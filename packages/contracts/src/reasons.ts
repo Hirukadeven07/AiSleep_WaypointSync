@@ -1,0 +1,19 @@
+export const REASON_CODES = [
+  'BRAND_MISMATCH',
+  'DISTRICT_MISMATCH',
+  'WRONG_DEPOT',
+  'CHILLED_NEEDS_REEFER',
+  'VAN_ONLY',
+  'MAX_TRIPS',
+  'TIME_BUDGET',
+  'OVER_WEIGHT',
+  'OVER_VOLUME',
+  'WINDOW_AT_RISK',
+  'FUEL_QUOTA',
+  'REPEAT_SKIP',
+  'PLAN_VERSION_STALE',
+  'AFTER_CUTOFF',
+  'VEHICLE_UNAVAILABLE',
+] as const;
+
+export type ReasonCode = (typeof REASON_CODES)[number];
