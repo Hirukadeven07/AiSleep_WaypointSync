@@ -1,0 +1,377 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  dispatcher
+  store
+  loader
+  driver
+}
+
+enum Brand {
+  Fresh
+  Style
+  Tech
+}
+
+enum Temp {
+  chilled
+  ambient
+}
+
+enum VehicleType {
+  truck
+  van
+}
+
+enum VehicleTemp {
+  reefer
+  ambient
+}
+
+enum DockType {
+  rear_dock
+  street
+  mall_bay
+}
+
+enum ParkingConstraint {
+  normal
+  van_only
+  mall_dock
+}
+
+enum OrderStatus {
+  waiting
+  planned
+  deferred
+  delivered
+  partial
+}
+
+enum TripStatus {
+  planning
+  published
+  loading
+  ready
+  on_road
+  completed
+  breakdown
+}
+
+enum StopStatus {
+  upcoming
+  arrived
+  waiting
+  confirmed
+  delivered
+  partial
+  deferred
+  at_risk
+}
+
+enum VehicleStatus {
+  available
+  out_of_service
+  on_road
+}
+
+enum FlagType {
+  missing
+  damaged
+  wrong_quantity
+}
+
+enum IncidentType {
+  breakdown
+  delay
+  quiet_driver
+  wait_timeout
+}
+
+model Depot {
+  id        String     @id
+  name      String
+  districts District[]
+  stores    Store[]
+  users     User[]
+  vehicles  Vehicle[]
+  trips     Trip[]
+}
+
+model District {
+  id                 String  @id @default(cuid())
+  name               String  @unique
+  depotId            String?
+  depot              Depot?  @relation(fields: [depotId], references: [id])
+  served             Boolean @default(true)
+  roadClass          String?
+  freeFlowKmh        Float?
+  depotToDistrictKm  Float?
+  depotToDistrictMin Int?
+  interStopKm        Float?
+  interStopMin       Int?
+  stores             Store[]
+  trips              Trip[]
+}
+
+model ServiceAllowance {
+  id       String   @id @default(cuid())
+  brand    Brand
+  dockType DockType
+  minutes  Int
+
+  @@unique([brand, dockType])
+}
+
+model CalendarDay {
+  id           DateTime @id @db.Date
+  dow          Int
+  isWeekend    Boolean
+  isoYear      Int
+  isoWeek      Int
+  isPayday     Boolean
+  festival     String?
+  festivalRamp Float    @default(0)
+  isHoliday    Boolean
+  monsoon      Boolean
+  isOperating  Boolean
+}
+
+model TrafficSpeed {
+  id           String   @id @default(cuid())
+  districtName String
+  hour         Int?
+  monsoon      Boolean?
+  speedIndex   Float?
+  raw          Json
+}
+
+model RoadCondition {
+  id              String   @id @default(cuid())
+  date            DateTime @db.Date
+  districtName    String
+  disruptionIndex Float?
+  raw             Json
+}
+
+model Store {
+  id                String            @id
+  displayName       String?
+  brand             Brand
+  districtId        String
+  district          District          @relation(fields: [districtId], references: [id])
+  depotId           String
+  depot             Depot             @relation(fields: [depotId], references: [id])
+  dockType          DockType
+  parkingConstraint ParkingConstraint @default(normal)
+  mallWindow        String?
+  windowOpenMin     Int
+  windowCloseMin    Int
+  lat               Float?
+  lng               Float?
+  phone             String?
+  orders            Order[]
+  users             User[]
+}
+
+model User {
+  id            String         @id @default(cuid())
+  loginId       String         @unique
+  role          Role
+  name          String
+  depotId       String?
+  depot         Depot?         @relation(fields: [depotId], references: [id])
+  storeId       String?
+  store         Store?         @relation(fields: [storeId], references: [id])
+  passwordHash  String?
+  pinHash       String?
+  phone         String?
+  sessions      Session[]
+  vehicle       Vehicle?
+  notifications Notification[]
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+model Vehicle {
+  id                 String        @id
+  plate              String?       @unique
+  depotId            String
+  depot              Depot         @relation(fields: [depotId], references: [id])
+  type               VehicleType
+  temp               VehicleTemp
+  weightCapKg        Float
+  volumeCapM3        Float
+  fuelType           String?
+  kmPerL             Float?
+  weeklyFuelQuotaL   Float?
+  status             VehicleStatus @default(available)
+  outOfServiceReason String?
+  returnDate         DateTime?     @db.Date
+  driverId           String?       @unique
+  driver             User?         @relation(fields: [driverId], references: [id])
+  trips              Trip[]
+}
+
+model Order {
+  id                  String      @id @default(cuid())
+  storeId             String
+  store               Store       @relation(fields: [storeId], references: [id])
+  brand               Brand
+  deliveryDate        DateTime    @db.Date
+  temp                Temp
+  status              OrderStatus @default(waiting)
+  units               Int
+  weightKg            Float
+  volumeM3            Float
+  urgentNote          String?
+  movedFromDate       DateTime?   @db.Date
+  deferReason         String?
+  deferredById        String?
+  deferredYesterday   Boolean     @default(false)
+  daysSinceLastServed Int?
+  repeatSkip          Boolean     @default(false)
+  createdAt           DateTime    @default(now())
+  lines               OrderLine[]
+  stop                TripStop?
+
+  @@index([deliveryDate, status])
+}
+
+model OrderLine {
+  id           String     @id @default(cuid())
+  orderId      String
+  order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  name         String
+  qty          Int
+  pack         String
+  chilled      Boolean    @default(false)
+  unitWeightKg Float
+  unitVolumeM3 Float
+  flags        LoadFlag[]
+}
+
+model Trip {
+  id             String        @id @default(cuid())
+  vehicleId      String
+  vehicle        Vehicle       @relation(fields: [vehicleId], references: [id])
+  depotId        String
+  depot          Depot         @relation(fields: [depotId], references: [id])
+  brand          Brand
+  districtId     String
+  district       District      @relation(fields: [districtId], references: [id])
+  serviceDate    DateTime      @db.Date
+  tripNumber     Int
+  status         TripStatus    @default(planning)
+  planVersion    Int           @default(1)
+  plannedMinutes Int?
+  plannedLitres  Float?
+  publishedAt    DateTime?
+  stops          TripStop[]
+  loadSession    LoadSession?
+  events         DriverEvent[]
+  incidents      Incident[]
+
+  @@unique([vehicleId, serviceDate, tripNumber])
+  @@index([depotId, serviceDate])
+}
+
+model TripStop {
+  id               String        @id @default(cuid())
+  tripId           String
+  trip             Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  orderId          String        @unique
+  order            Order         @relation(fields: [orderId], references: [id])
+  sequence         Int
+  status           StopStatus    @default(upcoming)
+  etaMin           Int?
+  arrivedAt        DateTime?
+  storeConfirmedAt DateTime?
+  driverAckAt      DateTime?
+  flags            LoadFlag[]
+  receipt          StoreReceipt?
+
+  @@unique([tripId, sequence])
+}
+
+model LoadSession {
+  id               String    @id @default(cuid())
+  tripId           String    @unique
+  trip             Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  loaderIds        String[]
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  departedAt       DateTime?
+  paused           Boolean   @default(false)
+  ackedPlanVersion Int       @default(0)
+}
+
+model LoadFlag {
+  id          String     @id @default(cuid())
+  stopId      String
+  stop        TripStop   @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  orderLineId String?
+  orderLine   OrderLine? @relation(fields: [orderLineId], references: [id])
+  type        FlagType
+  qty         Int?
+  note        String?
+  photoKey    String?
+  createdAt   DateTime   @default(now())
+}
+
+model StoreReceipt {
+  id             String   @id @default(cuid())
+  stopId         String   @unique
+  stop           TripStop @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  lineResults    Json
+  chilledWasCold Boolean?
+  photoKey       String?
+  createdAt      DateTime @default(now())
+}
+
+model DriverEvent {
+  id               String    @id @default(cuid())
+  clientId         String    @unique
+  driverId         String
+  tripId           String
+  trip             Trip      @relation(fields: [tripId], references: [id])
+  type             String
+  payload          Json
+  createdOnPhoneAt DateTime
+  seenPlanVersion  Int
+  appliedAt        DateTime?
+}
+
+model Incident {
+  id        String       @id @default(cuid())
+  type      IncidentType
+  tripId    String
+  trip      Trip         @relation(fields: [tripId], references: [id])
+  status    String
+  timeline  Json
+  createdAt DateTime     @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
