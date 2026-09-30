@@ -429,20 +429,3 @@ ALTER TABLE "Incident" ADD CONSTRAINT "Incident_tripId_fkey" FOREIGN KEY ("tripI
 
 -- AddForeignKey
 ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
-node.exe : ┌─────────────────────────────────────────────────────────┐
-At C:\Users\User\AppData\Roaming\npm\pnpm.ps1:24 char:5
-+     & "node$exe"  "$basedir/node_modules/pnpm/bin/pnpm.cjs" $args
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (┌──────────────...──────────────┐:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
-│  Update available 5.22.0 -> 8.0.0-rc.19                 │
-│                                                         │
-│  This is a major update - please follow the guide at    │
-│  https://pris.ly/d/major-version-upgrade                │
-│                                                         │
-│  Run the following to update                            │
-│    npm i --save-dev prisma@latest                       │
-│    npm i @prisma/client@latest                          │
-└─────────────────────────────────────────────────────────┘
