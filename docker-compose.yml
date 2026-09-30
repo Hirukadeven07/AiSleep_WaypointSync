@@ -1,0 +1,84 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-waypoint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-waypoint}
+      POSTGRES_DB: ${POSTGRES_DB:-waypoint}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # local development only; remove in production
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-waypoint} -d ${POSTGRES_DB:-waypoint}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    build:
+      context: infra/minio
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-waypoint}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-waypoint-secret}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        PRISMA_ENGINES_MIRROR: ${PRISMA_ENGINES_MIRROR:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-waypoint}:${POSTGRES_PASSWORD:-waypoint}@db:5432/${POSTGRES_DB:-waypoint}
+      PORT: 3001
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      DATA_DIR: /data
+      DEMO_NOW: ${DEMO_NOW:-}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-waypoint}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-waypoint-secret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-photos}
+      PHOTO_FALLBACK_DIR: ${PHOTO_FALLBACK_DIR:-/tmp/photos}
+    volumes:
+      - ./data:/data:ro
+    expose:
+      - "3001"
+    command: sh -c "pnpm exec prisma migrate deploy && pnpm run seed && node dist/main.js"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        NEXT_PUBLIC_DEMO_NOW: ${NEXT_PUBLIC_DEMO_NOW:-}
+    depends_on:
+      - api
+    environment:
+      API_INTERNAL_URL: http://api:3001
+    ports:
+      - "3000:3000"
+
+  cloudflared:
+    image: cloudflare/cloudflared
+    profiles: ["public"]
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  miniodata:
