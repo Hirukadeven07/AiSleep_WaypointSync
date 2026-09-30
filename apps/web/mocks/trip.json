@@ -1,0 +1,81 @@
+{
+  "trip": {
+    "id": "trip_mock_1",
+    "vehicleId": "VEH001",
+    "depotId": "Peliyagoda",
+    "brand": "Fresh",
+    "districtId": "gampaha",
+    "serviceDate": "2026-10-05",
+    "tripNumber": 1,
+    "status": "published",
+    "planVersion": 1,
+    "plannedMinutes": 101,
+    "plannedLitres": 14.5,
+    "stops": [
+      {
+        "id": "stop_1",
+        "sequence": 1,
+        "storeId": "OUT001",
+        "storeName": "Fresh Gampaha Town",
+        "orderId": "ord_1",
+        "status": "upcoming",
+        "etaMin": 495,
+        "windowOpenMin": 480,
+        "windowCloseMin": 600,
+        "units": 120,
+        "weightKg": 410,
+        "volumeM3": 2.1
+      },
+      {
+        "id": "stop_2",
+        "sequence": 2,
+        "storeId": "OUT002",
+        "storeName": "Fresh Veyangoda",
+        "orderId": "ord_2",
+        "status": "upcoming",
+        "etaMin": 519,
+        "windowOpenMin": 480,
+        "windowCloseMin": 630,
+        "units": 95,
+        "weightKg": 320,
+        "volumeM3": 1.7
+      },
+      {
+        "id": "stop_3",
+        "sequence": 3,
+        "storeId": "OUT003",
+        "storeName": "Fresh Minuwangoda",
+        "orderId": "ord_3",
+        "status": "at_risk",
+        "etaMin": 543,
+        "windowOpenMin": 510,
+        "windowCloseMin": 555,
+        "units": 80,
+        "weightKg": 260,
+        "volumeM3": 1.4
+      }
+    ]
+  },
+  "vehicle": {
+    "id": "VEH001",
+    "plate": "WP-1001",
+    "type": "truck",
+    "temp": "reefer",
+    "weightCapKg": 1500,
+    "volumeCapM3": 8
+  },
+  "loadPercent": { "weight": 66, "volume": 65 },
+  "driverName": "Kasun",
+  "lines": {
+    "stop_1": [
+      { "id": "l1", "name": "Milk 1L", "qty": 60, "pack": "crate", "chilled": true, "unitWeightKg": 1, "unitVolumeM3": 0.002 },
+      { "id": "l2", "name": "Rice 5kg", "qty": 20, "pack": "sack", "chilled": false, "unitWeightKg": 5, "unitVolumeM3": 0.008 }
+    ],
+    "stop_2": [
+      { "id": "l3", "name": "Yoghurt cup", "qty": 95, "pack": "tray", "chilled": true, "unitWeightKg": 0.2, "unitVolumeM3": 0.0005 }
+    ],
+    "stop_3": [
+      { "id": "l4", "name": "Bread loaf", "qty": 80, "pack": "tray", "chilled": false, "unitWeightKg": 0.5, "unitVolumeM3": 0.003 }
+    ]
+  }
+}

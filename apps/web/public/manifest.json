@@ -1,0 +1,13 @@
+{
+  "name": "Waypoint Sync Driver",
+  "short_name": "Sync Driver",
+  "start_url": "/drive",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1B2A41",
+  "theme_color": "#1B2A41",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
