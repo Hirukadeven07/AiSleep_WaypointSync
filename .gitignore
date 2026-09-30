@@ -1,0 +1,9 @@
+.env
+node_modules
+.next
+dist
+*.tsbuildinfo
+next-env.d.ts
+coverage
+.DS_Store
+# data/*.csv
