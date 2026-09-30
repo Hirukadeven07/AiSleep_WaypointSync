@@ -14,6 +14,8 @@ export const REASON_CODES = [
   'PLAN_VERSION_STALE',
   'AFTER_CUTOFF',
   'VEHICLE_UNAVAILABLE',
+  'MISSING_TRAVEL_LEG',
+  'MISSING_SERVICE_ALLOWANCE',
 ] as const;
 
 export type ReasonCode = (typeof REASON_CODES)[number];
