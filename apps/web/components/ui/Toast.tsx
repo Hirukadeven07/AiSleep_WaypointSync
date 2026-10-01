@@ -5,10 +5,10 @@ import { useEffect } from 'react';
 type Tone = 'info' | 'success' | 'warning' | 'danger';
 
 const tones: Record<Tone, string> = {
-  info: 'border-border',
-  success: 'border-success',
-  warning: 'border-warning',
-  danger: 'border-danger',
+  info: 'bg-slate',
+  success: 'bg-success',
+  warning: 'bg-warning',
+  danger: 'bg-danger',
 };
 
 /** Controlled toast: render it while `message` is set and clear the message in `onClose`. */
@@ -31,8 +31,9 @@ export function Toast({
   return (
     <div
       role="status"
-      className={`fixed bottom-lg left-1/2 z-50 -translate-x-1/2 rounded-card border bg-surface px-md py-sm text-label text-text shadow-lg ${tones[tone]}`}
+      className="fixed bottom-lg left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-[20px] bg-primary px-[18px] py-[14px] text-body font-bold text-bg shadow-raised"
     >
+      <span aria-hidden className={`h-7 w-7 shrink-0 rounded-full ${tones[tone]}`} />
       {message}
     </div>
   );

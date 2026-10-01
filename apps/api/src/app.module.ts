@@ -14,6 +14,7 @@ import { StopsModule } from './stops/stops.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { SyncModule } from './sync/sync.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { StoreModule } from './store/store.module';
 import { PhotosModule } from './photos/photos.module';
 import { HealthModule } from './health/health.module';
 
@@ -38,6 +39,7 @@ class ClockModule {}
     IncidentsModule,
     SyncModule,
     NotificationsModule,
+    StoreModule,
     PhotosModule,
     HealthModule,
   ],
