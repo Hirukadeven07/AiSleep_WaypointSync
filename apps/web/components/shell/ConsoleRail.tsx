@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { Me } from '@waypoint/contracts';
 import { Icon, type IconName } from '@/components/ui/Icon';
+import { initials } from '@/lib/initials';
 import { AccountMenu } from './AccountMenu';
 
 export const CONSOLE_NAV: { href: string; label: string; icon: IconName; exact?: boolean }[] = [
@@ -19,15 +20,6 @@ function useActive() {
   const pathname = usePathname();
   return (href: string, exact?: boolean) =>
     exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
-}
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0]!.toUpperCase())
-    .join('');
 }
 
 /** Desktop navigation: the floating rail with six dispatcher destinations. */

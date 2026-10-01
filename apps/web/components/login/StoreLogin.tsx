@@ -30,7 +30,7 @@ export function StoreLogin() {
   }
 
   return (
-    <main className="relative mx-auto flex min-h-screen w-full max-w-[480px] flex-col overflow-hidden bg-primary">
+    <main className="relative mx-auto flex min-h-dvh w-full max-w-[430px] flex-col overflow-hidden bg-primary">
       <SkylinePhoto variant="sheet" />
       <SwitchRole className="absolute right-5 top-14 z-10 bg-surface/90" />
 

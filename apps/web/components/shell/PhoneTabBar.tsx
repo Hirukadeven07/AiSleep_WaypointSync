@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Icon, type IconName } from '@/components/ui/Icon';
+import { PHONE_MAX } from './PhoneColumn';
 
 export interface PhoneTab {
   href: string;
@@ -17,7 +18,7 @@ export interface PhoneTab {
 export function PhoneTabBar({ tabs }: { tabs: PhoneTab[] }) {
   const pathname = usePathname();
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto flex w-full max-w-[480px] items-center rounded-t-shell bg-surface px-4 py-[10px] shadow-[0_-4px_20px_0_rgba(13,26,41,0.06)]">
+    <nav className={`fixed inset-x-0 bottom-0 z-30 mx-auto flex w-full ${PHONE_MAX} items-center rounded-t-shell bg-surface px-4 py-[10px] shadow-[0_-4px_20px_0_rgba(13,26,41,0.06)]`}>
       {tabs.map((t) => {
         const active = t.exact ? pathname === t.href : pathname === t.href || pathname.startsWith(`${t.href}/`);
         if (t.fab) {
