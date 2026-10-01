@@ -1,0 +1,8 @@
+# Nightly Waypoint dump. Time zone: Asia/Colombo.
+# Install on the VM: crontab -e  (paste the schedule line; set REPO to the clone path)
+#
+# CRON_TZ is used by Vixie/cronie when supported. If dumps land at the wrong hour,
+# set the VM timezone to Asia/Colombo or prefix the command with TZ=Asia/Colombo.
+
+CRON_TZ=Asia/Colombo
+15 0 * * * cd /opt/AiSleep_WaypointSync && ./scripts/backup-db.sh >> backups/cron.log 2>&1

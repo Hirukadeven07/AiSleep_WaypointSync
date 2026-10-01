@@ -29,6 +29,9 @@ export interface DriverEventInput {
   seenPlanVersion: number | null;
 }
 
+/** @deprecated Use DriverEventInput — kept so older imports still type-check. */
+export type DriverEvent = DriverEventInput;
+
 export interface SyncPushRequest {
   events: DriverEventInput[];
 }
