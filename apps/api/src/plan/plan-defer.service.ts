@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { BringBackResult, DeferPreview, DeferResult, Me } from '@waypoint/contracts';
 import { DomainError, deferOrder } from '@waypoint/domain';
 import { ClockService } from '../common/clock/clock.service';
+import { nextOperatingDay } from '../common/clock/operating-day';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { PlanEditService } from './plan-edit.service';
@@ -9,7 +10,6 @@ import { clockText, dayLabel } from './plan-labels';
 import { PlanService } from './plan.service';
 import { orderInclude, toOutlet, toStopView } from './plan.mapper';
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 /** Moving an order to a later day, and bringing it back. */
 @Injectable()
 export class PlanDeferService {
@@ -21,23 +21,10 @@ export class PlanDeferService {
     @Inject(NOTIFIER) private readonly notifier: Notifier,
   ) {}
 
-  /** The next operating day after `from` (skips days the calendar marks as closed). */
-  private async nextOperatingDay(from: Date): Promise<string> {
-    for (let i = 1; i <= 7; i++) {
-      const d = new Date(from);
-      d.setUTCDate(d.getUTCDate() + i);
-      const cal = await this.prisma.calendarDay.findUnique({ where: { id: d } });
-      if (!cal || cal.isOperating) return iso(d);
-    }
-    const d = new Date(from);
-    d.setUTCDate(d.getUTCDate() + 1);
-    return iso(d);
-  }
-
   async preview(me: Me, orderId: string, reason: string): Promise<DeferPreview> {
     const order = await this.edit.loadOrder(me, orderId);
     const view = this.plan.planOrder(order, this.clock.today());
-    const newDate = await this.nextOperatingDay(order.deliveryDate);
+    const newDate = await nextOperatingDay(this.prisma, order.deliveryDate);
     const result = deferOrder({
       order: toStopView(order).order,
       outlet: toOutlet(order.store),

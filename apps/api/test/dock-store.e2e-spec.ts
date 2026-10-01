@@ -172,6 +172,7 @@ describe('loader dock and store (e2e)', () => {
       const e2eStores = { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] };
       await prisma.fieldFlag.deleteMany({ where: { storeId: e2eStores } });
       await prisma.deliveryNote.deleteMany({ where: { order: { storeId: e2eStores } } });
+      await prisma.notification.deleteMany({ where: { title: 'E2E-HOME checked the goods' } });
       await prisma.trip.deleteMany({ where: { id: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.order.deleteMany({ where: { storeId: { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] } } });
       await prisma.user.update({ where: { loginId: 'sunil' }, data: { storeId: sunilStoreId } });
@@ -314,11 +315,60 @@ describe('loader dock and store (e2e)', () => {
       }
     });
 
+    it('delivers an order on the next operating day, skipping a closed one', async () => {
+      const days = [date('2026-10-02'), date('2026-10-03')];
+      const saved = await prisma.calendarDay.findMany({ where: { id: { in: days } } });
+      const row = (id: Date, isOperating: boolean) => ({
+        id,
+        dow: id.getUTCDay(),
+        isWeekend: false,
+        isoYear: 2026,
+        isoWeek: 40,
+        isPayday: false,
+        isHoliday: !isOperating,
+        monsoon: false,
+        isOperating,
+      });
+      try {
+        for (const [id, open] of [
+          [days[0]!, false],
+          [days[1]!, true],
+        ] as const) {
+          await prisma.calendarDay.upsert({
+            where: { id },
+            update: { isOperating: open },
+            create: row(id, open),
+          });
+        }
+        const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+        const placed = await store
+          .post('/api/store/orders')
+          .send({ lines: [{ catalogueId: 'F-MILK', qty: 1 }] })
+          .expect(201);
+        expect(placed.body.deliveryDate).toBe('2026-10-03');
+      } finally {
+        await prisma.calendarDay.deleteMany({ where: { id: { in: days } } });
+        for (const { id, ...rest } of saved) {
+          await prisma.calendarDay.create({ data: { id, ...rest } });
+        }
+      }
+    });
+
     it('confirms receipt with a missing line, then refuses a second receipt', async () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
       const home = (await store.get('/api/store/home').expect(200)).body;
       expect(home.delivery.stopId).toBe(ids.storeStop);
       expect(Array.isArray(home.phones)).toBe(true);
+
+      // The trip's assigned driver is told the goods were checked (the test vehicle has no driver).
+      const kasun = await prisma.user.findUniqueOrThrow({ where: { loginId: 'kasun' } });
+      await prisma.trip.update({
+        where: { id: ids.storeTrip },
+        data: { assignedDriverId: kasun.id },
+      });
+      const noticesBefore = await prisma.notification.count({
+        where: { userId: kasun.id, title: 'E2E-HOME checked the goods' },
+      });
 
       const delivery = (await store.get(`/api/store/deliveries/${ids.storeStop}`).expect(200)).body;
       const [first, second] = delivery.lines;
@@ -349,6 +399,12 @@ describe('loader dock and store (e2e)', () => {
       ]);
       const flag = await prisma.fieldFlag.findFirstOrThrow({ where: { orderId: stop.orderId } });
       expect(flag).toMatchObject({ tripId: ids.storeTrip, itemId: 'F-MILK', severity: 'medium' });
+      expect(
+        await prisma.notification.count({
+          where: { userId: kasun.id, title: 'E2E-HOME checked the goods' },
+        }),
+      ).toBe(noticesBefore + 1);
+      expect(confirmed.body.driverName).toBe(kasun.name);
 
       const again = await store
         .post(`/api/store/deliveries/${ids.storeStop}/receipt`)
