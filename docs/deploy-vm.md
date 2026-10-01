@@ -83,20 +83,15 @@ Do not run `docker compose down -v` or `pnpm seed:reset` on the VM unless you in
 
 ## 9. Nightly database backup
 
-`scripts/backup-db.sh` dumps Postgres to `backups/waypoint-<timestamp>.sql.gz`, checks the file is a valid gzip, and deletes dumps older than `KEEP_DAYS` (default 14). Set `BACKUP_TARGET` to an rsync destination to copy each dump off the machine, which is the part that protects you if the disk is lost.
+`scripts/backup-db.sh` dumps Postgres to `backups/waypoint-<timestamp>.sql.gz` and deletes dumps older than `BACKUP_KEEP_DAYS` (default 14). `scripts/restore-db.sh` loads one back. `scripts/crontab.example` has the nightly schedule line (00:15 Asia/Colombo).
 
 ```bash
-./scripts/backup-db.sh                      # run once to test
-crontab -e                                  # then add:
-30 2 * * * /home/<user>/waypoint-sync/scripts/backup-db.sh >> /var/log/waypoint-backup.log 2>&1
+./scripts/backup-db.sh                                  # run once to test
+crontab -e                                              # then paste the line from scripts/crontab.example
+./scripts/restore-db.sh backups/waypoint-XXXX.sql.gz    # restore (replaces objects in the database)
 ```
 
-Example with an off-machine copy: `BACKUP_TARGET=user@otherhost:/srv/waypoint-backups/` in the cron line or in `.env`.
+A backup on the same disk does not survive losing that disk. Copy the dumps somewhere else regularly (another machine, or object storage).
 
-On Windows use `scripts/backup-db.ps1` from Task Scheduler (`powershell -NoProfile -ExecutionPolicy Bypass -File "D:\path\to\waypoint-sync\scripts\backup-db.ps1"`). Set `BACKUP_COPY_DIR` to a folder on another drive or a synced folder for the off-machine copy.
-
-Restore into an empty database:
-
-```bash
-gzip -dc backups/waypoint-XXXX.sql.gz | docker compose exec -T db psql -U waypoint -d waypoint
-```
+On Windows (Docker Desktop) use `scripts/backup-db.ps1` from Task Scheduler:
+`powershell -NoProfile -ExecutionPolicy Bypass -File "D:\path\to\waypoint-sync\scripts\backup-db.ps1"`. Set `BACKUP_COPY_DIR` to a folder on another drive or a synced folder for the off-machine copy.

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import type { FlagType, ReceiptRequest, StoreDelivery } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { messageOf } from '@/lib/api-error';
@@ -77,6 +77,7 @@ export default function ReceivePage() {
       {done.map((d) => (
         <div key={d.stopId} className="space-y-sm rounded-card bg-surface p-lg">
           <p className="text-title text-ink">{d.plate} · checked</p>
+          {d.signedAt && <p className="text-caption text-muted">Signed by storekeeper</p>}
           <HandoffTimeline delivery={d} />
           <IssueList delivery={d} />
         </div>
@@ -97,6 +98,7 @@ function ReceiptForm({
     Object.fromEntries(delivery.lines.map((l) => [l.id, { receivedQty: l.qty, issue: null }])),
   );
   const [cold, setCold] = useState<boolean | null>(null);
+  const [signaturePng, setSignaturePng] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string>();
   const clearToast = useCallback(() => setToast(undefined), []);
@@ -116,6 +118,7 @@ function ReceiptForm({
         ...(lines[l.id]?.issue ? { issue: lines[l.id]!.issue! } : {}),
       })),
       ...(delivery.chilled ? { chilledWasCold: cold ?? undefined } : {}),
+      signaturePng: signaturePng ?? undefined,
     };
     try {
       await api<StoreDelivery>(`/store/deliveries/${delivery.stopId}/receipt`, {
@@ -240,7 +243,9 @@ function ReceiptForm({
         </fieldset>
       )}
 
-      <Button className="w-full" disabled={busy || needsCold} onClick={submit}>
+      <SignaturePad onChange={setSignaturePng} />
+
+      <Button className="w-full" disabled={busy || needsCold || !signaturePng} onClick={submit}>
         {busy
           ? 'Confirming…'
           : issues
@@ -252,7 +257,86 @@ function ReceiptForm({
           Answer the chilled question to confirm.
         </p>
       )}
+      {!signaturePng && !needsCold && (
+        <p className="text-center text-caption text-muted">Sign above to confirm receipt.</p>
+      )}
       {toast && <Toast message={toast} tone="danger" onClose={clearToast} />}
     </section>
+  );
+}
+
+function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+  }, []);
+
+  function point(e: PointerEvent<HTMLCanvasElement>) {
+    const c = ref.current!;
+    const r = c.getBoundingClientRect();
+    return {
+      x: ((e.clientX - r.left) / r.width) * c.width,
+      y: ((e.clientY - r.top) / r.height) * c.height,
+    };
+  }
+
+  return (
+    <div className="space-y-sm rounded-card bg-surface p-md">
+      <div className="flex items-center justify-between">
+        <p className="text-body font-semibold text-ink">Sign here</p>
+        <button
+          type="button"
+          className="text-label font-semibold text-slate"
+          onClick={() => {
+            const c = ref.current;
+            if (!c) return;
+            c.getContext('2d')?.clearRect(0, 0, c.width, c.height);
+            onChange(null);
+          }}
+        >
+          Clear
+        </button>
+      </div>
+      <canvas
+        ref={ref}
+        width={600}
+        height={160}
+        aria-label="Storekeeper signature"
+        className="h-40 w-full touch-none rounded-card border border-mist bg-white"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          drawing.current = true;
+          const ctx = ref.current?.getContext('2d');
+          if (!ctx) return;
+          const p = point(e);
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+        }}
+        onPointerMove={(e) => {
+          if (!drawing.current) return;
+          const ctx = ref.current?.getContext('2d');
+          if (!ctx || !ref.current) return;
+          const p = point(e);
+          ctx.lineTo(p.x, p.y);
+          ctx.stroke();
+          onChange(ref.current.toDataURL('image/png'));
+        }}
+        onPointerUp={() => {
+          drawing.current = false;
+        }}
+        onPointerCancel={() => {
+          drawing.current = false;
+        }}
+      />
+    </div>
   );
 }

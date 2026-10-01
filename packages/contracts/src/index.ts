@@ -7,3 +7,5 @@ export * from './publish';
 export * from './auth';
 export * from './dock';
 export * from './store';
+export * from './plan';
+export * from './driver-day';

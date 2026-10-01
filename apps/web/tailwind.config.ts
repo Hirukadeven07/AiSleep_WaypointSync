@@ -54,6 +54,11 @@ const config: Config = {
         banner: '#eceff3',
         peek: '#d9e1ea',
         sage: '#dce3dc',
+
+        // Plan board (Figma "Plan v2"): row wash and the over-capacity trip card
+        wash: '#f7f9fb',
+        'danger-wash': '#fcf1f1',
+        'danger-line': '#e8b4b4',
       },
       fontFamily: {
         sans: ['var(--font-dm-sans)', 'DM Sans', 'system-ui', 'sans-serif'],
@@ -93,6 +98,8 @@ const config: Config = {
       boxShadow: {
         // Elevation: flat (none), outlined (border-mist), raised (floating things only)
         raised: '0 16px 36px 0 rgba(13, 26, 41, 0.16)',
+        // Plan board: the order being dragged, and the order drawer
+        ghost: '0 14px 40px 0 rgba(13, 26, 41, 0.2)',
       },
     },
   },

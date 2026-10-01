@@ -1,35 +1,38 @@
 #!/usr/bin/env bash
-# Nightly Postgres backup. Run from the repo root (or anywhere: it cd's there).
-#
-#   BACKUP_DIR      where dumps are kept          (default: <repo>/backups)
-#   KEEP_DAYS       delete dumps older than this  (default: 14)
-#   BACKUP_TARGET   optional off-machine copy, any rsync destination,
-#                   e.g. user@otherhost:/srv/waypoint-backups/
-#
-# Cron (02:30 every night):
-#   30 2 * * * /path/to/waypoint-sync/scripts/backup-db.sh >> /var/log/waypoint-backup.log 2>&1
+# Dump Postgres from the Compose `db` service. Run from any cwd; uses the repo root.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-[ -f .env ] && set -a && . ./.env && set +a
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
-BACKUP_DIR="${BACKUP_DIR:-$PWD/backups}"
-KEEP_DAYS="${KEEP_DAYS:-14}"
-DB_USER="${POSTGRES_USER:-waypoint}"
-DB_NAME="${POSTGRES_DB:-waypoint}"
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
+POSTGRES_USER="${POSTGRES_USER:-waypoint}"
+POSTGRES_DB="${POSTGRES_DB:-waypoint}"
+BACKUP_DIR="${BACKUP_DIR:-./backups}"
+BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
+
+if ! docker compose exec -T db pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+  echo "error: db container is not running or not ready (start the stack first)" >&2
+  exit 1
+fi
 
 mkdir -p "$BACKUP_DIR"
-file="$BACKUP_DIR/waypoint-$(date +%Y%m%d-%H%M%S).sql.gz"
+stamp="$(date +%Y%m%d-%H%M%S)"
+out="$BACKUP_DIR/waypoint-${stamp}.sql.gz"
 
-docker compose exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner | gzip > "$file.part"
-# a failed dump must never leave a file that looks like a good backup
-gzip -t "$file.part"
-mv "$file.part" "$file"
-echo "$(date -Is) wrote $file ($(du -h "$file" | cut -f1))"
+docker compose exec -T db pg_dump \
+  --clean --if-exists \
+  -U "$POSTGRES_USER" \
+  "$POSTGRES_DB" | gzip >"$out"
 
-find "$BACKUP_DIR" -name 'waypoint-*.sql.gz' -mtime +"$KEEP_DAYS" -delete
+echo "wrote $out"
 
-if [ -n "${BACKUP_TARGET:-}" ]; then
-  rsync -a "$file" "$BACKUP_TARGET"
-  echo "$(date -Is) copied to $BACKUP_TARGET"
+if [[ "$BACKUP_KEEP_DAYS" =~ ^[0-9]+$ ]] && [[ "$BACKUP_KEEP_DAYS" -gt 0 ]]; then
+  find "$BACKUP_DIR" -name 'waypoint-*.sql.gz' -mtime "+${BACKUP_KEEP_DAYS}" -delete
 fi
