@@ -41,7 +41,7 @@ describe('outbox', () => {
 
   it('markActionSynced removes it from pending, and is safe to repeat', async () => {
     const a = await enqueueAction('ARRIVED', {}, 't1', 1, kasun);
-    const b = await enqueueAction('WAITING', {}, 't1', 1, kasun);
+    const b = await enqueueAction('ROAD_ISSUE', {}, 't1', 1, kasun);
     expect(await markActionSynced(a.clientId)).toBe(true);
     expect(await markActionSynced(a.clientId)).toBe(true);
     expect(await markActionSynced('no-such-id')).toBe(false);
@@ -51,7 +51,7 @@ describe('outbox', () => {
 
   it('purgeSynced deletes only synced rows', async () => {
     const a = await enqueueAction('ARRIVED', {}, 't1', 1, kasun);
-    await enqueueAction('WAITING', {}, 't1', 1, kasun);
+    await enqueueAction('ROAD_ISSUE', {}, 't1', 1, kasun);
     await markActionSynced(a.clientId);
     expect(await purgeSynced()).toBe(1);
     expect(await getPendingCount()).toBe(1);

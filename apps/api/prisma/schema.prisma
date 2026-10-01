@@ -258,6 +258,7 @@ model User {
   loaderProfile      Loader?
   dispatcherProfile  Dispatcher?
   assignedTrips      Trip[]         @relation("TripAssignedDriver")
+  events             DriverEvent[]
 }
 
 model Session {
@@ -283,6 +284,7 @@ model Vehicle {
   status             VehicleStatus    @default(available)
   outOfServiceReason String?
   returnDate         DateTime?        @db.Date
+  lastConfirmedLitres Float?
   driverId           String?          @unique
   driver             User?            @relation(fields: [driverId], references: [id])
   trips              Trip[]
@@ -349,6 +351,8 @@ model Trip {
   planVersion           Int              @default(1)
   plannedMinutes        Int?
   plannedLitres         Float?
+  /// Latest FUEL_READING synced for this trip; once the trip ends it is the end-of-trip fuel.
+  fuelLitresAtEnd       Float?
   publishedAt           DateTime?
   tripStartingDate      DateTime?        @db.Date
   tripEndingDate        DateTime?        @db.Date
@@ -439,13 +443,16 @@ model DriverEvent {
   id               String    @id @default(cuid())
   clientId         String    @unique
   driverId         String
-  tripId           String
-  trip             Trip      @relation(fields: [tripId], references: [id])
+  driver           User      @relation(fields: [driverId], references: [id])
+  tripId           String?
+  trip             Trip?     @relation(fields: [tripId], references: [id])
   type             String
   payload          Json
   createdOnPhoneAt DateTime
-  seenPlanVersion  Int
-  appliedAt        DateTime?
+  seenPlanVersion  Int?
+  appliedAt        DateTime  @default(now())
+
+  @@index([driverId, type, appliedAt])
 }
 
 model Incident {
