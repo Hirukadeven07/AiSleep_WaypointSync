@@ -213,6 +213,7 @@ describe('plan board (e2e)', () => {
     expect(['volume', 'weight', 'both']).toContain(body.summary.overWhat);
     expect(body.summary.movedToLaterCount).toBe(1);
     expect(body.summary.waitingCount).toBe(1);
+    expect(body.summary.orderCount).toBe(3);
     expect(body.summary.vehiclesFree).toBeGreaterThanOrEqual(1);
   });
 });

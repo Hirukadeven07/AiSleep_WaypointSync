@@ -33,7 +33,7 @@ import {
 } from './plan.mapper';
 
 /** Booklet departures: the Fresh run leaves at 03:30, the other brands at 08:00. */
-const DEPART_MIN = { Fresh: 3 * 60 + 30, Style: 8 * 60, Tech: 8 * 60 } as const;
+export const DEPART_MIN = { Fresh: 3 * 60 + 30, Style: 8 * 60, Tech: 8 * 60 } as const;
 
 const dateOnly = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
@@ -102,7 +102,16 @@ export class PlanService {
     };
   }
 
-  private planOrder(row: OrderRow, today: string): PlanOrder {
+  /** Travel and service-allowance tables for the domain rules. */
+  async loadLookup(): Promise<Lookup> {
+    const [districts, allowances] = await Promise.all([
+      this.prisma.district.findMany(),
+      this.prisma.serviceAllowance.findMany(),
+    ]);
+    return toLookup(districts, allowances);
+  }
+
+  planOrder(row: OrderRow, today: string): PlanOrder {
     const deferred = row.status === 'deferred';
     return {
       id: row.id,
@@ -124,7 +133,7 @@ export class PlanService {
     };
   }
 
-  private planTrip(row: TripRow, lookup: Lookup, depot: Depot): PlanTrip {
+  planTrip(row: TripRow, lookup: Lookup, depot: Depot): PlanTrip {
     const vehicle = toVehicle(row.vehicle);
     const stopViews = row.stops.map((s) => toStopView(s.order));
     const capacity = measureCapacity(
@@ -217,6 +226,7 @@ export class PlanService {
       overCount: over.length,
       overWhat:
         overVolume && overWeight ? 'both' : overVolume ? 'volume' : overWeight ? 'weight' : null,
+      orderCount: demand.length,
       waitingCount: orders.length,
       waitingSinceYesterday: orders.filter((o) => o.waitingSinceYesterday).length,
       movedToLaterCount: movedToLater.length,

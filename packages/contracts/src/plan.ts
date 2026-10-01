@@ -71,6 +71,8 @@ export interface PlanSummary {
   capacityUsedPct: number;
   overCount: number;
   overWhat: 'volume' | 'weight' | 'both' | null;
+  /** Every order for the day, planned or still waiting. */
+  orderCount: number;
   waitingCount: number;
   waitingSinceYesterday: number;
   movedToLaterCount: number;
@@ -88,4 +90,69 @@ export interface PlanDay {
   trips: PlanTrip[];
   districts: string[];
   summary: PlanSummary;
+}
+
+export interface PlanIssue {
+  code: string;
+  severity: 'block' | 'warn';
+  message: string;
+}
+
+export interface DropRequest {
+  orderId: string;
+  tripId: string;
+}
+
+/** What dropping an order on a trip would do, without saving anything. */
+export interface DropCheck {
+  orderId: string;
+  tripId: string;
+  canDrop: boolean;
+  blocks: PlanIssue[];
+  warnings: PlanIssue[];
+  /** 1-based position the stop slots into once stops are sorted by delivery window. */
+  placedSequence: number;
+  after: { stopCount: number; weightKg: number; volumeM3: number; minutes: number | null };
+}
+
+export interface AssignResult {
+  orderId: string;
+  storeName: string;
+  placedSequence: number;
+  /** True when adding the stop changed the order of the stops already on the trip. */
+  resorted: boolean;
+  trip: PlanTrip;
+  /** The trip the order was moved from, when it was already on one. */
+  fromTrip: PlanTrip | null;
+}
+
+export interface UnassignResult {
+  orderId: string;
+  fromTrip: PlanTrip | null;
+}
+
+export interface PlanOrderLine {
+  id: string;
+  name: string;
+  qty: number;
+  pack: string;
+  chilled: boolean;
+}
+
+export interface PlanOrderDetail {
+  order: PlanOrder;
+  /** Short reference shown in the drawer. */
+  code: string;
+  lines: PlanOrderLine[];
+  dockType: 'rear_dock' | 'street' | 'mall_bay';
+  unloadMin: number | null;
+  /** Set when the order has been moved before. */
+  warning: string | null;
+  assignedTripId: string | null;
+  suggestion: {
+    tripId: string;
+    label: string;
+    detail: string;
+    fit: string;
+  } | null;
 }

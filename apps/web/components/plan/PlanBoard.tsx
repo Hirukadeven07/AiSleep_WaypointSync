@@ -1,15 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { OrderDrawer } from './OrderDrawer';
 import { OrderQueue } from './OrderQueue';
 import { PlanHeader, SummaryStrip } from './PlanHeader';
+import { PlanToast } from './PlanToast';
 import { TripList } from './TripList';
 import { usePlan } from './usePlan';
+import { usePlanEdit } from './usePlanEdit';
 
-/** The dispatcher's plan board (Figma "Plan v2 / Default"). */
+/** The dispatcher's plan board (Figma "Plan v2"). */
 export function PlanBoard() {
-  const { plan, error } = usePlan();
-  const [focusTripId, setFocusTripId] = useState<string | null>(null);
+  const { plan, error, reload } = usePlan();
+  const edit = usePlanEdit(plan, reload);
 
   if (!plan) {
     return (
@@ -26,17 +28,30 @@ export function PlanBoard() {
       <PlanHeader plan={plan} />
       <SummaryStrip
         summary={plan.summary}
-        onView={() => firstOver && setFocusTripId(firstOver.id)}
+        onView={() => firstOver && edit.focusTrip(firstOver.id)}
       />
       <div className="flex flex-col gap-4 lg:h-[calc(100vh-214px)] lg:min-h-[520px] lg:flex-row">
         <OrderQueue
           orders={plan.orders}
           moved={plan.movedToLater}
           districts={plan.districts}
+          edit={edit}
           className="lg:w-[340px] lg:shrink-0"
         />
-        <TripList trips={plan.trips} focusTripId={focusTripId} className="min-w-0 lg:flex-1" />
+        <TripList trips={plan.trips} edit={edit} className="min-w-0 lg:flex-1" />
       </div>
+
+      {edit.drawerId && (
+        <OrderDrawer
+          orderId={edit.drawerId}
+          onClose={edit.closeDrawer}
+          onAdd={(detail, tripId) => {
+            edit.closeDrawer();
+            void edit.place(detail.order.id, detail.order.storeName, tripId);
+          }}
+        />
+      )}
+      {edit.toast && <PlanToast toast={edit.toast} />}
     </div>
   );
 }

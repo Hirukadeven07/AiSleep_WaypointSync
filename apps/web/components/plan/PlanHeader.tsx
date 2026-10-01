@@ -60,6 +60,17 @@ export function PlanHeader({ plan }: { plan: Pick<PlanDay, 'date' | 'depotId' | 
   );
 }
 
+function Stat({ value, label, warn = false }: { value: string; label: string; warn?: boolean }) {
+  return (
+    <p className="flex items-center gap-2 whitespace-nowrap">
+      <span className={`text-[20px] font-bold leading-7 ${warn ? 'text-warning' : 'text-ink'}`}>
+        {value}
+      </span>
+      <span className="text-[13px] font-medium leading-[18px] text-muted">{label}</span>
+    </p>
+  );
+}
+
 const OVER_LABEL = { volume: 'over volume', weight: 'over weight', both: 'over capacity' } as const;
 
 /** The strip under the header: vehicles free, capacity used and the open-problems button. */
@@ -67,6 +78,8 @@ export function SummaryStrip({ summary, onView }: { summary: PlanSummary; onView
   const used = Math.min(summary.capacityUsedPct, 100);
   return (
     <section className="flex items-center gap-6 rounded-[20px] bg-surface px-[18px] py-3">
+      <Stat value={String(summary.orderCount)} label="orders" />
+      <Stat value={String(summary.waitingSinceYesterday)} label="waiting since yesterday" warn />
       <p className="flex items-center gap-2 whitespace-nowrap">
         <span className="text-[20px] font-bold leading-7 text-ink">
           {summary.vehiclesFree}/{summary.vehiclesTotal}
@@ -83,6 +96,7 @@ export function SummaryStrip({ summary, onView }: { summary: PlanSummary; onView
           />
         </span>
       </p>
+      <Stat value={String(summary.movedToLaterCount)} label="moved to later" warn />
       <span className="min-w-px flex-1" />
       {summary.overCount > 0 && summary.overWhat ? (
         <button

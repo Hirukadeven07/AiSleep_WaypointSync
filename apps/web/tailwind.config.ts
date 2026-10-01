@@ -98,6 +98,8 @@ const config: Config = {
       boxShadow: {
         // Elevation: flat (none), outlined (border-mist), raised (floating things only)
         raised: '0 16px 36px 0 rgba(13, 26, 41, 0.16)',
+        // Plan board: the order being dragged, and the order drawer
+        ghost: '0 14px 40px 0 rgba(13, 26, 41, 0.2)',
       },
     },
   },

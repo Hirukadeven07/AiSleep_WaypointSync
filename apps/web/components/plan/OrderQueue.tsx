@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import type { Brand, PlanOrder } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
+import type { PlanEdit } from './usePlanEdit';
 import { SECTION_LABEL, dayLabel, kgText, orderWindow, sectionOf, type Section } from './format';
 
 export const BRAND_TAG: Record<Brand, string> = {
@@ -21,12 +22,43 @@ export function BrandTag({ brand }: { brand: Brand }) {
   );
 }
 
-function OrderRow({ order }: { order: PlanOrder }) {
+/** Drags show a copy of the row with the Figma "Dragging" frame: white, 2px slate border, soft shadow. */
+export function dragImage(row: HTMLElement, e: React.DragEvent) {
+  const ghost = row.cloneNode(true) as HTMLElement;
+  ghost.classList.remove('bg-warning-tint', 'bg-wash', 'bg-surface');
+  ghost.classList.add(
+    'border-2',
+    'border-slate',
+    'bg-surface',
+    'shadow-ghost',
+    'fixed',
+    '-left-[2000px]',
+    'top-0',
+  );
+  ghost.style.width = `${row.offsetWidth}px`;
+  document.body.appendChild(ghost);
+  e.dataTransfer.setDragImage(ghost, 24, 24);
+  setTimeout(() => ghost.remove(), 0);
+}
+
+function OrderRow({ order, edit }: { order: PlanOrder; edit: PlanEdit }) {
   return (
     <div
-      className={`flex shrink-0 items-center gap-[10px] rounded-input px-3 py-[10px] ${
+      role="button"
+      tabIndex={0}
+      draggable
+      onClick={() => edit.openDrawer(order.id)}
+      onKeyDown={(e) => e.key === 'Enter' && edit.openDrawer(order.id)}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', order.id);
+        dragImage(e.currentTarget, e);
+        edit.startDrag({ orderId: order.id, storeName: order.storeName, fromTripId: null });
+      }}
+      onDragEnd={edit.endDrag}
+      className={`flex shrink-0 cursor-grab items-center gap-[10px] rounded-input px-3 py-[10px] ${
         order.movedCount > 0 ? 'bg-warning-tint' : 'bg-wash'
-      }`}
+      } ${edit.drag?.orderId === order.id ? 'opacity-40' : ''}`}
     >
       <div className="flex min-w-px flex-[1_0_0] flex-col gap-[3px]">
         <div className="flex items-center gap-[6px]">
@@ -112,11 +144,13 @@ export function OrderQueue({
   orders,
   moved,
   districts,
+  edit,
   className = '',
 }: {
   orders: PlanOrder[];
   moved: PlanOrder[];
   districts: string[];
+  edit: PlanEdit;
   className?: string;
 }) {
   const [tab, setTab] = useState<'waiting' | 'moved'>('waiting');
@@ -213,7 +247,7 @@ export function OrderQueue({
                   {SECTION_LABEL[s]} · {rows.length}
                 </p>
                 {rows.map((o) => (
-                  <OrderRow key={o.id} order={o} />
+                  <OrderRow key={o.id} order={o} edit={edit} />
                 ))}
               </div>
             );
