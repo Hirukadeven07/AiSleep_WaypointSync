@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { Icon } from '@/components/ui/Icon';
 import { enqueueAction } from '@/lib/outbox';
 import { useDriver } from './DriverShell';
 import { useToast } from './DriverToast';
@@ -40,15 +41,19 @@ export function SosControl() {
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Send emergency SOS alert"
-        className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 z-40 flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-lg font-bold text-white shadow-xl ring-4 ring-white focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-black active:bg-red-700"
-      >
-        SOS
-      </button>
+      {/* Pinned top-right so it never sits on the tab bar. */}
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-40 mx-auto max-w-[480px]">
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Send emergency SOS alert"
+          className="pointer-events-auto absolute right-5 top-[calc(3.5rem+env(safe-area-inset-top))] flex min-h-12 items-center gap-2 rounded-pill border-2 border-white bg-danger px-[18px] py-3 text-[16px] font-bold tracking-[0.5px] text-white shadow-[0_4px_14px_0_rgba(196,48,48,0.35)] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-black"
+        >
+          <Icon name="alert" size={20} />
+          SOS
+        </button>
+      </div>
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">

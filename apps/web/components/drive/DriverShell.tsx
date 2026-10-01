@@ -13,6 +13,8 @@ import {
   type TripSummary,
 } from '@/lib/driver-cache';
 import { usePendingCount } from '@/lib/use-pending-count';
+import { PhoneTabBar, type PhoneTab } from '@/components/shell/PhoneTabBar';
+import { PhoneTopRow } from '@/components/shell/PhoneTopRow';
 import { SosControl } from './SosControl';
 import { ToastProvider } from './DriverToast';
 
@@ -26,6 +28,14 @@ interface DriverContextValue {
   cachedAt: string | null;
   refresh: () => Promise<void>;
 }
+
+const TABS: PhoneTab[] = [
+  { href: '/drive', label: 'Home', icon: 'home', exact: true },
+  { href: '/drive/stops', label: 'Stops', icon: 'route' },
+  { href: '/drive/report', label: 'Report', icon: 'plus', fab: true },
+  { href: '/drive/break', label: 'Break', icon: 'coffee' },
+  { href: '/drive/vehicle', label: 'Vehicle', icon: 'truck' },
+];
 
 const DriverContext = createContext<DriverContextValue | null>(null);
 
@@ -167,36 +177,33 @@ function ShellInner({ children }: { children: ReactNode }) {
 
   return (
     <DriverContext.Provider value={value}>
-      <div className="min-h-dvh bg-neutral-100 text-neutral-900">
-        <ShellHeader name={me?.name ?? 'Driver'} online={online} />
-        <main className="mx-auto w-full max-w-md px-4 pb-32 pt-4">{children}</main>
+      <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col">
+        <div className="flex items-center justify-between pr-5 pt-[env(safe-area-inset-top)]">
+          {me && <PhoneTopRow me={me} />}
+          <SyncStatus online={online} />
+        </div>
+        <main className="flex-1 px-5 pb-[130px] pt-2">{children}</main>
         <SosControl />
+        <PhoneTabBar tabs={TABS} />
       </div>
     </DriverContext.Provider>
   );
 }
 
-function ShellHeader({ name, online }: { name: string; online: boolean }) {
+function SyncStatus({ online }: { online: boolean }) {
   const pending = usePendingCount();
   return (
-    <header className="sticky top-0 z-30 bg-black pt-[env(safe-area-inset-top)] text-white">
-      <div className="mx-auto flex h-16 max-w-md items-center justify-between px-4">
-        <Link href="/drive" className="text-lg font-bold">
-          {name}
-        </Link>
-        <div className="flex items-center gap-2">
-          {!online && <span className="rounded-full bg-amber-400 px-3 py-1 text-sm font-semibold text-black">Offline</span>}
-          <span
-            aria-label={`${pending} pending ${pending === 1 ? 'action' : 'actions'}`}
-            className={`rounded-full px-3 py-1 text-sm font-semibold ${
-              pending > 0 ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-300'
-            }`}
-          >
-            {pending} pending
-          </span>
-        </div>
-      </div>
-    </header>
+    <div className="flex items-center gap-2">
+      {!online && <span className="rounded-full bg-warning-tint px-3 py-1 text-label text-warning">Offline</span>}
+      <span
+        aria-label={`${pending} pending ${pending === 1 ? 'action' : 'actions'}`}
+        className={`rounded-full px-3 py-1 text-label ${
+          pending > 0 ? 'bg-primary text-on-primary' : 'bg-surface text-muted'
+        }`}
+      >
+        {pending} pending
+      </span>
+    </div>
   );
 }
 
