@@ -95,6 +95,61 @@ enum IncidentType {
   wait_timeout
 }
 
+/// Outlet phone label (ERD OutletPhone).
+enum PhoneLabel {
+  shop
+  manager
+  warehouse
+}
+
+enum LoaderShift {
+  morning
+  night
+}
+
+enum LoaderNoteRole {
+  picking
+  confirming
+}
+
+/// Driver accept/reject of a store-raised FieldFlag. Drivers cannot raise FieldFlags.
+enum FieldFlagDecision {
+  pending
+  accepted
+  rejected
+}
+
+enum LoaderFlagScope {
+  item
+  dn
+}
+
+enum LoaderFlagStatus {
+  pending_dispatcher
+  approved
+  rejected
+}
+
+enum LoadingJobStatus {
+  assigned
+  picking
+  loaded
+  handed_over
+  cancelled
+}
+
+enum FlagSeverity {
+  low
+  medium
+  high
+}
+
+enum SosSeverity {
+  low
+  high
+  critical
+}
+
 model Depot {
   id        String     @id
   name      String
@@ -161,6 +216,7 @@ model RoadCondition {
   raw             Json
 }
 
+/// Running app table for ERD Outlet. Keep the name Store so existing Nest code stays valid.
 model Store {
   id                String            @id
   displayName       String?
@@ -179,23 +235,29 @@ model Store {
   phone             String?
   orders            Order[]
   users             User[]
+  phones            OutletPhone[]
+  fieldFlags        FieldFlag[]
 }
 
 model User {
-  id            String         @id @default(cuid())
-  loginId       String         @unique
-  role          Role
-  name          String
-  depotId       String?
-  depot         Depot?         @relation(fields: [depotId], references: [id])
-  storeId       String?
-  store         Store?         @relation(fields: [storeId], references: [id])
-  passwordHash  String?
-  pinHash       String?
-  phone         String?
-  sessions      Session[]
-  vehicle       Vehicle?
-  notifications Notification[]
+  id                 String         @id @default(cuid())
+  loginId            String         @unique
+  role               Role
+  name               String
+  depotId            String?
+  depot              Depot?         @relation(fields: [depotId], references: [id])
+  storeId            String?
+  store              Store?         @relation(fields: [storeId], references: [id])
+  passwordHash       String?
+  pinHash            String?
+  phone              String?
+  sessions           Session[]
+  vehicle            Vehicle?
+  notifications      Notification[]
+  driverProfile      Driver?
+  loaderProfile      Loader?
+  dispatcherProfile  Dispatcher?
+  assignedTrips      Trip[]         @relation("TripAssignedDriver")
 }
 
 model Session {
@@ -207,10 +269,10 @@ model Session {
 }
 
 model Vehicle {
-  id                 String        @id
-  plate              String?       @unique
+  id                 String           @id
+  plate              String?          @unique
   depotId            String
-  depot              Depot         @relation(fields: [depotId], references: [id])
+  depot              Depot            @relation(fields: [depotId], references: [id])
   type               VehicleType
   temp               VehicleTemp
   weightCapKg        Float
@@ -218,35 +280,38 @@ model Vehicle {
   fuelType           String?
   kmPerL             Float?
   weeklyFuelQuotaL   Float?
-  status             VehicleStatus @default(available)
+  status             VehicleStatus    @default(available)
   outOfServiceReason String?
-  returnDate         DateTime?     @db.Date
-  driverId           String?       @unique
-  driver             User?         @relation(fields: [driverId], references: [id])
+  returnDate         DateTime?        @db.Date
+  driverId           String?          @unique
+  driver             User?            @relation(fields: [driverId], references: [id])
   trips              Trip[]
+  incidents          DriverIncident[]
 }
 
 model Order {
-  id                  String      @id @default(cuid())
+  id                  String         @id @default(cuid())
   storeId             String
-  store               Store       @relation(fields: [storeId], references: [id])
+  store               Store          @relation(fields: [storeId], references: [id])
   brand               Brand
-  deliveryDate        DateTime    @db.Date
+  deliveryDate        DateTime       @db.Date
   temp                Temp
-  status              OrderStatus @default(waiting)
+  status              OrderStatus    @default(waiting)
   units               Int
   weightKg            Float
   volumeM3            Float
   urgentNote          String?
-  movedFromDate       DateTime?   @db.Date
+  movedFromDate       DateTime?      @db.Date
   deferReason         String?
   deferredById        String?
-  deferredYesterday   Boolean     @default(false)
+  deferredYesterday   Boolean        @default(false)
   daysSinceLastServed Int?
-  repeatSkip          Boolean     @default(false)
-  createdAt           DateTime    @default(now())
+  repeatSkip          Boolean        @default(false)
+  createdAt           DateTime       @default(now())
   lines               OrderLine[]
   stop                TripStop?
+  deliveryNotes       DeliveryNote[]
+  fieldFlags          FieldFlag[]
 
   @@index([deliveryDate, status])
 }
@@ -255,6 +320,8 @@ model OrderLine {
   id           String     @id @default(cuid())
   orderId      String
   order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  itemId       String?
+  item         Item?      @relation(fields: [itemId], references: [id])
   name         String
   qty          Int
   pack         String
@@ -265,44 +332,68 @@ model OrderLine {
 }
 
 model Trip {
-  id             String        @id @default(cuid())
-  vehicleId      String
-  vehicle        Vehicle       @relation(fields: [vehicleId], references: [id])
-  depotId        String
-  depot          Depot         @relation(fields: [depotId], references: [id])
-  brand          Brand
-  districtId     String
-  district       District      @relation(fields: [districtId], references: [id])
-  serviceDate    DateTime      @db.Date
-  tripNumber     Int
-  status         TripStatus    @default(planning)
-  planVersion    Int           @default(1)
-  plannedMinutes Int?
-  plannedLitres  Float?
-  publishedAt    DateTime?
-  stops          TripStop[]
-  loadSession    LoadSession?
-  events         DriverEvent[]
-  incidents      Incident[]
+  id                    String           @id @default(cuid())
+  vehicleId             String
+  vehicle               Vehicle          @relation(fields: [vehicleId], references: [id])
+  assignedDriverId      String?
+  assignedDriver        User?            @relation("TripAssignedDriver", fields: [assignedDriverId], references: [id])
+  depotId               String
+  depot                 Depot            @relation(fields: [depotId], references: [id])
+  brand                 Brand
+  districtId            String
+  district              District         @relation(fields: [districtId], references: [id])
+  serviceDate           DateTime         @db.Date
+  tripNumber            Int
+  csvRouteId            String?
+  status                TripStatus       @default(planning)
+  planVersion           Int              @default(1)
+  plannedMinutes        Int?
+  plannedLitres         Float?
+  publishedAt           DateTime?
+  tripStartingDate      DateTime?        @db.Date
+  tripEndingDate        DateTime?        @db.Date
+  startingTime          DateTime?
+  estimatedStartingTime DateTime?
+  endingTime            DateTime?
+  stops                 TripStop[]
+  loadSession           LoadSession?
+  loadingJob            LoadingJob?
+  events                DriverEvent[]
+  incidents             Incident[]
+  routeLegs             RouteLeg[]
+  locationPings         LocationPing[]
+  fieldFlags            FieldFlag[]
+  driverIncidents       DriverIncident[] @relation("DriverIncidentTrip")
+  reassignedIncidents   DriverIncident[] @relation("DriverIncidentReassign")
 
   @@unique([vehicleId, serviceDate, tripNumber])
   @@index([depotId, serviceDate])
 }
 
 model TripStop {
-  id               String        @id @default(cuid())
-  tripId           String
-  trip             Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  orderId          String        @unique
-  order            Order         @relation(fields: [orderId], references: [id])
-  sequence         Int
-  status           StopStatus    @default(upcoming)
-  etaMin           Int?
-  arrivedAt        DateTime?
-  storeConfirmedAt DateTime?
-  driverAckAt      DateTime?
-  flags            LoadFlag[]
-  receipt          StoreReceipt?
+  id                      String           @id @default(cuid())
+  tripId                  String
+  trip                    Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  orderId                 String           @unique
+  order                   Order            @relation(fields: [orderId], references: [id])
+  sequence                Int
+  status                  StopStatus       @default(upcoming)
+  etaMin                  Int?
+  arrivedAt               DateTime?
+  storeConfirmedAt        DateTime?
+  driverAckAt             DateTime?
+  plannedArrivalTime      DateTime?
+  leaveOutletTime         DateTime?
+  serviceMin              Float?
+  unloadingTime           Float?
+  estimatedUnloadingTime  Float?
+  estimatedTripStopTime   DateTime?
+  tripStopTime            DateTime?
+  tripStartTime           DateTime?
+  estimatedTripStartTime  DateTime?
+  flags                   LoadFlag[]
+  receipt                 StoreReceipt?
+  lastStopIncidents       DriverIncident[]
 
   @@unique([tripId, sequence])
 }
@@ -376,4 +467,272 @@ model Notification {
   link      String?
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+}
+
+// --- Team ERD (waypoint schema team version.drawio) --------------------------------
+// Store = Outlet. User.role + Driver/Loader/Dispatcher profiles = login people.
+// LoadSession stays as the live dock; LoadingJob is the dispatcher handoff row.
+
+model OutletPhone {
+  id      String     @id @default(cuid())
+  storeId String
+  store   Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  phoneNo String
+  label   PhoneLabel
+}
+
+model Item {
+  id           String           @id
+  itemName     String
+  isChilled    Boolean          @default(false)
+  packLabel    String?
+  packWeightKg Float?
+  orderLines   OrderLine[]
+  batches      InventoryBatch[]
+  dnLines      DeliveryNoteLine[]
+  fieldFlags   FieldFlag[]
+  loaderFlags  LoaderFlag[]
+}
+
+model InventoryBatch {
+  id                String             @id @default(cuid())
+  itemId            String
+  item              Item               @relation(fields: [itemId], references: [id])
+  batchName         String?
+  manufacturingDate DateTime?          @db.Date
+  expiryDate        DateTime?          @db.Date
+  qty               Float              @default(0)
+  picks             DeliveryNotePick[]
+}
+
+/// 1:1 with User where role = driver. Vehicle assignment stays on Vehicle.driverId.
+model Driver {
+  id            String           @id @default(cuid())
+  userId        String           @unique
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  licenseNo     String?          @unique
+  idNo          String?          @unique
+  joinDate      DateTime?        @db.Date
+  leavingDate   DateTime?        @db.Date
+  lastLoginAt   DateTime?
+  isActive      Boolean          @default(true)
+  phones        DriverPhone[]
+  incidents     DriverIncident[]
+  locationPings LocationPing[]
+}
+
+model DriverPhone {
+  phoneNumber String @id
+  driverId    String
+  driver      Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+}
+
+model Loader {
+  id            String               @id @default(cuid())
+  userId        String               @unique
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employeeNo    String?              @unique
+  idNo          String?              @unique
+  shift         LoaderShift?
+  joinDate      DateTime?            @db.Date
+  leavingDate   DateTime?            @db.Date
+  lastLoginAt   DateTime?
+  isActive      Boolean              @default(true)
+  notesChanged  DeliveryNote[]
+  assignments   DeliveryNoteLoader[]
+  flags         LoaderFlag[]
+}
+
+model Dispatcher {
+  id          String       @id @default(cuid())
+  userId      String       @unique
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employeeNo  String?      @unique
+  lastLoginAt DateTime?
+  isActive    Boolean      @default(true)
+  loadingJobs LoadingJob[]
+  reviews     LoaderFlag[]
+}
+
+model RouteLeg {
+  id                String    @id @default(cuid())
+  tripId            String
+  trip              Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  seq               Int
+  fromPoint         String?
+  toOutlet          String?
+  distanceKm        Float?
+  plannedDepartTime DateTime?
+  plannedTravelMin  Float?
+  actualDepartTime  DateTime?
+  actualTravelMin   Float?
+  monsoon           Boolean?
+  trafficBand       String?
+
+  @@unique([tripId, seq])
+}
+
+/// Dispatcher → loader handoff for a trip. LoadSession is the live dock progress.
+model LoadingJob {
+  id            String           @id @default(cuid())
+  tripId        String           @unique
+  trip          Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  depot         String
+  assignedById  String
+  assignedBy    Dispatcher       @relation(fields: [assignedById], references: [id])
+  assignedAt    DateTime         @default(now())
+  bay           String?
+  loadByTime    DateTime?
+  instructions  String?
+  priority      Int              @default(0)
+  status        LoadingJobStatus @default(assigned)
+  startedAt     DateTime?
+  loadedAt      DateTime?
+  handedOverAt  DateTime?
+  totalWeightKg Float?
+  totalVolumeM3 Float?
+}
+
+/// Versioned delivery note. Current row is the one with validTo = null.
+model DeliveryNote {
+  dnId         String
+  versionAt    DateTime
+  orderId      String
+  order        Order                 @relation(fields: [orderId], references: [id])
+  status       String?
+  validTo      DateTime?
+  changedById  String?
+  changedBy    Loader?               @relation(fields: [changedById], references: [id])
+  changeReason String?
+  lines        DeliveryNoteLine[]
+  loaders      DeliveryNoteLoader[]
+  loaderFlags  LoaderFlag[]
+
+  @@id([dnId, versionAt])
+  @@index([dnId])
+  @@index([orderId])
+}
+
+model DeliveryNoteLine {
+  id             String             @id @default(cuid())
+  dnId           String
+  versionAt      DateTime
+  note           DeliveryNote       @relation(fields: [dnId, versionAt], references: [dnId, versionAt], onDelete: Cascade)
+  itemId         String
+  item           Item               @relation(fields: [itemId], references: [id])
+  qtyConfirmed   Float?
+  shortageReason String?
+  picks          DeliveryNotePick[]
+}
+
+model DeliveryNotePick {
+  id       String           @id @default(cuid())
+  dnLineId String
+  line     DeliveryNoteLine @relation(fields: [dnLineId], references: [id], onDelete: Cascade)
+  batchId  String
+  batch    InventoryBatch   @relation(fields: [batchId], references: [id])
+  qty      Float
+}
+
+model DeliveryNoteLoader {
+  id         String         @id @default(cuid())
+  dnId       String
+  versionAt  DateTime
+  note       DeliveryNote   @relation(fields: [dnId, versionAt], references: [dnId, versionAt], onDelete: Cascade)
+  loaderId   String
+  loader     Loader         @relation(fields: [loaderId], references: [id])
+  role       LoaderNoteRole?
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  @@unique([dnId, versionAt, loaderId])
+}
+
+/// Raised by the outlet (store), not the driver. Driver only sets driverDecision.
+model FieldFlag {
+  id               String            @id @default(cuid())
+  raisedAt         DateTime          @default(now())
+  storeId          String
+  store            Store             @relation(fields: [storeId], references: [id])
+  orderId          String
+  order            Order             @relation(fields: [orderId], references: [id])
+  tripId           String?
+  trip             Trip?             @relation(fields: [tripId], references: [id])
+  itemId           String?
+  item             Item?             @relation(fields: [itemId], references: [id])
+  qtyFlagged       Float?
+  reason           String
+  reasonDetail     String?
+  severity         FlagSeverity?
+  driverDecision   FieldFlagDecision @default(pending)
+  driverDecidedAt  DateTime?
+  driverNote       String?
+  resolvedAt       DateTime?
+
+  @@index([orderId])
+}
+
+model LoaderFlag {
+  id                String           @id @default(cuid())
+  raisedAt          DateTime         @default(now())
+  loaderId          String
+  loader            Loader           @relation(fields: [loaderId], references: [id])
+  dnId              String
+  versionAt         DateTime
+  note              DeliveryNote     @relation(fields: [dnId, versionAt], references: [dnId, versionAt], onDelete: Cascade)
+  scope             LoaderFlagScope
+  itemId            String?
+  item              Item?            @relation(fields: [itemId], references: [id])
+  qtyFlagged        Float?
+  reason            String
+  reasonDetail      String?
+  validationStatus  LoaderFlagStatus @default(pending_dispatcher)
+  reviewedById      String?
+  reviewedBy        Dispatcher?      @relation(fields: [reviewedById], references: [id])
+  reviewedAt        DateTime?
+  reviewNote        String?
+
+  @@index([dnId])
+}
+
+model DriverIncident {
+  id               String      @id @default(cuid())
+  driverId         String
+  driver           Driver      @relation(fields: [driverId], references: [id])
+  tripId           String?
+  trip             Trip?       @relation("DriverIncidentTrip", fields: [tripId], references: [id])
+  vehicleId        String?
+  vehicle          Vehicle?    @relation(fields: [vehicleId], references: [id])
+  incidentType     String
+  severity         SosSeverity
+  message          String?
+  lat              Float?
+  lng              Float?
+  lastStopId       String?
+  lastStop         TripStop?   @relation(fields: [lastStopId], references: [id])
+  raisedAt         DateTime    @default(now())
+  acknowledgedAt   DateTime?
+  acknowledgedBy   String?
+  resolvedAt       DateTime?
+  resolution       String?
+  reassignedTripId String?
+  reassignedTrip   Trip?       @relation("DriverIncidentReassign", fields: [reassignedTripId], references: [id])
+}
+
+/// GPS trail. Phone stores pings locally when offline, then POST /sync with clientUuid.
+model LocationPing {
+  id         String   @id @default(cuid())
+  clientUuid String   @unique
+  tripId     String
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  driverId   String
+  driver     Driver   @relation(fields: [driverId], references: [id])
+  lat        Float
+  lng        Float
+  accuracyM  Float?
+  speedKmh   Float?
+  recordedAt DateTime
+  receivedAt DateTime @default(now())
+
+  @@index([tripId, recordedAt])
 }
