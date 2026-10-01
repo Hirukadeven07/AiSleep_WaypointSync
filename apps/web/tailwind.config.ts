@@ -13,6 +13,7 @@ const config: Config = {
         slate: '#415a77', // secondary text, links
         muted: '#5b6b7f', // grey: supporting text
         mist: '#c9d1da', // disabled, outlines
+        sand: '#c9d3de', // avatars, text on navy (Figma accent/sand)
         border: '#e3e7ec', // line: borders, dividers
         bg: '#f4f6f8', // canvas: app background
         faint: '#94a3b8', // landing: de-emphasised headline, store names
