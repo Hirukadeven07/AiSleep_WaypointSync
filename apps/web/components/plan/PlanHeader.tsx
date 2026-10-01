@@ -5,18 +5,24 @@ import { clock12, dayLabel } from './format';
 function Pill({
   icon,
   children,
+  onClick,
   primary = false,
+  disabled = false,
 }: {
-  icon: 'sparkle' | 'plus' | 'send';
+  icon: 'sparkle' | 'plus' | 'send' | 'check';
   children: string;
+  onClick?: () => void;
   primary?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
+      onClick={onClick}
+      disabled={disabled}
       className={`flex shrink-0 items-center gap-2 rounded-pill px-[18px] py-[11px] text-[14px] font-semibold leading-5 ${
         primary ? 'bg-primary text-bg' : 'border border-border bg-surface text-ink'
-      }`}
+      } ${disabled ? 'cursor-default' : ''}`}
     >
       <Icon name={icon} size={16} />
       {children}
@@ -25,7 +31,18 @@ function Pill({
 }
 
 /** Figma "Plan v2 / Default" header: title, date line, actions and the List / Map switch. */
-export function PlanHeader({ plan }: { plan: Pick<PlanDay, 'date' | 'depotId' | 'cutoffMin'> }) {
+export function PlanHeader({
+  plan,
+  onAutoAssign,
+  onNewTrip,
+  onPublish,
+}: {
+  plan: Pick<PlanDay, 'date' | 'depotId' | 'cutoffMin' | 'published'>;
+  onAutoAssign: () => void;
+  onNewTrip: () => void;
+  onPublish: () => void;
+}) {
+  const published = plan.published !== null;
   return (
     <header className="flex flex-wrap items-center gap-[10px]">
       <div className="flex min-w-px flex-[1_0_0] flex-col gap-1">
@@ -36,11 +53,21 @@ export function PlanHeader({ plan }: { plan: Pick<PlanDay, 'date' | 'depotId' | 
           {`${dayLabel(plan.date)}  ·  ${plan.depotId} depot  ·  orders close ${clock12(plan.cutoffMin)}`}
         </p>
       </div>
-      <Pill icon="sparkle">Auto-assign</Pill>
-      <Pill icon="plus">New trip</Pill>
-      <Pill icon="send" primary>
-        Publish plan
+      <Pill icon="sparkle" onClick={onAutoAssign} disabled={published}>
+        Auto-assign
       </Pill>
+      <Pill icon="plus" onClick={onNewTrip} disabled={published}>
+        New trip
+      </Pill>
+      {published ? (
+        <Pill icon="check" primary disabled>
+          Published
+        </Pill>
+      ) : (
+        <Pill icon="send" primary onClick={onPublish}>
+          Publish plan
+        </Pill>
+      )}
       <div aria-hidden className="h-7 w-px shrink-0 bg-border" />
       <div className="flex shrink-0 gap-1 rounded-pill bg-border p-1">
         <span className="flex items-center gap-[6px] rounded-pill bg-surface px-[14px] py-[9px] text-[13px] font-semibold leading-[18px] text-ink">
@@ -73,8 +100,23 @@ function Stat({ value, label, warn = false }: { value: string; label: string; wa
 
 const OVER_LABEL = { volume: 'over volume', weight: 'over weight', both: 'over capacity' } as const;
 
+const timeText = (iso: string) =>
+  new Date(iso).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'Asia/Colombo',
+  });
+
 /** The strip under the header: vehicles free, capacity used and the open-problems button. */
-export function SummaryStrip({ summary, onView }: { summary: PlanSummary; onView: () => void }) {
+export function SummaryStrip({
+  summary,
+  published,
+  onView,
+}: {
+  summary: PlanSummary;
+  published: PlanDay['published'];
+  onView: () => void;
+}) {
   const used = Math.min(summary.capacityUsedPct, 100);
   return (
     <section className="flex items-center gap-6 rounded-[20px] bg-surface px-[18px] py-3">
@@ -98,7 +140,12 @@ export function SummaryStrip({ summary, onView }: { summary: PlanSummary; onView
       </p>
       <Stat value={String(summary.movedToLaterCount)} label="moved to later" warn />
       <span className="min-w-px flex-1" />
-      {summary.overCount > 0 && summary.overWhat ? (
+      {published ? (
+        <span className="flex items-center gap-2 whitespace-nowrap rounded-pill bg-success-tint px-[14px] py-2 text-[13px] leading-[18px] text-success">
+          <span className="font-bold">Published {timeText(published.at)}</span>
+          <span className="font-semibold">All stores notified</span>
+        </span>
+      ) : summary.overCount > 0 && summary.overWhat ? (
         <button
           type="button"
           onClick={onView}
