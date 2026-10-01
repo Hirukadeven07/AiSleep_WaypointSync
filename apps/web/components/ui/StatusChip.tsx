@@ -1,12 +1,12 @@
 type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'chilled' | 'primary';
 
 const tones: Record<Tone, string> = {
-  neutral: 'bg-surface text-muted border-border',
-  success: 'text-success border-success',
-  warning: 'text-warning border-warning',
-  danger: 'text-danger border-danger',
-  chilled: 'text-chilled border-chilled',
-  primary: 'text-primary border-primary',
+  neutral: 'bg-muted/10 text-muted',
+  success: 'bg-success/10 text-success',
+  warning: 'bg-warning/10 text-warning',
+  danger: 'bg-danger/10 text-danger',
+  chilled: 'bg-chilled-tint text-chilled',
+  primary: 'bg-info-tint text-slate',
 };
 
 /** Maps a status string (order/trip/stop/vehicle) to a tone. */
@@ -39,8 +39,9 @@ export function toneFor(status: string): Tone {
 export function StatusChip({ status, tone }: { status: string; tone?: Tone }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-sm py-xs text-caption font-medium ${tones[tone ?? toneFor(status)]}`}
+      className={`inline-flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-caption font-semibold ${tones[tone ?? toneFor(status)]}`}
     >
+      <span aria-hidden className="h-[7px] w-[7px] rounded-full bg-current" />
       {status.replace(/_/g, ' ')}
     </span>
   );
