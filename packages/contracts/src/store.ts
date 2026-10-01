@@ -27,6 +27,15 @@ export interface StoreOrderView {
   repeatSkip: boolean;
 }
 
+/** A line the store flagged at receipt (ERD FieldFlag). The driver accepts or disputes it. */
+export interface StoreIssue {
+  id: string;
+  itemName: string;
+  qty: number | null;
+  reason: string;
+  driverDecision: 'pending' | 'accepted' | 'rejected';
+}
+
 /** One delivery to this store: a trip stop with its handoff timestamps. */
 export interface StoreDelivery {
   stopId: string;
@@ -41,6 +50,7 @@ export interface StoreDelivery {
   storeConfirmedAt: string | null;
   driverAckAt: string | null;
   lines: OrderLine[];
+  issues: StoreIssue[];
 }
 
 export interface StoreHome {
@@ -56,6 +66,7 @@ export interface StoreHome {
   nextOrder: StoreOrderView | null;
   deferral: StoreOrderView | null;
   unreadNotices: number;
+  phones: { label: 'shop' | 'manager' | 'warehouse'; phoneNo: string }[];
 }
 
 export interface PlaceOrderRequest {

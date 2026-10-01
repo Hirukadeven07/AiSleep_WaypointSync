@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { usePoll } from '@/lib/poll';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusChip } from '@/components/ui/StatusChip';
-import { HandoffTimeline, PageTitle } from '@/components/store/parts';
+import { HandoffTimeline, IssueList, PageTitle } from '@/components/store/parts';
 
 /** S5: where each of today's deliveries is in the handoff, polled every 5 seconds. */
 export default function DeliveryPage() {
@@ -39,6 +39,7 @@ export default function DeliveryPage() {
             <StatusChip status={d.status} />
           </div>
           <HandoffTimeline delivery={d} />
+          <IssueList delivery={d} />
           {(d.status === 'arrived' || d.status === 'waiting') && (
             <Link
               href="/store/receive"

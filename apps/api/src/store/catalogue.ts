@@ -116,6 +116,7 @@ export function buildLines(brand: Brand, picks: { catalogueId: string; qty: numb
     const item = catalogueItem(brand, p.catalogueId);
     if (!item) throw new Error(`Unknown catalogue item ${p.catalogueId} for ${brand}`);
     return {
+      itemId: item.id,
       name: item.name,
       qty: p.qty,
       pack: item.pack,

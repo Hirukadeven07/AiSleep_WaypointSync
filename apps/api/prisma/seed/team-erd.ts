@@ -15,7 +15,8 @@ export async function seedTeamErd(prisma: PrismaClient) {
   console.log('[seed] team ERD sample rows ready');
 }
 
-async function seedCatalogue(prisma: PrismaClient) {
+/** Item and InventoryBatch rows for the catalogue. Idempotent; order lines reference these ids. */
+export async function seedCatalogue(prisma: PrismaClient) {
   const all = [...CATALOGUE.Fresh, ...CATALOGUE.Style, ...CATALOGUE.Tech];
   for (const item of all) {
     await prisma.item.upsert({
