@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { loadAllCsv } from './load-csv';
+import { seedDockStoreDemo } from './dock-store-demo';
 
 const prisma = new PrismaClient();
 
@@ -20,7 +21,8 @@ async function seedUsers() {
     where: { depotId: 'Peliyagoda', brand: 'Fresh' },
     orderBy: { id: 'asc' },
   });
-  if (!store) console.warn('[seed] no Peliyagoda Fresh store found - store user gets storeId = null');
+  if (!store)
+    console.warn('[seed] no Peliyagoda Fresh store found - store user gets storeId = null');
 
   const users = [
     {
@@ -37,7 +39,12 @@ async function seedUsers() {
       storeId: store?.id ?? null,
       passwordHash: await argon2.hash('waypoint'),
     },
-    { loginId: 'sampath', role: 'loader' as const, name: 'Sampath (Loader)', depotId: 'Peliyagoda' },
+    {
+      loginId: 'sampath',
+      role: 'loader' as const,
+      name: 'Sampath (Loader)',
+      depotId: 'Peliyagoda',
+    },
     {
       loginId: 'kasun',
       role: 'driver' as const,
@@ -73,6 +80,7 @@ async function main() {
   await loadAllCsv(prisma, dataDir);
 
   await seedUsers();
+  await seedDockStoreDemo(prisma);
   console.log('[seed] done');
 }
 

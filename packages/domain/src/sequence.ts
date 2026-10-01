@@ -18,7 +18,7 @@ export function sortStopsByWindow(stops: StopView[]): StopView[] {
 }
 
 /** `loadOrder[0]` is the first crate the loader should pick up. */
-export function loadOrder(deliveryStops: StopView[]): StopView[] {
+export function loadOrder<T>(deliveryStops: T[]): T[] {
   return [...deliveryStops].reverse();
 }
 
