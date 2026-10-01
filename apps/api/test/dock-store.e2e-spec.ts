@@ -252,6 +252,15 @@ describe('loader dock and store (e2e)', () => {
 
       const acked = await loader.post(`/api/loads/${ids.loadTrip}/ack`).expect(200);
       expect(acked.body.lock.locked).toBe(false);
+      // E2E-A left the truck: its delivery note now has a current 'removed' version.
+      const removedNote = await prisma.deliveryNote.findFirstOrThrow({
+        where: { orderId: stopRow.orderId, validTo: null },
+      });
+      expect(removedNote).toMatchObject({
+        status: 'removed',
+        changeReason: 'taken off the trip by dispatch (plan v2)',
+      });
+      expect(await prisma.deliveryNote.count({ where: { dnId: removedNote.dnId } })).toBe(2);
 
       const departed = await loader
         .post(`/api/loads/${ids.loadTrip}/depart`)
