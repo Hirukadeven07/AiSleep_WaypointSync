@@ -3,18 +3,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AssignResult,
+  AutoAssignProposal,
   DropCheck,
   PlanDay,
   PlanTrip,
+  PublishCheck,
   UnassignResult,
 } from '@waypoint/contracts';
-import { api } from '@/lib/api';
-import { ApiError } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { kgText, m3Text } from './format';
 
 export type DragState = { orderId: string; storeName: string; fromTripId: string | null };
 export type Hover = { tripId: string; check: DropCheck | null };
-export type ToastState = { kind: 'ok' | 'error'; title: string; sub: string; undo?: () => void };
+export type ToastState = {
+  kind: 'ok' | 'error';
+  title: string;
+  sub: string;
+  undo?: () => void;
+  /** A button on the toast that goes to another page. */
+  action?: { label: string; href: string };
+};
+
+export type PlanModal =
+  | { kind: 'defer'; orderId: string }
+  | { kind: 'newTrip' }
+  | { kind: 'publish'; check: PublishCheck }
+  | { kind: 'auto'; proposal: AutoAssignProposal };
 
 const tripName = (t: PlanTrip) => t.plate ?? t.vehicleId;
 
@@ -43,6 +57,7 @@ export function usePlanEdit(plan: PlanDay | null, reload: () => Promise<void>) {
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ id: string; n: number } | null>(null);
   const [drawerId, setDrawerId] = useState<string | null>(null);
+  const [modal, setModal] = useState<PlanModal | null>(null);
 
   const hoverId = useRef<string | null>(null);
   const checks = useRef(new Map<string, DropCheck>());
@@ -56,8 +71,27 @@ export function usePlanEdit(plan: PlanDay | null, reload: () => Promise<void>) {
   }, [toast]);
 
   const closeDrawer = useCallback(() => setDrawerId(null), []);
+  const closeModal = useCallback(() => setModal(null), []);
+  const showToast = useCallback((t: ToastState) => setToast(t), []);
   const dismissToast = useCallback(() => setToast(null), []);
   const focusTrip = useCallback((id: string) => setFocus((f) => ({ id, n: (f?.n ?? 0) + 1 })), []);
+
+  /** A moved order comes back to the waiting queue. */
+  const bringBack = useCallback(
+    (orderId: string, storeName: string) => {
+      void api('/plan/bring-back', { method: 'POST', body: { orderId } })
+        .then(reload)
+        .then(() => setToast({ kind: 'ok', title: `${storeName} is back in the queue`, sub: '' }))
+        .catch((e) =>
+          setToast({
+            kind: 'error',
+            title: `${storeName} could not be brought back`,
+            sub: reason(e),
+          }),
+        );
+    },
+    [reload],
+  );
 
   const startDrag = useCallback((d: DragState) => setDrag(d), []);
 
@@ -189,6 +223,7 @@ export function usePlanEdit(plan: PlanDay | null, reload: () => Promise<void>) {
     justAdded,
     focus,
     drawerId,
+    modal,
     startDrag,
     endDrag,
     enter,
@@ -197,8 +232,13 @@ export function usePlanEdit(plan: PlanDay | null, reload: () => Promise<void>) {
     dropOnQueue,
     place,
     dismissToast,
+    bringBack,
     openDrawer: setDrawerId,
     closeDrawer,
+    openModal: setModal,
+    closeModal,
+    showToast,
+    reload,
     focusTrip,
   };
 }

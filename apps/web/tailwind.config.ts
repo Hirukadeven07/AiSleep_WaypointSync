@@ -59,6 +59,7 @@ const config: Config = {
         wash: '#f7f9fb',
         'danger-wash': '#fcf1f1',
         'danger-line': '#e8b4b4',
+        'olive-wash': '#f3f5e6', // an empty trip you just created
       },
       fontFamily: {
         sans: ['var(--font-dm-sans)', 'DM Sans', 'system-ui', 'sans-serif'],

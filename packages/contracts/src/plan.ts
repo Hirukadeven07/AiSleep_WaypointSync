@@ -90,6 +90,8 @@ export interface PlanDay {
   trips: PlanTrip[];
   districts: string[];
   summary: PlanSummary;
+  /** Set once every trip with stops has been sent to loaders and drivers. */
+  published: { at: string; tripCount: number; storeCount: number } | null;
 }
 
 export interface PlanIssue {
@@ -155,4 +157,107 @@ export interface PlanOrderDetail {
     detail: string;
     fit: string;
   } | null;
+}
+
+/** Why a dispatcher can move an order to a later day. */
+export const DEFER_REASONS = [
+  'No chilled space left on any trip',
+  'No van left for a van-only store',
+  'Delivery window missed by every trip',
+  'Stock still healthy, lowest priority',
+] as const;
+export type DeferReason = (typeof DEFER_REASONS)[number];
+
+export interface DeferRequest {
+  orderId: string;
+  reason: string;
+}
+
+/** What moving an order to a later day will do, and what the store will be told. */
+export interface DeferPreview {
+  orderId: string;
+  storeName: string;
+  /** How many times the order will have been moved, counting this one. */
+  times: number;
+  newDate: string; // YYYY-MM-DD
+  repeatSkip: boolean;
+  /** The exact text the store receives. */
+  storeMessage: string;
+}
+
+export interface DeferResult {
+  order: PlanOrder;
+  fromTrip: PlanTrip | null;
+}
+
+export interface BringBackResult {
+  order: PlanOrder;
+}
+
+export interface NewTripVehicle {
+  id: string;
+  label: string; // "WP-1190 · Refrigerated truck"
+  detail: string; // "3,000 kg · 15 m³ · back at depot 10:20"
+  tag: string | null; // "Best for Fresh"
+  available: boolean;
+  /** Why it cannot be chosen, e.g. "Out of service until Mon". */
+  unavailable: string | null;
+}
+
+export interface NewTripOptions {
+  runs: { tripNumber: 1 | 2; label: string }[];
+  /** Vehicles keyed by the run they would take. */
+  vehicles: Record<'1' | '2', NewTripVehicle[]>;
+  districts: { id: string; name: string }[];
+}
+
+export interface CreateTripRequest {
+  vehicleId: string;
+  tripNumber: 1 | 2;
+  brand: 'Fresh' | 'Style' | 'Tech';
+  districtId: string;
+}
+
+export interface TripSuggestion {
+  orderId: string;
+  storeName: string;
+  waitingSinceYesterday: boolean;
+  windowOpenMin: number;
+  windowCloseMin: number;
+  weightKg: number;
+}
+
+export interface PublishProblem {
+  tripId: string;
+  trip: string; // "WP-3310 · Trip 1"
+  code: string;
+  message: string;
+  severity: 'block' | 'warn';
+}
+
+export interface PublishCheck {
+  /** Trips that will be sent (those with stops). */
+  tripCount: number;
+  storeCount: number;
+  problems: PublishProblem[];
+  /** True when nothing blocks. Warnings can still be published through. */
+  canPublish: boolean;
+}
+
+export interface PlanPublishResult {
+  ok: boolean;
+  publishedAt: string; // ISO
+  tripCount: number;
+  storeCount: number;
+}
+
+export interface AutoAssignProposal {
+  /** Trips on the plan once the proposal is applied. */
+  tripsAfter: number;
+  ordersPlaced: number;
+  movedToLater: number;
+  capacityUsedPct: number;
+  addedToExisting: number;
+  newTrips: { label: string; run: 1 | 2 }[];
+  deferred: { orderId: string; storeName: string; reason: string }[];
 }

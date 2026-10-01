@@ -1,8 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Brand, DropCheck, PlanTrip, PlanTripState } from '@waypoint/contracts';
+import type {
+  Brand,
+  DropCheck,
+  PlanTrip,
+  PlanTripState,
+  TripSuggestion,
+} from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
+import { api } from '@/lib/api';
 import { kgText, m3Text, stopCount, stopWindow, tone, vehicleKind } from './format';
 import { dragImage } from './OrderQueue';
 import type { PlanEdit } from './usePlanEdit';
@@ -78,6 +85,106 @@ function DropHint({ check }: { check: DropCheck }) {
   );
 }
 
+/** "9-12" for a window that opens at 9:00 and closes at 12:00. */
+const hourText = (min: number) =>
+  min % 60 === 0
+    ? String(min / 60)
+    : `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
+
+/** A trip you just created: a drop area and the orders the rules let onto it (Figma "New · empty"). */
+function EmptyTrip({ trip, edit }: { trip: PlanTrip; edit: PlanEdit }) {
+  const [suggestions, setSuggestions] = useState<TripSuggestion[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    api<TripSuggestion[]>(`/plan/trips/${trip.id}/suggestions`)
+      .then((s) => live && setSuggestions(s))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [trip.id]);
+
+  async function addAll() {
+    for (const s of suggestions) {
+      if (!(await edit.place(s.orderId, s.storeName, trip.id))) break;
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-[10px] px-[14px] py-3">
+      <div className="flex items-center gap-3">
+        <span
+          className={`flex size-9 shrink-0 items-center justify-center rounded-[12px] ${TILE[trip.brand]}`}
+        >
+          <Icon name="truck" size={16} />
+        </span>
+        <span className="flex min-w-px flex-[1_0_0] flex-col gap-px whitespace-nowrap">
+          <span className="text-[14px] font-semibold leading-5 text-ink">
+            {trip.plate ?? trip.vehicleId} · Trip {trip.tripNumber}
+          </span>
+          <span className="text-[12px] leading-[15px] text-muted">
+            {vehicleKind(trip)} · {trip.brand} · {trip.district} ·{' '}
+            {trip.tripNumber === 1 ? 'morning' : 'afternoon'} run
+          </span>
+        </span>
+        <span className="rounded-pill bg-olive-tint px-[9px] py-[3px] text-[12px] font-semibold leading-[15px] text-olive-ink">
+          New · empty
+        </span>
+      </div>
+      <div className="flex flex-col items-center gap-[2px] whitespace-nowrap rounded-[12px] border-[1.5px] border-dashed border-olive-ink bg-surface px-[14px] py-3">
+        <p className="text-[13px] font-semibold leading-[18px] text-olive-ink">
+          Drag orders here from the queue
+        </p>
+        {suggestions.length > 0 && (
+          <p className="text-[12px] leading-[15px] text-muted">or add the suggested ones</p>
+        )}
+      </div>
+      {suggestions.length > 0 && (
+        <div className="flex flex-col rounded-[12px] bg-surface px-3 py-[6px]">
+          <div className="flex items-center py-[6px]">
+            <p className="min-w-px flex-1 text-[12px] font-semibold leading-[17px] text-ink">
+              Suggested for {trip.brand} · {trip.district}
+            </p>
+            <button
+              type="button"
+              onClick={() => void addAll()}
+              className="rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[17px] text-bg"
+            >
+              Add all {suggestions.length}
+            </button>
+          </div>
+          {suggestions.map((s) => (
+            <div key={s.orderId} className="flex items-center gap-[10px] py-[6px]">
+              <div className="flex min-w-px flex-1 items-center gap-[6px]">
+                <p className="whitespace-nowrap text-[12px] font-semibold leading-[17px] text-ink">
+                  {s.storeName}
+                </p>
+                {s.waitingSinceYesterday && (
+                  <span className="whitespace-nowrap rounded-pill bg-warning/[0.14] px-[9px] py-[3px] text-[12px] font-semibold leading-[15px] text-warning">
+                    Waiting since yesterday
+                  </span>
+                )}
+              </div>
+              <p className="whitespace-nowrap text-[12px] leading-[15px] text-muted">
+                {hourText(s.windowOpenMin)}-{hourText(s.windowCloseMin)} · {kgText(s.weightKg)} kg
+              </p>
+              <button
+                type="button"
+                onClick={() => void edit.place(s.orderId, s.storeName, trip.id)}
+                className="flex min-h-6 items-center gap-1 rounded-pill bg-olive-tint px-[10px] py-1 text-[12px] font-bold leading-[15px] text-olive-ink"
+              >
+                <Icon name="plus" size={11} />
+                Add
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TripRow({
   trip,
   open,
@@ -113,23 +220,40 @@ function TripRow({
         ? 'border border-border bg-wash'
         : '';
 
+  const dropProps = {
+    onDragOver: (e: React.DragEvent) => {
+      if (!droppable) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      edit.enter(trip.id);
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) edit.leave(trip.id);
+    },
+    onDrop: (e: React.DragEvent) => {
+      if (!droppable || !edit.drag) return;
+      e.preventDefault();
+      edit.drop(trip.id);
+    },
+  };
+
+  // A trip with no stops yet is the "New · empty" card with its drop area and suggestions.
+  if (trip.stops.length === 0 && trip.status === 'planning' && !hover) {
+    return (
+      <div
+        id={`trip-${trip.id}`}
+        {...dropProps}
+        className="relative flex flex-col rounded-note border-2 border-olive-ink bg-olive-wash"
+      >
+        <EmptyTrip trip={trip} edit={edit} />
+      </div>
+    );
+  }
+
   return (
     <div
       id={`trip-${trip.id}`}
-      onDragOver={(e) => {
-        if (!droppable) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        edit.enter(trip.id);
-      }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) edit.leave(trip.id);
-      }}
-      onDrop={(e) => {
-        if (!droppable || !edit.drag) return;
-        e.preventDefault();
-        edit.drop(trip.id);
-      }}
+      {...dropProps}
       className={`relative flex flex-col rounded-note ${frame}`}
     >
       <button
@@ -261,8 +385,11 @@ export function TripList({
     // Only a new focus request should run this, not every refresh of the trips.
   }, [focus?.id, focus?.n]);
 
-  const shown = all ? trips : trips.slice(0, VISIBLE);
-  const hidden = trips.length - shown.length;
+  // A trip with no stops yet goes first, so a new trip is where the dispatcher is looking.
+  const isEmpty = (t: PlanTrip) => t.stops.length === 0 && t.status === 'planning';
+  const ordered = [...trips].sort((a, b) => Number(isEmpty(b)) - Number(isEmpty(a)));
+  const shown = all ? ordered : ordered.slice(0, VISIBLE);
+  const hidden = ordered.length - shown.length;
 
   return (
     <section

@@ -99,6 +99,7 @@ export class PlanService {
       trips,
       districts: [...new Set(orders.map((o) => o.district))].sort(),
       summary: this.summary(waitingRows, tripRows, trips, vehicles, orders, movedToLater),
+      published: this.published(tripRows),
     };
   }
 
@@ -109,6 +110,23 @@ export class PlanService {
       this.prisma.serviceAllowance.findMany(),
     ]);
     return toLookup(districts, allowances);
+  }
+
+  /** The plan counts as published once every trip with stops has been sent. */
+  private published(tripRows: TripRow[]): PlanDay['published'] {
+    const withStops = tripRows.filter((t) => t.stops.length > 0);
+    if (withStops.length === 0 || withStops.some((t) => t.status === 'planning')) return null;
+    const at = withStops.reduce<Date | null>(
+      (latest, t) =>
+        t.publishedAt && (!latest || t.publishedAt > latest) ? t.publishedAt : latest,
+      null,
+    );
+    if (!at) return null;
+    return {
+      at: at.toISOString(),
+      tripCount: withStops.length,
+      storeCount: new Set(withStops.flatMap((t) => t.stops.map((s) => s.order.storeId))).size,
+    };
   }
 
   planOrder(row: OrderRow, today: string): PlanOrder {
