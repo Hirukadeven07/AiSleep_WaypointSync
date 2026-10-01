@@ -13,7 +13,7 @@ jest.setTimeout(60_000);
 const DAY = '2031-06-10';
 const NOW = `${DAY}T10:45:00+05:30`;
 const date = (iso: string) => new Date(`${iso}T00:00:00Z`);
-const STORES = ['DL-A', 'DL-B', 'DL-C', 'DL-D', 'DL-E', 'DL-F', 'DL-G', 'DL-H', 'DL-I'];
+const STORES = ['DL-A', 'DL-B', 'DL-C', 'DL-D', 'DL-E', 'DL-F', 'DL-G', 'DL-H', 'DL-I', 'DL-J'];
 const VEHICLES = ['DL-V1', 'DL-V2', 'DL-V3', 'DL-V4', 'DL-V5', 'DL-V6', 'DL-V7'];
 
 describe('live day (e2e)', () => {
@@ -122,7 +122,7 @@ describe('live day (e2e)', () => {
     // On time: one delivered, the next ETA inside its window.
     await makeTrip('ontime', 'DL-V1', 'on_road', [
       { status: 'delivered', arrivedAt: at('09:42') },
-      { status: 'upcoming', etaMin: 590 },
+      { status: 'upcoming', etaMin: 560 },
     ]);
     // Late: the ETA is 25 minutes past the end of the window.
     await makeTrip('late', 'DL-V2', 'on_road', [{ status: 'upcoming', etaMin: 625 }]);
@@ -143,6 +143,8 @@ describe('live day (e2e)', () => {
     );
     await makeTrip('loading', 'DL-V6', 'loading', [{ status: 'upcoming' }]);
     await makeTrip('assigned', 'DL-V7', 'published', [{ status: 'upcoming' }]);
+    // The same van's second trip, waiting for its turn.
+    await makeTrip('next', 'DL-V5', 'published', [{ status: 'upcoming' }], { tripNumber: 2 });
 
     const kasun = await prisma.user.findUniqueOrThrow({ where: { loginId: 'kasun' } });
     await prisma.driverEvent.create({
@@ -174,6 +176,7 @@ describe('live day (e2e)', () => {
   afterAll(async () => {
     process.env.DEMO_NOW = previousDemoNow;
     if (prisma) {
+      await prisma.driverEvent.deleteMany({ where: { clientId: { startsWith: 'dl-' } } });
       await prisma.trip.deleteMany({ where: { vehicleId: { in: VEHICLES } } });
       await prisma.order.deleteMany({ where: { storeId: { in: STORES } } });
       await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
@@ -224,13 +227,17 @@ describe('live day (e2e)', () => {
     expect(byId('assigned')).toMatchObject({ live: 'assigned' });
     expect(byId('ontime').stops[0]).toMatchObject({ confirmed: true, issueNote: '1 item damaged' });
     expect(byId('late').stops[0]).toMatchObject({ missBy: 25 });
+    expect(byId('done').nextTrip).toEqual({ tripNumber: 2, stops: 1 });
+    expect(byId('next').previousTrip).toMatchObject({ tripNumber: 1, delivered: 1, total: 1 });
+    expect(byId('next').previousTrip.backAt).toBeTruthy();
+    expect(byId('ontime').previousTrip).toBeNull();
   });
 
   it('counts the day and lists what needs attention', async () => {
     const agent = await dispatcher();
     const { body } = await agent.get('/api/dispatch/live').expect(200);
     const mine = body.trips.filter((t: { vehicleId: string }) => VEHICLES.includes(t.vehicleId));
-    expect(mine).toHaveLength(7);
+    expect(mine).toHaveLength(8);
 
     const kinds = body.attention
       .filter((a: { tripId: string }) => Object.values(trip).includes(a.tripId))
@@ -251,5 +258,59 @@ describe('live day (e2e)', () => {
     expect(body.kpis.incidentsText).toMatch(/breakdown/);
     expect(body.counts.all).toBe(body.trips.length);
     expect(body.tomorrow).toMatchObject({ cutoffMin: 960, minutesToCutoff: 960 - 645 });
+  });
+
+  it('previews and sends a delay notice to the stores that are affected', async () => {
+    const agent = await dispatcher();
+    const preview = await agent.get(`/api/dispatch/trips/${trip.late}/notify-preview`).expect(200);
+    expect(preview.body.subtitle).toBe('DL-V2 · Trip 1  ·  running about 25 min late');
+    expect(preview.body.recipients).toEqual([
+      {
+        stopId: trip['late-stop1'],
+        storeName: expect.stringMatching(/^Store DL-/),
+        detail: 'New ETA 10:25 · window was 9:00-10:00',
+      },
+    ]);
+    expect(preview.body.message).toBe(
+      'Hi, your Fresh delivery on DL-V2 is running about 25 min late. New ETA is shown in your app. Sorry for the wait.',
+    );
+    // Nothing is affected on a trip that is on time.
+    const none = await agent.get(`/api/dispatch/trips/${trip.ontime}/notify-preview`).expect(200);
+    expect(none.body.recipients).toEqual([]);
+
+    const stop = await prisma.tripStop.findUniqueOrThrow({
+      where: { id: trip['late-stop1'] },
+      include: { order: true },
+    });
+    const user = await prisma.user.create({
+      data: {
+        loginId: `dl-store-${Date.now()}`,
+        role: 'store',
+        name: 'DL store',
+        storeId: stop.order.storeId,
+      },
+    });
+    try {
+      const sent = await agent
+        .post(`/api/dispatch/trips/${trip.late}/notify`)
+        .send({ stopIds: [trip['late-stop1']], message: preview.body.message })
+        .expect(200);
+      expect(sent.body).toEqual({ sent: 1 });
+      const notices = await prisma.notification.findMany({ where: { userId: user.id } });
+      expect(notices).toEqual([
+        expect.objectContaining({ title: 'Delivery running late', body: preview.body.message }),
+      ]);
+
+      await agent
+        .post(`/api/dispatch/trips/${trip.late}/notify`)
+        .send({ stopIds: [trip['ontime-stop1']], message: 'x' })
+        .expect(404);
+      await agent
+        .post(`/api/dispatch/trips/${trip.late}/notify`)
+        .send({ stopIds: [], message: 'x' })
+        .expect(400);
+    } finally {
+      await prisma.user.delete({ where: { id: user.id } });
+    }
   });
 });
