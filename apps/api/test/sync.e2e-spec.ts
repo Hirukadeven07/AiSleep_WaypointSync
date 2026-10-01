@@ -160,6 +160,23 @@ describe('driver sync (e2e)', () => {
     });
     stopId = stop.id;
 
+    // A stop on another driver's trip, for the FORBIDDEN_STOP check. TripStop.orderId is unique.
+    const otherOrder = await prisma.order.create({
+      data: {
+        storeId: store.id,
+        brand: 'Fresh',
+        deliveryDate: date(DAY),
+        temp: 'ambient',
+        status: 'waiting',
+        units: 1,
+        weightKg: 10,
+        volumeM3: 0.1,
+      },
+    });
+    await prisma.tripStop.create({
+      data: { tripId: otherTrip.id, orderId: otherOrder.id, sequence: 1, status: 'upcoming' },
+    });
+
     driverAgent = await login({ role: 'driver', loginId: 'kasun', secret: '1234' });
   });
 
@@ -424,6 +441,9 @@ describe('driver sync (e2e)', () => {
   });
 
   it('keeps processing in order and returns the pull snapshot and active SOS', async () => {
+    // The SOS test above already raised alerts today; clear them so activeSos starts false.
+    await prisma.driverEvent.deleteMany({ where: { driverId, type: 'SOS_ALERT' } });
+
     const badEvent = await driverAgent
       .post('/api/sync')
       .send({
