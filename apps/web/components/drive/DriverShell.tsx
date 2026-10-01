@@ -1,5 +1,4 @@
 'use client';
-import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AuthError, fetchDriverDay, fetchMe } from '@/lib/driver-api';
@@ -12,14 +11,13 @@ import {
   type Me,
   type TripSummary,
 } from '@/lib/driver-cache';
-import { usePendingCount } from '@/lib/use-pending-count';
 import { DriverSidebar } from '@/components/shell/DriverSidebar';
 import { PhoneColumn } from '@/components/shell/PhoneColumn';
 import { PhoneTabBar } from '@/components/shell/PhoneTabBar';
 import { PhoneTopRow } from '@/components/shell/PhoneTopRow';
 import { DRIVER_TABS } from '@/components/shell/driverTabs';
 import { SosControl } from './SosControl';
-import { ToastProvider } from './DriverToast';
+import { OfflineBanner } from './OfflineBanner';
 
 interface DriverContextValue {
   me: Me | null;
@@ -43,17 +41,14 @@ export function useDriver(): DriverContextValue {
 type Phase = 'loading' | 'ready' | 'no-access' | 'offline-empty';
 
 export function DriverShell({ children }: { children: ReactNode }) {
-  return (
-    <ToastProvider>
-      <ShellInner>{children}</ShellInner>
-    </ToastProvider>
-  );
+  return <ShellInner>{children}</ShellInner>;
 }
 
 function ShellInner({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const isLogin = pathname === '/drive/login';
+  const isSos = pathname === '/drive/sos';
 
   const [phase, setPhase] = useState<Phase>('loading');
   const [me, setMe] = useState<Me | null>(null);
@@ -126,6 +121,10 @@ function ShellInner({ children }: { children: ReactNode }) {
     };
   }, [isLogin, refresh]);
 
+  useEffect(() => {
+    if (phase === 'no-access') router.replace('/no-access');
+  }, [phase, router]);
+
   // Installable PWA. Production only, so dev hot-reload is never served from cache.
   useEffect(() => {
     if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) {
@@ -147,27 +146,22 @@ function ShellInner({ children }: { children: ReactNode }) {
     );
   }
 
-  if (phase === 'loading') {
-    return <Centered title="Loading your day" />;
-  }
-  if (phase === 'no-access') {
-    return (
-      <Centered title="This account isn't a driver account">
-        <Link href="/login/driver" className="mt-4 inline-flex h-12 items-center rounded-xl bg-black px-5 text-base font-semibold text-white">
-          Sign in as a driver
-        </Link>
-      </Centered>
-    );
+  // The Figma has no frames for loading, wrong account or "no signal and nothing saved", so these
+  // show only the blank canvas (and, offline, the Figma offline banner).
+  if (phase === 'loading' || phase === 'no-access') {
+    return <div className="min-h-dvh bg-bg" />;
   }
   if (phase === 'offline-empty') {
     return (
-      <Centered title="No signal, and nothing saved yet">
-        <p className="mt-2 text-neutral-700">Connect once to load your trips. After that they open offline.</p>
-        <button onClick={() => void refresh()} className="mt-4 h-12 rounded-xl bg-black px-5 text-base font-semibold text-white">
-          Try again
-        </button>
-      </Centered>
+      <main className="mx-auto min-h-dvh w-full max-w-[430px] px-5 pt-6">
+        <OfflineBanner />
+      </main>
     );
+  }
+
+  // Full-screen emergency page: no tab bar, sidebar or SOS button.
+  if (isSos) {
+    return <DriverContext.Provider value={value}>{children}</DriverContext.Provider>;
   }
 
   return (
@@ -176,14 +170,11 @@ function ShellInner({ children }: { children: ReactNode }) {
       <div className="lg:flex lg:min-h-dvh">
         {me && <DriverSidebar me={me} />}
         <PhoneColumn className="lg:relative lg:mx-0 lg:min-w-0 lg:max-w-none lg:flex-1">
-          <div className="flex items-center justify-between pr-5 pt-[env(safe-area-inset-top)] lg:absolute lg:right-44 lg:top-11 lg:z-10 lg:p-0">
-            {me && (
-              <div className="lg:hidden">
-                <PhoneTopRow me={me} />
-              </div>
-            )}
-            <SyncStatus online={online} />
-          </div>
+          {me && (
+            <div className="pt-[env(safe-area-inset-top)] lg:hidden">
+              <PhoneTopRow me={me} />
+            </div>
+          )}
           <main className="flex-1 px-5 pb-[130px] pt-2 lg:px-10 lg:py-8">{children}</main>
         </PhoneColumn>
         <SosControl />
@@ -192,31 +183,5 @@ function ShellInner({ children }: { children: ReactNode }) {
         </div>
       </div>
     </DriverContext.Provider>
-  );
-}
-
-function SyncStatus({ online }: { online: boolean }) {
-  const pending = usePendingCount();
-  return (
-    <div className="flex items-center gap-2">
-      {!online && <span className="rounded-full bg-warning-tint px-3 py-1 text-label text-warning">Offline</span>}
-      <span
-        aria-label={`${pending} pending ${pending === 1 ? 'action' : 'actions'}`}
-        className={`rounded-full px-3 py-1 text-label ${
-          pending > 0 ? 'bg-primary text-on-primary' : 'bg-surface text-muted'
-        }`}
-      >
-        {pending} pending
-      </span>
-    </div>
-  );
-}
-
-function Centered({ title, children }: { title: string; children?: ReactNode }) {
-  return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center px-6 text-center">
-      <h1 className="text-xl font-bold">{title}</h1>
-      {children}
-    </main>
   );
 }
