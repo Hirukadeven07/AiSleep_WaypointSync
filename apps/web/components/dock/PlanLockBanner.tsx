@@ -4,7 +4,7 @@ import type { PlanLock } from '@waypoint/contracts';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 
-/** L5: loading pauses until the loader accepts the dispatcher's new plan. */
+/** Plan-change lock: loading pauses until the loader accepts the dispatcher's new plan. */
 export function PlanLockBanner({
   lock,
   addedNames,
