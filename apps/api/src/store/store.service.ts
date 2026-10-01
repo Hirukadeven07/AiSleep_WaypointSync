@@ -246,8 +246,16 @@ export class StoreService {
     const lineResults = results.map(({ itemId: _i, chilled: _c, ...r }) => r);
     const warm = dto.chilledWasCold === false;
 
-    await this.prisma.$transaction([
-      this.prisma.storeReceipt.create({
+    await this.prisma.$transaction(async (tx) => {
+      // Claim the stop first: of two quick taps on "Confirm receipt", only one gets past here.
+      const claimed = await tx.tripStop.updateMany({
+        where: { id: stop.id, status: { in: ['arrived', 'waiting'] } },
+        data: { status: 'confirmed', storeConfirmedAt: now },
+      });
+      if (claimed.count === 0) {
+        throw new DomainError('RECEIPT_NOT_READY', 'These goods have already been checked.');
+      }
+      await tx.storeReceipt.create({
         data: {
           stopId: stop.id,
           lineResults,
@@ -256,9 +264,9 @@ export class StoreService {
           signedByUserId: me.id,
           signedAt: now,
         },
-      }),
+      });
       // Each problem line becomes a FieldFlag the driver accepts or disputes at acknowledgement.
-      this.prisma.fieldFlag.createMany({
+      await tx.fieldFlag.createMany({
         data: results
           .filter((r) => r.issue)
           .map((r) => ({
@@ -273,16 +281,12 @@ export class StoreService {
             reasonDetail: `${r.name}: ${r.receivedQty} of ${r.orderedQty} received`,
             severity: r.chilled && warm ? ('high' as const) : ('medium' as const),
           })),
-      }),
-      this.prisma.tripStop.update({
-        where: { id: stop.id },
-        data: { status: 'confirmed', storeConfirmedAt: now },
-      }),
-      this.prisma.order.update({
+      });
+      await tx.order.update({
         where: { id: stop.orderId },
         data: { status: partial ? 'partial' : 'delivered' },
-      }),
-    ]);
+      });
+    });
 
     // The trip's own driver; the vehicle's usual driver when the dispatcher assigned nobody.
     const driverId = stop.trip.assignedDriverId ?? stop.trip.vehicle.driverId;
