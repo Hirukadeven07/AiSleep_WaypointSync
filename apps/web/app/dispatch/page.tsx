@@ -1,7 +1,7 @@
 'use client';
 
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import { LiveDay } from '@/components/dispatch/LiveDay';
 
 export default function Page() {
-  return <PlaceholderPage title="Live day" />;
+  return <LiveDay />;
 }
