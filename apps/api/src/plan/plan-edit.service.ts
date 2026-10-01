@@ -54,12 +54,12 @@ export class PlanEditService {
     private readonly clock: ClockService,
   ) {}
 
-  private depotOf(me: Me): string {
+  depotOf(me: Me): string {
     if (!me.depotId) throw new ForbiddenException('This account has no depot');
     return me.depotId;
   }
 
-  private async loadOrder(me: Me, orderId: string): Promise<OrderRow> {
+  async loadOrder(me: Me, orderId: string): Promise<OrderRow> {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, store: { depotId: this.depotOf(me) } },
       include: orderInclude,
@@ -68,7 +68,7 @@ export class PlanEditService {
     return order;
   }
 
-  private async loadTrip(
+  async loadTrip(
     me: Me,
     tripId: string,
     db: Prisma.TransactionClient | PrismaService = this.prisma,
@@ -81,7 +81,7 @@ export class PlanEditService {
     return trip;
   }
 
-  private static assertEditable(trip: TripRow) {
+  static assertEditable(trip: TripRow) {
     if (trip.status !== 'planning') {
       throw new DomainError(
         'PLAN_LOCKED',
@@ -91,7 +91,7 @@ export class PlanEditService {
   }
 
   /** Work out what adding `order` to `trip` would do. Nothing is saved. */
-  private evaluate(order: OrderRow, trip: TripRow, lookup: Lookup) {
+  evaluate(order: OrderRow, trip: TripRow, lookup: Lookup) {
     const vehicle = toVehicle(trip.vehicle);
     const candidate = toStopView(order);
     const current = sortStopsByWindow(
@@ -222,12 +222,7 @@ export class PlanEditService {
   }
 
   /** Stops follow delivery windows, so every change re-sorts the trip and refreshes its planned minutes. */
-  private async resequence(
-    tx: Prisma.TransactionClient,
-    tripId: string,
-    lookup: Lookup,
-    depot: Depot,
-  ) {
+  async resequence(tx: Prisma.TransactionClient, tripId: string, lookup: Lookup, depot: Depot) {
     const stops = await tx.tripStop.findMany({
       where: { tripId },
       include: { order: { include: orderInclude } },
@@ -247,7 +242,7 @@ export class PlanEditService {
     });
   }
 
-  private async tripView(me: Me, tripId: string, lookup: Lookup, depot: Depot) {
+  async tripView(me: Me, tripId: string, lookup: Lookup, depot: Depot) {
     return this.plan.planTrip(await this.loadTrip(me, tripId), lookup, depot);
   }
 

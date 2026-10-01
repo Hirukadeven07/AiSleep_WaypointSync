@@ -1,9 +1,15 @@
 'use client';
 
+import type { AutoAssignProposal, PublishCheck } from '@waypoint/contracts';
+import { api } from '@/lib/api';
+import { AutoAssignModal } from './AutoAssignModal';
+import { DeferModal } from './DeferModal';
+import { NewTripModal } from './NewTripModal';
 import { OrderDrawer } from './OrderDrawer';
 import { OrderQueue } from './OrderQueue';
 import { PlanHeader, SummaryStrip } from './PlanHeader';
 import { PlanToast } from './PlanToast';
+import { PublishModal, publishPlan } from './PublishModal';
 import { TripList } from './TripList';
 import { usePlan } from './usePlan';
 import { usePlanEdit } from './usePlanEdit';
@@ -22,12 +28,42 @@ export function PlanBoard() {
   }
 
   const firstOver = plan.trips.find((t) => t.state === 'over');
+  const modal = edit.modal;
+
+  /** Publishing with nothing open goes straight through; otherwise the check explains what is open. */
+  async function publish() {
+    try {
+      const check = await api<PublishCheck>('/plan/publish/check', { method: 'POST', body: {} });
+      if (check.problems.length === 0) await publishPlan(edit, false);
+      else edit.openModal({ kind: 'publish', check });
+    } catch {
+      edit.showToast({ kind: 'error', title: 'The plan could not be checked', sub: 'Try again.' });
+    }
+  }
+
+  async function autoAssign() {
+    try {
+      const proposal = await api<AutoAssignProposal>('/plan/auto-assign', {
+        method: 'POST',
+        body: {},
+      });
+      edit.openModal({ kind: 'auto', proposal });
+    } catch {
+      edit.showToast({ kind: 'error', title: 'Auto-assign is not available', sub: 'Try again.' });
+    }
+  }
 
   return (
     <div className="flex flex-col gap-[14px] pt-4 lg:-mb-2">
-      <PlanHeader plan={plan} />
+      <PlanHeader
+        plan={plan}
+        onAutoAssign={autoAssign}
+        onNewTrip={() => edit.openModal({ kind: 'newTrip' })}
+        onPublish={publish}
+      />
       <SummaryStrip
         summary={plan.summary}
+        published={plan.published}
         onView={() => firstOver && edit.focusTrip(firstOver.id)}
       />
       <div className="flex flex-col gap-4 lg:h-[calc(100vh-214px)] lg:min-h-[520px] lg:flex-row">
@@ -45,12 +81,17 @@ export function PlanBoard() {
         <OrderDrawer
           orderId={edit.drawerId}
           onClose={edit.closeDrawer}
+          onMoveLater={() => edit.openModal({ kind: 'defer', orderId: edit.drawerId! })}
           onAdd={(detail, tripId) => {
             edit.closeDrawer();
             void edit.place(detail.order.id, detail.order.storeName, tripId);
           }}
         />
       )}
+      {modal?.kind === 'defer' && <DeferModal orderId={modal.orderId} edit={edit} />}
+      {modal?.kind === 'newTrip' && <NewTripModal edit={edit} />}
+      {modal?.kind === 'publish' && <PublishModal check={modal.check} edit={edit} />}
+      {modal?.kind === 'auto' && <AutoAssignModal proposal={modal.proposal} edit={edit} />}
       {edit.toast && <PlanToast toast={edit.toast} />}
     </div>
   );

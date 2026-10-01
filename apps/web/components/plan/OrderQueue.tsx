@@ -84,7 +84,7 @@ function OrderRow({ order, edit }: { order: PlanOrder; edit: PlanEdit }) {
   );
 }
 
-function MovedCard({ order }: { order: PlanOrder }) {
+function MovedCard({ order, edit }: { order: PlanOrder; edit: PlanEdit }) {
   return (
     <div className="flex shrink-0 flex-col gap-[6px] rounded-input bg-wash p-3">
       <div className="flex items-center gap-[6px]">
@@ -96,12 +96,19 @@ function MovedCard({ order }: { order: PlanOrder }) {
       {order.deferReason && (
         <p className="text-[12px] leading-[17px] text-muted">{order.deferReason}</p>
       )}
-      {order.deferredTo && (
-        <p className="flex items-center gap-2 text-[12px] font-semibold leading-[17px] text-warning">
-          <Icon name="clock" size={13} />
-          {dayLabel(order.deferredTo)}
+      <div className="flex items-center gap-2 text-[12px] leading-[17px]">
+        <Icon name="clock" size={13} className="text-warning" />
+        <p className="font-semibold text-warning">
+          {order.deferredTo ? `${dayLabel(order.deferredTo)} · store notified` : 'store notified'}
         </p>
-      )}
+        <button
+          type="button"
+          onClick={() => edit.bringBack(order.id, order.storeName)}
+          className="ml-2 font-bold text-slate"
+        >
+          Bring back
+        </button>
+      </div>
     </div>
   );
 }
@@ -200,7 +207,7 @@ export function OrderQueue({
             These orders could not fit tomorrow. Each store has been told why and when to expect it.
           </p>
           {moved.map((o) => (
-            <MovedCard key={o.id} order={o} />
+            <MovedCard key={o.id} order={o} edit={edit} />
           ))}
         </>
       ) : (

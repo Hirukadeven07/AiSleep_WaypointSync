@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Icon } from '@/components/ui/Icon';
 import type { ToastState } from './usePlanEdit';
 
@@ -29,6 +30,14 @@ export function PlanToast({ toast }: { toast: ToastState }) {
           </span>
         )}
       </span>
+      {toast.action && (
+        <Link
+          href={toast.action.href}
+          className="shrink-0 rounded-pill border border-border bg-surface px-3 py-[6px] text-[12px] font-semibold leading-[17px] text-ink"
+        >
+          {toast.action.label}
+        </Link>
+      )}
     </div>
   );
 }

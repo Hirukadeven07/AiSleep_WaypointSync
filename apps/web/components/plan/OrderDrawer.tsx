@@ -42,9 +42,12 @@ export function OrderDrawer({
   orderId,
   onClose,
   onAdd,
+  onMoveLater,
 }: {
   orderId: string;
   onClose: () => void;
+  /** Opens the Move to later dialog for this order. */
+  onMoveLater: () => void;
   /** Adds the order to a trip; the drawer closes when it is done. */
   onAdd: (detail: PlanOrderDetail, tripId: string) => void;
 }) {
@@ -192,7 +195,7 @@ export function OrderDrawer({
             <span className="min-h-px flex-1" />
             <button
               type="button"
-              disabled
+              onClick={onMoveLater}
               className="flex shrink-0 items-center justify-center rounded-pill border border-border bg-surface px-[18px] py-3 text-[14px] font-semibold leading-5 text-ink"
             >
               Move to later
