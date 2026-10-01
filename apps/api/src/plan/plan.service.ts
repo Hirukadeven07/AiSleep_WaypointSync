@@ -1,8 +1,227 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  ORDER_CUTOFF_MIN,
+  type Me,
+  type PlanDay,
+  type PlanOrder,
+  type PlanSummary,
+  type PlanTrip,
+  type PlanTripState,
+} from '@waypoint/contracts';
+import {
+  TIME_BUDGET_MIN,
+  capacitySummary,
+  computeTripMinutes,
+  evaluatePublish,
+  measureCapacity,
+  type Depot,
+  type Lookup,
+} from '@waypoint/domain';
+import type { Vehicle as VehicleRow } from '@prisma/client';
+import { ClockService } from '../common/clock/clock.service';
+import { PrismaService } from '../common/prisma/prisma.service';
+import {
+  orderInclude,
+  toLookup,
+  toOrder,
+  toOutlet,
+  toStopView,
+  toVehicle,
+  tripInclude,
+  type OrderRow,
+  type TripRow,
+} from './plan.mapper';
+
+/** Booklet departures: the Fresh run leaves at 03:30, the other brands at 08:00. */
+const DEPART_MIN = { Fresh: 3 * 60 + 30, Style: 8 * 60, Tech: 8 * 60 } as const;
+
+const dateOnly = (iso: string) => new Date(`${iso}T00:00:00Z`);
+const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+const round1 = (n: number) => Math.round(n * 10) / 10;
+const byWindow = (a: PlanOrder, b: PlanOrder) =>
+  a.windowOpenMin - b.windowOpenMin || a.storeName.localeCompare(b.storeName);
+
+function addDays(iso: string, days: number): string {
+  const d = dateOnly(iso);
+  d.setUTCDate(d.getUTCDate() + days);
+  return isoDate(d);
+}
 
 @Injectable()
 export class PlanService {
-  placeholder() {
-    return { todo: 'plan' };
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly clock: ClockService,
+  ) {}
+
+  /** The plan board for one service day (tomorrow unless a date is given). */
+  async day(me: Me, dateParam?: string): Promise<PlanDay> {
+    if (dateParam !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      throw new BadRequestException('date must be YYYY-MM-DD');
+    }
+    if (!me.depotId) throw new ForbiddenException('This account has no depot');
+    const depotId = me.depotId;
+    const date = dateParam ?? addDays(this.clock.today(), 1);
+    const day = dateOnly(date);
+
+    const [waitingRows, deferredRows, tripRows, vehicles, districts, allowances] =
+      await Promise.all([
+        this.prisma.order.findMany({
+          where: { deliveryDate: day, status: 'waiting', stop: null, store: { depotId } },
+          include: orderInclude,
+        }),
+        this.prisma.order.findMany({
+          where: { movedFromDate: day, status: 'deferred', store: { depotId } },
+          include: orderInclude,
+        }),
+        this.prisma.trip.findMany({
+          where: { serviceDate: day, depotId },
+          include: tripInclude,
+          orderBy: [{ vehicleId: 'asc' }, { tripNumber: 'asc' }],
+        }),
+        this.prisma.vehicle.findMany({ where: { depotId } }),
+        this.prisma.district.findMany(),
+        this.prisma.serviceAllowance.findMany(),
+      ]);
+
+    const lookup = toLookup(districts, allowances);
+    const today = this.clock.today();
+    const orders = waitingRows.map((r) => this.planOrder(r, today)).sort(byWindow);
+    const movedToLater = deferredRows.map((r) => this.planOrder(r, today)).sort(byWindow);
+    const trips = tripRows.map((t) => this.planTrip(t, lookup, depotId as Depot));
+
+    return {
+      date,
+      depotId,
+      cutoffMin: ORDER_CUTOFF_MIN,
+      orders,
+      movedToLater,
+      trips,
+      districts: [...new Set(orders.map((o) => o.district))].sort(),
+      summary: this.summary(waitingRows, tripRows, trips, vehicles, orders, movedToLater),
+    };
+  }
+
+  private planOrder(row: OrderRow, today: string): PlanOrder {
+    const deferred = row.status === 'deferred';
+    return {
+      id: row.id,
+      storeId: row.storeId,
+      storeName: row.store.displayName ?? row.store.id,
+      brand: row.brand,
+      district: row.store.district.name,
+      windowOpenMin: row.store.windowOpenMin,
+      windowCloseMin: row.store.windowCloseMin,
+      weightKg: row.weightKg,
+      volumeM3: row.volumeM3,
+      units: row.units,
+      chilled: row.temp === 'chilled',
+      movedCount: row.repeatSkip ? 2 : row.movedFromDate && !deferred ? 1 : 0,
+      waitingSinceYesterday: isoDate(row.createdAt) < today,
+      status: deferred ? 'deferred' : 'waiting',
+      deferredTo: deferred ? isoDate(row.deliveryDate) : null,
+      deferReason: row.deferReason,
+    };
+  }
+
+  private planTrip(row: TripRow, lookup: Lookup, depot: Depot): PlanTrip {
+    const vehicle = toVehicle(row.vehicle);
+    const stopViews = row.stops.map((s) => toStopView(s.order));
+    const capacity = measureCapacity(
+      vehicle,
+      stopViews.map((s) => s.order),
+    );
+    const minutes = computeTripMinutes(stopViews, lookup, depot) ?? row.plannedMinutes;
+
+    let state: PlanTripState;
+    if (row.status !== 'planning') {
+      state = 'sent';
+    } else if (capacity.overWeight || capacity.overVolume) {
+      state = 'over';
+    } else {
+      // Fuel is judged per week, which the board does not total yet, so it does not make a trip a draft.
+      const check = evaluatePublish({
+        vehicle,
+        stops: stopViews,
+        lookup,
+        departAtMin: DEPART_MIN[row.brand],
+        otherLitresThisWeek: 0,
+      });
+      const issues = [...check.blocks, ...check.warnings].filter((i) => i.code !== 'FUEL_QUOTA');
+      state = stopViews.length === 0 || issues.length > 0 ? 'draft' : 'ready';
+    }
+
+    return {
+      id: row.id,
+      vehicleId: row.vehicleId,
+      plate: row.vehicle.plate,
+      vehicleType: row.vehicle.type,
+      vehicleTemp: row.vehicle.temp,
+      brand: row.brand,
+      district: row.district.name,
+      tripNumber: row.tripNumber,
+      status: row.status,
+      state,
+      overWeight: capacity.overWeight,
+      overVolume: capacity.overVolume,
+      weightKg: capacity.usedWeightKg,
+      weightCapKg: capacity.weightCapKg,
+      volumeM3: round1(capacity.usedVolumeM3),
+      volumeCapM3: capacity.volumeCapM3,
+      minutes,
+      budgetMin: TIME_BUDGET_MIN[row.brand],
+      stops: row.stops.map((s) => ({
+        id: s.id,
+        orderId: s.orderId,
+        sequence: s.sequence,
+        storeName: s.order.store.displayName ?? s.order.store.id,
+        windowOpenMin: s.order.store.windowOpenMin,
+        windowCloseMin: s.order.store.windowCloseMin,
+        weightKg: s.order.weightKg,
+      })),
+    };
+  }
+
+  private summary(
+    waitingRows: OrderRow[],
+    tripRows: TripRow[],
+    trips: PlanTrip[],
+    vehicles: VehicleRow[],
+    orders: PlanOrder[],
+    movedToLater: PlanOrder[],
+  ): PlanSummary {
+    const busy = new Set(tripRows.map((t) => t.vehicleId));
+    const available = vehicles.filter((v) => v.status === 'available');
+
+    // Capacity used = planned weight against the vehicles that have a trip.
+    const plannedKg = trips.reduce((sum, t) => sum + t.weightKg, 0);
+    const tripVehicles = new Map(trips.map((t) => [t.vehicleId, t.weightCapKg]));
+    const capKg = [...tripVehicles.values()].reduce((a, b) => a + b, 0);
+
+    const over = trips.filter((t) => t.overWeight || t.overVolume);
+    const overVolume = over.some((t) => t.overVolume);
+    const overWeight = over.some((t) => t.overWeight);
+
+    // The day's demand is every order for the date, planned or still waiting.
+    const demand = [...waitingRows, ...tripRows.flatMap((t) => t.stops.map((s) => s.order))];
+    const limit = capacitySummary(
+      demand.map(toOrder),
+      demand.map((o) => toOutlet(o.store)),
+      available.map(toVehicle),
+    );
+
+    return {
+      vehiclesFree: available.filter((v) => !busy.has(v.id)).length,
+      vehiclesTotal: vehicles.length,
+      capacityUsedPct: capKg > 0 ? Math.round((plannedKg / capKg) * 100) : 0,
+      overCount: over.length,
+      overWhat:
+        overVolume && overWeight ? 'both' : overVolume ? 'volume' : overWeight ? 'weight' : null,
+      waitingCount: orders.length,
+      waitingSinceYesterday: orders.filter((o) => o.waitingSinceYesterday).length,
+      movedToLaterCount: movedToLater.length,
+      limitingResource: limit.limitingResource,
+      overbooked: limit.overbooked,
+    };
   }
 }
