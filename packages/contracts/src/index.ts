@@ -5,3 +5,5 @@ export * from './trip';
 export * from './driver-event';
 export * from './publish';
 export * from './auth';
+export * from './dock';
+export * from './store';
