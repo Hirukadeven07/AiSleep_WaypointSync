@@ -13,8 +13,11 @@ import {
   type TripSummary,
 } from '@/lib/driver-cache';
 import { usePendingCount } from '@/lib/use-pending-count';
-import { PhoneTabBar, type PhoneTab } from '@/components/shell/PhoneTabBar';
+import { DriverSidebar } from '@/components/shell/DriverSidebar';
+import { PhoneColumn } from '@/components/shell/PhoneColumn';
+import { PhoneTabBar } from '@/components/shell/PhoneTabBar';
 import { PhoneTopRow } from '@/components/shell/PhoneTopRow';
+import { DRIVER_TABS } from '@/components/shell/driverTabs';
 import { SosControl } from './SosControl';
 import { ToastProvider } from './DriverToast';
 
@@ -28,14 +31,6 @@ interface DriverContextValue {
   cachedAt: string | null;
   refresh: () => Promise<void>;
 }
-
-const TABS: PhoneTab[] = [
-  { href: '/drive', label: 'Home', icon: 'home', exact: true },
-  { href: '/drive/stops', label: 'Stops', icon: 'route' },
-  { href: '/drive/report', label: 'Report', icon: 'plus', fab: true },
-  { href: '/drive/break', label: 'Break', icon: 'coffee' },
-  { href: '/drive/vehicle', label: 'Vehicle', icon: 'truck' },
-];
 
 const DriverContext = createContext<DriverContextValue | null>(null);
 
@@ -92,7 +87,7 @@ function ShellInner({ children }: { children: ReactNode }) {
         clearCachedShell();
         setMe(null);
         setDay(null);
-        router.replace('/drive/login');
+        router.replace('/login/driver');
         return;
       }
       // Network trouble: keep whatever is on screen
@@ -158,7 +153,7 @@ function ShellInner({ children }: { children: ReactNode }) {
   if (phase === 'no-access') {
     return (
       <Centered title="This account isn't a driver account">
-        <Link href="/drive/login" className="mt-4 inline-flex h-12 items-center rounded-xl bg-black px-5 text-base font-semibold text-white">
+        <Link href="/login/driver" className="mt-4 inline-flex h-12 items-center rounded-xl bg-black px-5 text-base font-semibold text-white">
           Sign in as a driver
         </Link>
       </Centered>
@@ -177,14 +172,24 @@ function ShellInner({ children }: { children: ReactNode }) {
 
   return (
     <DriverContext.Provider value={value}>
-      <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col">
-        <div className="flex items-center justify-between pr-5 pt-[env(safe-area-inset-top)]">
-          {me && <PhoneTopRow me={me} />}
-          <SyncStatus online={online} />
-        </div>
-        <main className="flex-1 px-5 pb-[130px] pt-2">{children}</main>
+      {/* Phone column with a tab bar below 1024px; sidebar layout from 1024px (Figma desktop frames). */}
+      <div className="lg:flex lg:min-h-dvh">
+        {me && <DriverSidebar me={me} />}
+        <PhoneColumn className="lg:relative lg:mx-0 lg:min-w-0 lg:max-w-none lg:flex-1">
+          <div className="flex items-center justify-between pr-5 pt-[env(safe-area-inset-top)] lg:absolute lg:right-44 lg:top-11 lg:z-10 lg:p-0">
+            {me && (
+              <div className="lg:hidden">
+                <PhoneTopRow me={me} />
+              </div>
+            )}
+            <SyncStatus online={online} />
+          </div>
+          <main className="flex-1 px-5 pb-[130px] pt-2 lg:px-10 lg:py-8">{children}</main>
+        </PhoneColumn>
         <SosControl />
-        <PhoneTabBar tabs={TABS} />
+        <div className="lg:hidden">
+          <PhoneTabBar tabs={DRIVER_TABS} />
+        </div>
       </div>
     </DriverContext.Provider>
   );
