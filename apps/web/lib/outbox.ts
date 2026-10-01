@@ -9,6 +9,7 @@
  * use getPendingActions() -> toSyncEvent() -> markActionSynced().
  */
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import type { DriverEventType } from '@waypoint/contracts';
 import { readCachedMe, type EntityId } from './driver-cache';
 
 export const OUTBOX_DB_NAME = 'waypoint_driver_db';
@@ -17,12 +18,8 @@ const STORE = 'outbox' as const;
 const CHANGE_EVENT = 'waypoint:outbox-changed';
 const CHANNEL_NAME = 'waypoint_driver_outbox';
 
-export type DriverEventType =
-  | 'ARRIVED'
-  | 'WAITING'
-  | 'ACKNOWLEDGEMENT'
-  | 'ROAD_ISSUE'
-  | 'SOS_ALERT';
+// Shared with the API so the outbox can never queue a type the server rejects.
+export type { DriverEventType } from '@waypoint/contracts';
 
 export type OutboxStatus = 'PENDING' | 'SYNCED';
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Reason } from '../src/reasons';
 import { canAddStop, evaluateDrop, evaluateNewTrip } from '../src/rules/index';
+import type { Lookup } from '../src/types';
 import { lookup, stop, vehicle } from './helpers';
 
 const truck = vehicle();
@@ -15,11 +16,13 @@ describe('hard rules — refuse the drop', () => {
     expect(canAddStop({ vehicle: truck, currentStops: current, candidate, lookup })).toBe(false);
   });
 
-  it('locks district to the first stop', () => {
+  it('warns, and still allows, a stop from another district', () => {
     const current = [stop({ id: 'OUT-C', brand: 'Fresh', district: 'Colombo' })];
     const candidate = stop({ id: 'OUT-G', brand: 'Fresh', district: 'Gampaha' }, { id: 'ORD-G' });
     const issues = evaluateDrop({ vehicle: truck, currentStops: current, candidate, lookup });
-    expect(issues.map((issue) => issue.code)).toContain(Reason.DISTRICT_MISMATCH);
+    const district = issues.find((issue) => issue.code === Reason.DISTRICT_MISMATCH);
+    expect(district?.severity).toBe('warn');
+    expect(canAddStop({ vehicle: truck, currentStops: current, candidate, lookup })).toBe(true);
   });
 
   it('allows a second Fresh Colombo stop on a Fresh Colombo trip', () => {
@@ -49,8 +52,11 @@ describe('hard rules — refuse the drop', () => {
     expect(canAddStop({ vehicle: truck, currentStops: empty, candidate, lookup })).toBe(true);
   });
 
-  it('allows ambient cargo on a reefer', () => {
+  it('warns when ambient cargo is placed on a reefer', () => {
     const candidate = stop({ id: 'OUT-AM' }, { id: 'ORD-AM', chilled: false });
+    const issues = evaluateDrop({ vehicle: truck, currentStops: empty, candidate, lookup });
+    const ambient = issues.find((issue) => issue.code === Reason.AMBIENT_ON_REEFER);
+    expect(ambient?.severity).toBe('warn');
     expect(canAddStop({ vehicle: truck, currentStops: empty, candidate, lookup })).toBe(true);
   });
 
@@ -92,7 +98,38 @@ describe('hard rules — refuse the drop', () => {
       { id: 'ORD-T10' },
     );
     const issues = evaluateDrop({ vehicle: truck, currentStops: current, candidate, lookup });
-    expect(issues.map((issue) => issue.code)).toContain(Reason.TIME_BUDGET);
+    expect(issues.find((issue) => issue.code === Reason.TIME_BUDGET)?.severity).toBe('block');
+  });
+
+  it('warns when the Fresh budget is over by 5 minutes and blocks at 6', () => {
+    const budgetLookup = (allowanceMin: number): Lookup => ({
+      travel: [
+        {
+          district: 'Colombo',
+          depot: 'Peliyagoda',
+          depotToDistrictKm: 1,
+          depotToDistrictFreeflowMin: 270,
+          interStopKm: 1,
+          interStopFreeflowMin: 0,
+        },
+      ],
+      allowances: [{ brand: 'Fresh', dockType: 'street', minutes: allowanceMin }],
+    });
+    const candidate = stop({ id: 'OUT-TIME', brand: 'Fresh', district: 'Colombo', dockType: 'street' });
+    const warn = evaluateDrop({
+      vehicle: truck,
+      currentStops: empty,
+      candidate,
+      lookup: budgetLookup(5),
+    }).find((issue) => issue.code === Reason.TIME_BUDGET);
+    const block = evaluateDrop({
+      vehicle: truck,
+      currentStops: empty,
+      candidate,
+      lookup: budgetLookup(6),
+    }).find((issue) => issue.code === Reason.TIME_BUDGET);
+    expect(warn?.severity).toBe('warn');
+    expect(block?.severity).toBe('block');
   });
 });
 

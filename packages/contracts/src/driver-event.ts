@@ -2,9 +2,9 @@
 export const DRIVER_EVENT_TYPES = [
   'SOS_ALERT',
   'ARRIVED',
-  'WAITING',
   'ACKNOWLEDGEMENT',
   'ROAD_ISSUE',
+  'FUEL_READING',
 ] as const;
 
 export type DriverEventType = (typeof DRIVER_EVENT_TYPES)[number];
@@ -19,7 +19,6 @@ export type SyncRejectReason =
   | 'NO_VEHICLE'
   | 'INVALID_PAYLOAD';
 
-/** One phone action in POST /api/sync. tripId is null for SOS with no active trip. */
 export interface DriverEventInput {
   clientId: string;
   driverId: string;

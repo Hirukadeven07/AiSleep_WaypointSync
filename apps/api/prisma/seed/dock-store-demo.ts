@@ -7,6 +7,7 @@
  */
 import type { Brand, PrismaClient, Store } from '@prisma/client';
 import { buildLines } from '../../src/store/catalogue';
+import { seedCatalogue } from './team-erd';
 
 const DEPOT = 'Peliyagoda';
 
@@ -88,6 +89,8 @@ async function createOrder(
 }
 
 export async function seedDockStoreDemo(prisma: PrismaClient) {
+  // Order lines carry itemId, so the Item rows must exist before any demo order.
+  await seedCatalogue(prisma);
   const today = colomboDate();
   const tomorrow = colomboDate(1);
 

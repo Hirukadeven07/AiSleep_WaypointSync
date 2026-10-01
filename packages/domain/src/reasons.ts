@@ -10,6 +10,8 @@ export const Reason = {
   DISTRICT_MISMATCH: 'DISTRICT_MISMATCH',
   WRONG_DEPOT: 'WRONG_DEPOT',
   CHILLED_NEEDS_REEFER: 'CHILLED_NEEDS_REEFER',
+  /** Warning only. Double cast until Yohan adds this code to @waypoint/contracts. */
+  AMBIENT_ON_REEFER: 'AMBIENT_ON_REEFER' as unknown as ReasonCode,
   VAN_ONLY: 'VAN_ONLY',
   MAX_TRIPS: 'MAX_TRIPS',
   TIME_BUDGET: 'TIME_BUDGET',

@@ -102,6 +102,7 @@ _None yet._
 - [Data model](docs/data-model.md)
 - [AI disclosure](docs/ai-disclosure.md)
 - [Screen map](docs/screen-map.md)
+- [VM deployment runbook](docs/deploy-vm.md)
 
 ## Setup notes
 
