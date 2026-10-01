@@ -19,9 +19,12 @@ import { PlanLockBanner } from '@/components/dock/PlanLockBanner';
 
 const FLAG_LABEL = { missing: 'Missing', damaged: 'Damaged', wrong_quantity: 'Wrong qty' } as const;
 
-/** Ticks live on the shared dock tablet so a refresh keeps progress. Keyed by plan version. */
-function useTicks(tripId: string, planVersion: number | undefined) {
-  const key = planVersion ? `dock:ticks:${tripId}:v${planVersion}` : null;
+/**
+ * Ticks live on the shared dock tablet so a refresh keeps progress. Keyed by trip, not plan version:
+ * a plan change keeps the ticks of lines still on the truck, and lines taken off are not counted.
+ */
+function useTicks(tripId: string, ready: boolean) {
+  const key = ready ? `dock:ticks:${tripId}` : null;
   const [ticks, setTicks] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -65,7 +68,7 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
 
   // A mutation response is newer than the last poll until the next poll lands.
   useEffect(() => setSheet(data), [data]);
-  const { ticks, toggle } = useTicks(tripId, sheet?.planVersion);
+  const { ticks, toggle } = useTicks(tripId, !!sheet);
 
   const run = useCallback(
     async (action: () => Promise<LoadSheet | void>, success?: string) => {
