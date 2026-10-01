@@ -94,7 +94,7 @@ _To be written._
 
 ## Departures from the Designathon design
 
-_None yet._
+- **Sync Dock sign-in (L1):** the design has a shared dock password on the keypad. The screen sends the code, but the API signs a loader in by loader ID and depot only, so any code (or none) works. Kept this way so judges can sign in as `sampath` without a code.
 
 ## Docs
 
