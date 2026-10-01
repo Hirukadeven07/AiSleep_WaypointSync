@@ -196,6 +196,7 @@ model User {
   sessions      Session[]
   vehicle       Vehicle?
   notifications Notification[]
+  events        DriverEvent[]
 }
 
 model Session {
@@ -207,23 +208,24 @@ model Session {
 }
 
 model Vehicle {
-  id                 String        @id
-  plate              String?       @unique
-  depotId            String
-  depot              Depot         @relation(fields: [depotId], references: [id])
-  type               VehicleType
-  temp               VehicleTemp
-  weightCapKg        Float
-  volumeCapM3        Float
-  fuelType           String?
-  kmPerL             Float?
-  weeklyFuelQuotaL   Float?
-  status             VehicleStatus @default(available)
-  outOfServiceReason String?
-  returnDate         DateTime?     @db.Date
-  driverId           String?       @unique
-  driver             User?         @relation(fields: [driverId], references: [id])
-  trips              Trip[]
+  id                  String        @id
+  plate               String?       @unique
+  depotId             String
+  depot               Depot         @relation(fields: [depotId], references: [id])
+  type                VehicleType
+  temp                VehicleTemp
+  weightCapKg         Float
+  volumeCapM3         Float
+  fuelType            String?
+  kmPerL              Float?
+  weeklyFuelQuotaL    Float?
+  status              VehicleStatus @default(available)
+  outOfServiceReason  String?
+  returnDate          DateTime?     @db.Date
+  lastConfirmedLitres Float?
+  driverId            String?       @unique
+  driver              User?         @relation(fields: [driverId], references: [id])
+  trips               Trip[]
 }
 
 model Order {
@@ -265,25 +267,26 @@ model OrderLine {
 }
 
 model Trip {
-  id             String        @id @default(cuid())
-  vehicleId      String
-  vehicle        Vehicle       @relation(fields: [vehicleId], references: [id])
-  depotId        String
-  depot          Depot         @relation(fields: [depotId], references: [id])
-  brand          Brand
-  districtId     String
-  district       District      @relation(fields: [districtId], references: [id])
-  serviceDate    DateTime      @db.Date
-  tripNumber     Int
-  status         TripStatus    @default(planning)
-  planVersion    Int           @default(1)
-  plannedMinutes Int?
-  plannedLitres  Float?
-  publishedAt    DateTime?
-  stops          TripStop[]
-  loadSession    LoadSession?
-  events         DriverEvent[]
-  incidents      Incident[]
+  id               String        @id @default(cuid())
+  vehicleId        String
+  vehicle          Vehicle       @relation(fields: [vehicleId], references: [id])
+  depotId          String
+  depot            Depot         @relation(fields: [depotId], references: [id])
+  brand            Brand
+  districtId       String
+  district         District      @relation(fields: [districtId], references: [id])
+  serviceDate      DateTime      @db.Date
+  tripNumber       Int
+  status           TripStatus    @default(planning)
+  planVersion      Int           @default(1)
+  plannedMinutes   Int?
+  plannedLitres    Float?
+  fuelLitresAtEnd  Float?
+  publishedAt      DateTime?
+  stops            TripStop[]
+  loadSession      LoadSession?
+  events           DriverEvent[]
+  incidents        Incident[]
 
   @@unique([vehicleId, serviceDate, tripNumber])
   @@index([depotId, serviceDate])
@@ -348,13 +351,16 @@ model DriverEvent {
   id               String    @id @default(cuid())
   clientId         String    @unique
   driverId         String
-  tripId           String
-  trip             Trip      @relation(fields: [tripId], references: [id])
+  driver           User      @relation(fields: [driverId], references: [id])
+  tripId           String?
+  trip             Trip?     @relation(fields: [tripId], references: [id])
   type             String
   payload          Json
   createdOnPhoneAt DateTime
-  seenPlanVersion  Int
-  appliedAt        DateTime?
+  seenPlanVersion  Int?
+  appliedAt        DateTime  @default(now())
+
+  @@index([driverId, type, appliedAt])
 }
 
 model Incident {
