@@ -28,6 +28,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { DEPART_MIN, PlanService } from './plan.service';
 import {
+  isAtDepot,
   orderInclude,
   toOutlet,
   toStopView,
@@ -82,10 +83,10 @@ export class PlanEditService {
   }
 
   static assertEditable(trip: TripRow) {
-    if (trip.status !== 'planning') {
+    if (!isAtDepot(trip.status)) {
       throw new DomainError(
         'PLAN_LOCKED',
-        `Trip ${trip.id} is already published and can no longer be changed.`,
+        `Trip ${trip.id} has left the depot and can no longer be changed.`,
       );
     }
   }
@@ -109,13 +110,15 @@ export class PlanEditService {
     }
 
     const sorted = sortStopsByWindow([...current, candidate]);
-    const capacity = capacityIssues(vehicle, sorted, false);
+    // A sent plan must stay inside capacity, so on a sent trip being over blocks the drop.
+    const capacity = capacityIssues(vehicle, sorted, trip.status !== 'planning');
     const measured = measureCapacity(
       vehicle,
       sorted.map((s) => s.order),
     );
-    const blocks = issues.filter((i) => i.severity === 'block');
-    const warnings = [...issues.filter((i) => i.severity === 'warn'), ...capacity];
+    const all = [...issues, ...capacity];
+    const blocks = all.filter((i) => i.severity === 'block');
+    const warnings = all.filter((i) => i.severity === 'warn');
 
     return {
       current,
@@ -221,7 +224,10 @@ export class PlanEditService {
     };
   }
 
-  /** Stops follow delivery windows, so every change re-sorts the trip and refreshes its planned minutes. */
+  /**
+   * Stops follow delivery windows, so every change re-sorts the trip and refreshes its planned minutes.
+   * A change to a sent trip also raises its plan version, which pauses the dock until the loader accepts it.
+   */
   async resequence(tx: Prisma.TransactionClient, tripId: string, lookup: Lookup, depot: Depot) {
     const stops = await tx.tripStop.findMany({
       where: { tripId },
@@ -236,9 +242,16 @@ export class PlanEditService {
     for (const [i, view] of sorted.entries()) {
       await tx.tripStop.update({ where: { id: views.get(view)! }, data: { sequence: i + 1 } });
     }
+    const trip = await tx.trip.findUniqueOrThrow({
+      where: { id: tripId },
+      select: { status: true },
+    });
     await tx.trip.update({
       where: { id: tripId },
-      data: { plannedMinutes: computeTripMinutes(sorted, lookup, depot) },
+      data: {
+        plannedMinutes: computeTripMinutes(sorted, lookup, depot),
+        ...(trip.status !== 'planning' && { planVersion: { increment: 1 } }),
+      },
     });
   }
 

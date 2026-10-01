@@ -199,7 +199,7 @@ function TripRow({
   const hover = edit.hover?.tripId === trip.id ? edit.hover : null;
   const check = hover?.check ?? null;
   const preview = check?.after;
-  const droppable = edit.drag !== null && trip.state !== 'sent';
+  const droppable = edit.drag !== null && trip.editable;
   const chip = stateChip(trip);
   const over = trip.state === 'over';
   const refused = check ? !check.canDrop : false;
@@ -309,7 +309,7 @@ function TripRow({
           {trip.stops.map((s) => (
             <div
               key={s.id}
-              draggable={trip.state !== 'sent'}
+              draggable={trip.editable}
               onDragStart={(e) => {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', s.orderId);
@@ -318,7 +318,7 @@ function TripRow({
               }}
               onDragEnd={edit.endDrag}
               className={`flex items-center gap-[10px] rounded-[10px] bg-surface px-[10px] py-[7px] ${
-                trip.state !== 'sent' ? 'cursor-grab' : ''
+                trip.editable ? 'cursor-grab' : ''
               }`}
             >
               <span

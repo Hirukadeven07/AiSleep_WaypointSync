@@ -122,7 +122,11 @@ describe('plan edits (e2e)', () => {
     ids.f3 = (await order('PE-F3', 'Fresh', true, 3000, 'waiting')).id;
     ids.s1 = (await order('PE-S1', 'Style', false, 100, 'waiting')).id;
 
-    const trip = (vehicleId: string, tripNumber: number, status: 'planning' | 'published') =>
+    const trip = (
+      vehicleId: string,
+      tripNumber: number,
+      status: 'planning' | 'published' | 'on_road',
+    ) =>
       prisma.trip.create({
         data: {
           vehicleId,
@@ -136,7 +140,7 @@ describe('plan edits (e2e)', () => {
       });
     ids.reeferTrip = (await trip('PE-REEFER', 1, 'planning')).id;
     ids.ambTrip = (await trip('PE-AMB', 1, 'planning')).id;
-    ids.lockedTrip = (await trip('PE-REEFER', 2, 'published')).id;
+    ids.lockedTrip = (await trip('PE-REEFER', 2, 'on_road')).id;
     await prisma.tripStop.create({
       data: { tripId: ids.reeferTrip, orderId: ids.f1, sequence: 1 },
     });
@@ -240,7 +244,7 @@ describe('plan edits (e2e)', () => {
     );
   });
 
-  it('will not change a published trip', async () => {
+  it('will not change a trip that has left the depot', async () => {
     const agent = await dispatcher();
     const res = await agent
       .post('/api/plan/assign')

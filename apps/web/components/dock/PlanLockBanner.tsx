@@ -36,7 +36,7 @@ export function PlanLockBanner({
         <ul className="space-y-xs">
           {lock.removed.map((r) => (
             <li
-              key={r.stopId}
+              key={r.orderId}
               className="flex items-center gap-sm rounded-input bg-danger-tint px-md py-sm text-body text-danger"
             >
               <span className="font-bold">−</span>

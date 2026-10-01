@@ -217,9 +217,26 @@ describe('loader dock and store (e2e)', () => {
         .expect(200);
       expect(flagged.body.loadOrder[0].flags).toHaveLength(1);
 
-      await prisma.trip.update({ where: { id: ids.loadTrip }, data: { planVersion: 2 } });
+      // The dispatcher takes E2E-A off the trip mid-load; the dock pauses and shows it in red.
+      const dispatcher = await login({ role: 'dispatcher', loginId: 'nimal', secret: 'waypoint' });
+      const removedOrder = sheet.loadOrder.find(
+        (s: { storeName: string }) => s.storeName === 'E2E-A',
+      );
+      const stopRow = await prisma.tripStop.findUniqueOrThrow({
+        where: { id: removedOrder.stopId },
+      });
+      await dispatcher.post('/api/plan/unassign').send({ orderId: stopRow.orderId }).expect(200);
       const locked = (await loader.get(`/api/loads/${ids.loadTrip}`).expect(200)).body;
-      expect(locked.lock.locked).toBe(true);
+      expect(locked.planVersion).toBe(2);
+      expect(locked.lock).toMatchObject({
+        locked: true,
+        removed: [{ orderId: stopRow.orderId, storeName: 'E2E-A' }],
+        added: [],
+      });
+      await loader
+        .post(`/api/loads/${ids.loadTrip}/flags`)
+        .send({ stopId: stop.stopId, orderLineId: stop.lines[1].id, type: 'damaged' })
+        .expect(409);
 
       const stale = await loader
         .post(`/api/loads/${ids.loadTrip}/depart`)
@@ -365,7 +382,9 @@ describe('loader dock and store (e2e)', () => {
         deferReason: 'No truck capacity left',
       });
       const notices = (await store.get('/api/store/notices').expect(200)).body;
-      const notice = notices.find((n: { title: string }) => n.title === 'Delivery moved to Sat 3 Oct');
+      const notice = notices.find(
+        (n: { title: string }) => n.title === 'Delivery moved to Sat 3 Oct',
+      );
       expect(notice.body).toContain('No truck capacity left');
       await prisma.notification.deleteMany({ where: { id: notice.id } });
     });
