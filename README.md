@@ -54,6 +54,29 @@ Set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`, then:
 docker compose --profile public up -d
 ```
 
+## Database backups
+
+Dumps stay on the VM for now (the `backups/` folder is gitignored). Copying them off the VM (R2, S3, or `scp`) is still TODO.
+
+On the VM, from the repo root, with the Compose stack running:
+
+```bash
+chmod +x scripts/backup-db.sh scripts/restore-db.sh
+./scripts/backup-db.sh
+```
+
+That writes `backups/waypoint-YYYYMMDD-HHMMSS.sql.gz` and deletes dumps older than `BACKUP_KEEP_DAYS` (default 14). Credentials come from `.env` (`POSTGRES_USER`, `POSTGRES_DB`).
+
+Install the nightly job with `crontab -e` using [`scripts/crontab.example`](scripts/crontab.example) (Asia/Colombo, 00:15). Change `/opt/AiSleep_WaypointSync` to the clone path.
+
+A backup is unproven until it has been restored once. This **replaces objects** in `POSTGRES_DB`:
+
+```bash
+./scripts/restore-db.sh backups/waypoint-YYYYMMDD-HHMMSS.sql.gz
+```
+
+Prefer restoring into a throwaway database or a staging clone, not blindly onto the live demo DB.
+
 ## Project structure
 
 ```
