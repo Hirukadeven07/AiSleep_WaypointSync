@@ -50,4 +50,8 @@ export class ReceiptDto implements ReceiptRequest {
   @IsOptional()
   @IsBoolean()
   chilledWasCold?: boolean;
+
+  @IsOptional()
+  @IsString()
+  signaturePng?: string;
 }

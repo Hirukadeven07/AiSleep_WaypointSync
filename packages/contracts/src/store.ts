@@ -49,6 +49,8 @@ export interface StoreDelivery {
   arrivedAt: string | null;
   storeConfirmedAt: string | null;
   driverAckAt: string | null;
+  signaturePhotoKey: string | null;
+  signedAt: string | null;
   lines: OrderLine[];
   issues: StoreIssue[];
 }
@@ -82,6 +84,8 @@ export interface ReceiptLine {
 export interface ReceiptRequest {
   lines: ReceiptLine[];
   chilledWasCold?: boolean;
+  /** PNG from the signature pad (raw base64 or a data-URL). */
+  signaturePng?: string;
 }
 
 export interface StoreNotice {

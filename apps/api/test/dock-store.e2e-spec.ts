@@ -313,10 +313,14 @@ describe('loader dock and store (e2e)', () => {
             { orderLineId: second.id, receivedQty: second.qty - 1, issue: 'missing' },
           ],
           chilledWasCold: true,
+          signaturePng:
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
         })
         .expect(200);
       expect(confirmed.body.status).toBe('confirmed');
       expect(confirmed.body.storeConfirmedAt).toBeTruthy();
+      expect(confirmed.body.signaturePhotoKey).toBe(`receipts/${ids.storeStop}/signature.png`);
+      expect(confirmed.body.signedAt).toBeTruthy();
 
       const stop = await prisma.tripStop.findUniqueOrThrow({
         where: { id: ids.storeStop },
