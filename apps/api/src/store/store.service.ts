@@ -272,7 +272,8 @@ export class StoreService {
             orderId: stop.orderId,
             tripId: stop.tripId,
             itemId: r.itemId,
-            qtyFlagged: r.issue === 'damaged' ? r.orderedQty : r.orderedQty - r.receivedQty,
+            // The short count is the problem; a damaged line with nothing short counts as all damaged.
+            qtyFlagged: r.receivedQty < r.orderedQty ? r.orderedQty - r.receivedQty : r.orderedQty,
             reason: r.issue!,
             reasonDetail: `${r.name}: ${r.receivedQty} of ${r.orderedQty} received`,
             severity: r.chilled && warm ? ('high' as const) : ('medium' as const),
