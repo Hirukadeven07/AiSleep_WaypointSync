@@ -64,10 +64,10 @@ Then, from a phone on mobile data (not the VM's network), open the public hostna
 
 ## 7. Before real use: hardening
 
-`docker-compose.yml` is written for local development, so check these:
+`docker-compose.yml` already binds `db` (5432) and `minio` (9000, 9001) to `127.0.0.1` and sets `restart: unless-stopped` on every service. Still to do:
 
-- **Published ports.** `db` (5432), `minio` (9000, 9001) and `web` (3000) are published on the VM's host. The file's own comment says to remove the db port in production. Remove those `ports:` entries or block them with the VM firewall so only the tunnel is public.
-- **Restart on reboot.** No service has a `restart:` policy, so a VM reboot leaves the stack down. Add `restart: unless-stopped` to each service and run `sudo systemctl enable docker`.
+- **`web` (3000) is published on all interfaces.** With the tunnel in front you do not need that. Block 3000 in the VM firewall or security group.
+- **Docker must start on boot:** `sudo systemctl enable docker`.
 - **Default credentials.** Change the seeded user secrets if the data is real; the README logins are demo values.
 
 ## 8. Day-to-day
@@ -80,3 +80,18 @@ docker compose --profile public down             # stop (keeps volumes)
 ```
 
 Do not run `docker compose down -v` or `pnpm seed:reset` on the VM unless you intend to wipe the database.
+
+## 9. Nightly database backup
+
+`scripts/backup-db.sh` dumps Postgres to `backups/waypoint-<timestamp>.sql.gz` and deletes dumps older than `BACKUP_KEEP_DAYS` (default 14). `scripts/restore-db.sh` loads one back. `scripts/crontab.example` has the nightly schedule line (00:15 Asia/Colombo).
+
+```bash
+./scripts/backup-db.sh                                  # run once to test
+crontab -e                                              # then paste the line from scripts/crontab.example
+./scripts/restore-db.sh backups/waypoint-XXXX.sql.gz    # restore (replaces objects in the database)
+```
+
+A backup on the same disk does not survive losing that disk. Copy the dumps somewhere else regularly (another machine, or object storage).
+
+On Windows (Docker Desktop) use `scripts/backup-db.ps1` from Task Scheduler:
+`powershell -NoProfile -ExecutionPolicy Bypass -File "D:\path\to\waypoint-sync\scripts\backup-db.ps1"`. Set `BACKUP_COPY_DIR` to a folder on another drive or a synced folder for the off-machine copy.

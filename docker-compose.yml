@@ -1,5 +1,6 @@
 services:
   db:
+    restart: unless-stopped
     image: postgres:16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-waypoint}
@@ -8,7 +9,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432" # local development only; remove in production
+      - "127.0.0.1:5432:5432" # host-only: reachable from this machine, not the network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-waypoint} -d ${POSTGRES_DB:-waypoint}"]
       interval: 5s
@@ -16,6 +17,7 @@ services:
       retries: 10
 
   minio:
+    restart: unless-stopped
     build:
       context: infra/minio
       args:
@@ -27,10 +29,11 @@ services:
     volumes:
       - miniodata:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
 
   api:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -59,6 +62,7 @@ services:
     command: sh -c "pnpm exec prisma migrate deploy && pnpm run seed && node dist/main.js"
 
   web:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -73,6 +77,7 @@ services:
       - "3000:3000"
 
   cloudflared:
+    restart: unless-stopped
     image: cloudflare/cloudflared
     profiles: ["public"]
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
