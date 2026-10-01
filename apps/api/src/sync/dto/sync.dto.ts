@@ -1,57 +1,12 @@
-import { Type } from 'class-transformer';
-import {
-  ArrayMaxSize,
-  IsArray,
-  IsIn,
-  IsISO8601,
-  IsInt,
-  IsNotEmpty,
-  IsObject,
-  IsOptional,
-  IsString,
-  IsUUID,
-  ValidateNested,
-} from 'class-validator';
-import type { DriverEventType } from '@waypoint/contracts';
+import { ArrayMaxSize, IsArray } from 'class-validator';
 
-export const DRIVER_EVENT_TYPES = [
-  'SOS_ALERT',
-  'ARRIVED',
-  'ACKNOWLEDGEMENT',
-  'ROAD_ISSUE',
-  'FUEL_READING',
-] as const satisfies DriverEventType[];
-
-export class DriverEventInputDto {
-  @IsUUID()
-  clientId!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  driverId!: string;
-
-  @IsOptional()
-  @IsString()
-  tripId: string | null = null;
-
-  @IsIn(DRIVER_EVENT_TYPES)
-  type!: DriverEventType;
-
-  @IsObject()
-  payload!: Record<string, unknown>;
-
-  @IsISO8601()
-  createdOnPhoneAt!: string;
-
-  @IsOptional()
-  @IsInt()
-  seenPlanVersion: number | null = null;
-}
-
+/**
+ * Only the envelope is validated here. Each event is checked one by one in SyncService,
+ * so a single malformed event is rejected on its own instead of failing (and blocking)
+ * the whole outbox batch with a 400.
+ */
 export class SyncPushRequestDto {
   @IsArray()
   @ArrayMaxSize(100)
-  @ValidateNested({ each: true })
-  @Type(() => DriverEventInputDto)
-  events!: DriverEventInputDto[];
+  events!: unknown[];
 }

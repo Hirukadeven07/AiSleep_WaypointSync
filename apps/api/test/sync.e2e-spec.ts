@@ -22,6 +22,16 @@ describe('driver sync (e2e)', () => {
   let stopId: string;
   let storeId: string;
   let badStopTripId: string;
+  // Seeded open SOS incidents for kasun: parked (resolved) during the test, reopened in afterAll.
+  let parkedSosIds: string[] = [];
+
+  /** Resolve every open SOS incident for the test driver, so activeSos starts false. */
+  async function resolveOpenSos() {
+    await prisma.driverIncident.updateMany({
+      where: { driver: { userId: driverId }, incidentType: 'sos', resolvedAt: null },
+      data: { resolvedAt: new Date() },
+    });
+  }
 
   async function login(body: Record<string, string>) {
     const agent = request.agent(app.getHttpServer());
@@ -177,11 +187,30 @@ describe('driver sync (e2e)', () => {
       data: { tripId: otherTrip.id, orderId: otherOrder.id, sequence: 1, status: 'upcoming' },
     });
 
+    const openSos = await prisma.driverIncident.findMany({
+      where: { driver: { userId: driverId }, incidentType: 'sos', resolvedAt: null },
+      select: { id: true },
+    });
+    parkedSosIds = openSos.map((incident) => incident.id);
+    await resolveOpenSos();
+
     driverAgent = await login({ role: 'driver', loginId: 'kasun', secret: '1234' });
   });
 
   afterAll(async () => {
     await prisma.driverEvent.deleteMany({ where: { driverId } });
+    await prisma.driverIncident.deleteMany({
+      where: { driver: { userId: driverId }, id: { notIn: parkedSosIds } },
+    });
+    if (parkedSosIds.length > 0) {
+      await prisma.driverIncident.updateMany({
+        where: { id: { in: parkedSosIds } },
+        data: { resolvedAt: null },
+      });
+    }
+    await prisma.notification.deleteMany({
+      where: { title: 'Driver SOS', body: { contains: 'E2E SOS' } },
+    });
     if (tripId) await prisma.tripStop.deleteMany({ where: { tripId } });
     if (badStopTripId) await prisma.tripStop.deleteMany({ where: { tripId: badStopTripId } });
     if (tripId) await prisma.trip.delete({ where: { id: tripId } });
@@ -320,7 +349,7 @@ describe('driver sync (e2e)', () => {
     );
   });
 
-  it('stores SOS alerts with null trip ids when the trip is invalid, and records stale plan versions', async () => {
+  it('accepts SOS alerts with no or an invalid trip id, and records stale plan versions', async () => {
     const ok = await driverAgent
       .post('/api/sync')
       .send({
@@ -441,8 +470,8 @@ describe('driver sync (e2e)', () => {
   });
 
   it('keeps processing in order and returns the pull snapshot and active SOS', async () => {
-    // The SOS test above already raised alerts today; clear them so activeSos starts false.
-    await prisma.driverEvent.deleteMany({ where: { driverId, type: 'SOS_ALERT' } });
+    // The SOS test above left open incidents; resolve them so activeSos starts false.
+    await resolveOpenSos();
 
     const badEvent = await driverAgent
       .post('/api/sync')
@@ -498,5 +527,145 @@ describe('driver sync (e2e)', () => {
 
     const refreshed = await driverAgent.get('/api/sync').expect(200);
     expect(refreshed.body.activeSos).toBe(true);
+
+    // Dispatch resolving the incident clears it.
+    await resolveOpenSos();
+    const resolved = await driverAgent.get('/api/sync').expect(200);
+    expect(resolved.body.activeSos).toBe(false);
+  });
+
+  it('rejects a malformed event on its own without failing the rest of the batch', async () => {
+    const good = 'f1111111-1111-4111-8111-111111111111';
+    const res = await driverAgent
+      .post('/api/sync')
+      .send({
+        events: [
+          {
+            clientId: 'f0000000-0000-4000-8000-000000000000',
+            driverId,
+            tripId,
+            type: 'WAITING',
+            payload: {},
+            createdOnPhoneAt: '2026-10-01T08:00:00+05:30',
+            seenPlanVersion: 1,
+          },
+          'not-an-event',
+          {
+            clientId: good,
+            driverId,
+            tripId,
+            type: 'ROAD_ISSUE',
+            payload: { note: 'pothole' },
+            createdOnPhoneAt: '2026-10-01T08:01:00+05:30',
+            seenPlanVersion: 1,
+          },
+        ],
+      })
+      .expect(200);
+    expect(res.body.rejected).toEqual(['f0000000-0000-4000-8000-000000000000', 'invalid:1']);
+    expect(res.body.rejectedReasons['f0000000-0000-4000-8000-000000000000']).toBe('INVALID_EVENT');
+    expect(res.body.applied).toEqual([good]);
+  });
+
+  it('raises a dispatcher-visible SOS incident with location and alerts the depot dispatchers', async () => {
+    const clientId = 'f2222222-2222-4222-8222-222222222222';
+    const body = {
+      events: [
+        {
+          clientId,
+          driverId,
+          tripId,
+          type: 'SOS_ALERT',
+          payload: {
+            location: { lat: 6.93, lng: 79.85 },
+            severity: 'critical',
+            message: 'E2E SOS',
+          },
+          createdOnPhoneAt: '2026-10-01T08:30:00+05:30',
+          seenPlanVersion: 1,
+        },
+      ],
+    };
+    const res = await driverAgent.post('/api/sync').send(body).expect(200);
+    expect(res.body.applied).toEqual([clientId]);
+
+    const incident = await prisma.driverIncident.findFirstOrThrow({
+      where: { driver: { userId: driverId }, message: 'E2E SOS' },
+    });
+    expect(incident).toMatchObject({
+      tripId,
+      vehicleId,
+      incidentType: 'sos',
+      severity: 'critical',
+      lat: 6.93,
+      lng: 79.85,
+      resolvedAt: null,
+    });
+    // Raised at the phone's time, not the sync time.
+    expect(incident.raisedAt.toISOString()).toBe(
+      new Date('2026-10-01T08:30:00+05:30').toISOString(),
+    );
+
+    const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+    const alerts = await prisma.notification.count({
+      where: { userId: nimal.id, title: 'Driver SOS', body: { contains: 'E2E SOS' } },
+    });
+    expect(alerts).toBe(1);
+
+    // Re-syncing the same SOS must not raise a second incident.
+    const again = await driverAgent.post('/api/sync').send(body).expect(200);
+    expect(again.body.duplicate).toEqual([clientId]);
+    expect(
+      await prisma.driverIncident.count({
+        where: { driver: { userId: driverId }, message: 'E2E SOS' },
+      }),
+    ).toBe(1);
+  });
+
+  it('records the arrival time from the phone, not the sync time, and keeps the first arrival', async () => {
+    const order = await prisma.order.create({
+      data: {
+        storeId,
+        brand: 'Fresh',
+        deliveryDate: date(DAY),
+        temp: 'ambient',
+        status: 'waiting',
+        units: 1,
+        weightKg: 5,
+        volumeM3: 0.05,
+      },
+    });
+    const stop = await prisma.tripStop.create({
+      data: { tripId, orderId: order.id, sequence: 2, status: 'upcoming' },
+    });
+    const arrive = (clientId: string, at: string) => ({
+      events: [
+        {
+          clientId,
+          driverId,
+          tripId,
+          type: 'ARRIVED',
+          payload: { stopId: stop.id },
+          createdOnPhoneAt: at,
+          seenPlanVersion: 1,
+        },
+      ],
+    });
+
+    // Arrived offline at 08:40; synced at 09:00 (DEMO_NOW).
+    await driverAgent
+      .post('/api/sync')
+      .send(arrive('f3333333-3333-4333-8333-333333333333', '2026-10-01T08:40:00+05:30'))
+      .expect(200);
+    await driverAgent
+      .post('/api/sync')
+      .send(arrive('f4444444-4444-4444-8444-444444444444', '2026-10-01T08:50:00+05:30'))
+      .expect(200);
+
+    const saved = await prisma.tripStop.findUniqueOrThrow({ where: { id: stop.id } });
+    expect(saved.status).toBe('waiting');
+    expect(saved.arrivedAt?.toISOString()).toBe(
+      new Date('2026-10-01T08:40:00+05:30').toISOString(),
+    );
   });
 });

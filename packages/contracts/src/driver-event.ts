@@ -1,9 +1,23 @@
-export type DriverEventType =
-  | 'SOS_ALERT'
-  | 'ARRIVED'
-  | 'ACKNOWLEDGEMENT'
-  | 'ROAD_ISSUE'
-  | 'FUEL_READING';
+/** Single source of truth for driver event types: the API validates against it, the outbox queues it. */
+export const DRIVER_EVENT_TYPES = [
+  'SOS_ALERT',
+  'ARRIVED',
+  'ACKNOWLEDGEMENT',
+  'ROAD_ISSUE',
+  'FUEL_READING',
+] as const;
+
+export type DriverEventType = (typeof DRIVER_EVENT_TYPES)[number];
+
+export type SyncRejectReason =
+  | 'INVALID_EVENT'
+  | 'DRIVER_MISMATCH'
+  | 'FORBIDDEN_STOP'
+  | 'FORBIDDEN_TRIP'
+  | 'ACK_BEFORE_RECEIPT'
+  | 'NO_ACTIVE_TRIP'
+  | 'NO_VEHICLE'
+  | 'INVALID_PAYLOAD';
 
 export interface DriverEventInput {
   clientId: string;
@@ -24,7 +38,7 @@ export interface SyncPushResponse {
   duplicate: string[];
   rejected: string[];
   stale?: string[];
-  rejectedReasons?: Record<string, string>;
+  rejectedReasons?: Record<string, SyncRejectReason>;
 }
 
 export interface SyncPullStop {

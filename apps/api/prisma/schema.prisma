@@ -351,6 +351,7 @@ model Trip {
   planVersion           Int              @default(1)
   plannedMinutes        Int?
   plannedLitres         Float?
+  /// Latest FUEL_READING synced for this trip; once the trip ends it is the end-of-trip fuel.
   fuelLitresAtEnd       Float?
   publishedAt           DateTime?
   tripStartingDate      DateTime?        @db.Date

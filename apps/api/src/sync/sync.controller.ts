@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
-import type { SyncPullResponse, SyncPushRequest, SyncPushResponse } from '@waypoint/contracts';
+import type { SyncPullResponse, SyncPushResponse } from '@waypoint/contracts';
 import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { SyncPushRequestDto } from './dto/sync.dto';
@@ -17,10 +17,7 @@ export class SyncController {
 
   @Post()
   @HttpCode(200)
-  push(
-    @CurrentUser() me: AuthUser,
-    @Body() dto: SyncPushRequestDto,
-  ): Promise<SyncPushResponse> {
-    return this.sync.push(me, dto as SyncPushRequest);
+  push(@CurrentUser() me: AuthUser, @Body() dto: SyncPushRequestDto): Promise<SyncPushResponse> {
+    return this.sync.push(me, dto.events);
   }
 }

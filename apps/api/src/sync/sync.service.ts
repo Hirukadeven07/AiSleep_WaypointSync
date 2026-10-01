@@ -1,30 +1,33 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import type {
-  DriverEventInput,
-  DriverEventType,
-  SyncPullResponse,
-  SyncPushRequest,
-  SyncPushResponse,
+import { Inject, Injectable } from '@nestjs/common';
+import { Prisma, SosSeverity } from '@prisma/client';
+import {
+  DRIVER_EVENT_TYPES,
+  type DriverEventInput,
+  type DriverEventType,
+  type SyncPullResponse,
+  type SyncPushResponse,
+  type SyncRejectReason,
 } from '@waypoint/contracts';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
+import {
+  NOTIFIER,
+  type NotificationInput,
+  type Notifier,
+} from '../notifications/notifier.interface';
 
-const EVENT_TYPES = new Set<DriverEventType>([
-  'SOS_ALERT',
-  'ARRIVED',
-  'ACKNOWLEDGEMENT',
-  'ROAD_ISSUE',
-  'FUEL_READING',
-]);
+const EVENT_TYPES = new Set<string>(DRIVER_EVENT_TYPES);
+const SOS_SEVERITIES = new Set<string>(Object.values(SosSeverity));
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Stop statuses an ARRIVED event moves to `waiting`. */
+const ARRIVABLE = ['upcoming', 'arrived', 'at_risk'];
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const iso = (value: Date | null) => value?.toISOString() ?? null;
 
 class RejectedEvent extends Error {
-  constructor(public readonly reason: string) {
+  constructor(public readonly reason: SyncRejectReason) {
     super(reason);
   }
 }
@@ -33,6 +36,12 @@ class DuplicateEvent extends Error {
   constructor() {
     super('duplicate');
   }
+}
+
+interface AppliedEvent {
+  stale: boolean;
+  /** Sent only after the event's transaction commits. */
+  notifications: NotificationInput[];
 }
 
 @Injectable()
@@ -79,40 +88,32 @@ export class SyncService {
     };
   }
 
-  async push(me: AuthUser, dto: SyncPushRequest): Promise<SyncPushResponse> {
-    if (!dto || !Array.isArray(dto.events) || dto.events.length > 100) {
-      throw new BadRequestException('Body must include an events array of up to 100 items.');
-    }
-
-    const response: SyncPushResponse = {
+  /** Events are processed in order; each one is applied, reported duplicate, or rejected on its own. */
+  async push(me: AuthUser, events: unknown[]): Promise<SyncPushResponse> {
+    const response: Required<SyncPushResponse> = {
       applied: [],
       duplicate: [],
       rejected: [],
       stale: [],
       rejectedReasons: {},
     };
+    const reject = (clientId: string, reason: SyncRejectReason) => {
+      response.rejected.push(clientId);
+      response.rejectedReasons[clientId] = reason;
+    };
 
-    for (const raw of dto.events) {
-      let clientId: string | null = null;
-      try {
-        this.assertValidEventShape(raw);
-      } catch {
-        clientId =
-          raw && typeof raw === 'object' && 'clientId' in raw && typeof raw.clientId === 'string'
-            ? raw.clientId
-            : null;
-        const rejectedId = clientId ?? `invalid:${response.rejected.length + response.duplicate.length}`;
-        response.rejected.push(rejectedId);
-        response.rejectedReasons![rejectedId] = 'INVALID_EVENT';
+    for (const [index, raw] of events.entries()) {
+      if (!this.isValidEvent(raw)) {
+        // Echo the clientId when there is one so the phone can drop that outbox row.
+        const clientId = this.readClientId(raw) ?? `invalid:${index}`;
+        reject(clientId, 'INVALID_EVENT');
         continue;
       }
-
-      const event = raw as DriverEventInput;
-      clientId = event.clientId;
+      const event = raw;
+      const { clientId } = event;
 
       if (event.driverId !== me.id) {
-        response.rejected.push(clientId);
-        response.rejectedReasons![clientId] = 'DRIVER_MISMATCH';
+        reject(clientId, 'DRIVER_MISMATCH');
         continue;
       }
 
@@ -122,301 +123,295 @@ export class SyncService {
         continue;
       }
 
-      let staleEvent = false;
+      let result: AppliedEvent;
       try {
-        await this.prisma.$transaction(async (tx) => {
-          const result = await this.applyEvent(tx, me, event);
-          if (!result.accepted) {
-            throw new RejectedEvent(result.reason!);
-          }
-          staleEvent = !!result.stale;
-        });
-        response.applied.push(clientId);
-        if (staleEvent) {
-          response.stale!.push(clientId);
-        }
+        result = await this.prisma.$transaction((tx) => this.applyEvent(tx, me, event));
       } catch (error) {
-        if (error instanceof DuplicateEvent) {
-          response.duplicate.push(clientId);
-          continue;
-        }
         if (error instanceof RejectedEvent) {
-          response.rejected.push(clientId);
-          response.rejectedReasons![clientId] = error.reason;
+          reject(clientId, error.reason);
           continue;
         }
-        if (this.isUniqueViolation(error)) {
+        if (error instanceof DuplicateEvent || this.isUniqueViolation(error)) {
           response.duplicate.push(clientId);
           continue;
         }
         throw error;
       }
+
+      response.applied.push(clientId);
+      if (result.stale) response.stale.push(clientId);
+      await this.deliver(result.notifications);
     }
 
     return response;
   }
 
-  private assertValidEventShape(raw: unknown): asserts raw is DriverEventInput {
-    if (!raw || typeof raw !== 'object') {
-      throw new BadRequestException('Each sync event must be an object.');
-    }
-
+  private isValidEvent(raw: unknown): raw is DriverEventInput {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
     const event = raw as Record<string, unknown>;
-    if (typeof event.clientId !== 'string' || !this.isUuid(event.clientId)) {
-      throw new BadRequestException('Each event needs a valid clientId UUID.');
-    }
-    if (typeof event.driverId !== 'string' || !event.driverId) {
-      throw new BadRequestException('Each event needs a driverId string.');
-    }
-    if (event.tripId !== null && typeof event.tripId !== 'string') {
-      throw new BadRequestException('tripId must be a string or null.');
-    }
-    if (typeof event.type !== 'string' || !EVENT_TYPES.has(event.type as DriverEventType)) {
-      throw new BadRequestException('Unsupported driver event type.');
-    }
-    if (typeof event.payload !== 'object' || event.payload === null || Array.isArray(event.payload)) {
-      throw new BadRequestException('Event payload must be an object.');
-    }
-    if (typeof event.createdOnPhoneAt !== 'string' || Number.isNaN(Date.parse(event.createdOnPhoneAt))) {
-      throw new BadRequestException('createdOnPhoneAt must be an ISO timestamp string.');
-    }
-    if (
-      event.seenPlanVersion !== null &&
-      (typeof event.seenPlanVersion !== 'number' || !Number.isInteger(event.seenPlanVersion))
-    ) {
-      throw new BadRequestException('seenPlanVersion must be a finite number or null.');
-    }
+    return (
+      this.readClientId(raw) !== null &&
+      typeof event.driverId === 'string' &&
+      event.driverId.length > 0 &&
+      (event.tripId === null || event.tripId === undefined || typeof event.tripId === 'string') &&
+      typeof event.type === 'string' &&
+      EVENT_TYPES.has(event.type) &&
+      typeof event.payload === 'object' &&
+      event.payload !== null &&
+      !Array.isArray(event.payload) &&
+      typeof event.createdOnPhoneAt === 'string' &&
+      !Number.isNaN(Date.parse(event.createdOnPhoneAt)) &&
+      (event.seenPlanVersion === null ||
+        event.seenPlanVersion === undefined ||
+        Number.isInteger(event.seenPlanVersion))
+    );
+  }
+
+  private readClientId(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const clientId = (raw as Record<string, unknown>).clientId;
+    return typeof clientId === 'string' && UUID.test(clientId) ? clientId : null;
   }
 
   private async applyEvent(
     tx: Prisma.TransactionClient,
     me: AuthUser,
     event: DriverEventInput,
-  ): Promise<{ accepted: boolean; stale?: boolean; reason?: string }> {
-    const accepted = (valid: boolean, reason?: string) => ({ accepted: valid, stale: false, reason });
+  ): Promise<AppliedEvent> {
+    const payload = event.payload;
+    const happenedAt = this.happenedAt(event);
 
-    if (event.type === 'SOS_ALERT') {
-      const trip = await this.lookupTripForDriver(tx, me.id, event.tripId ?? null);
-      const eventTripId = trip?.id ?? null;
-      const stale = await this.shouldMarkStale(tx, event, eventTripId);
-      try {
-        await tx.driverEvent.create({
-          data: {
-            clientId: event.clientId,
-            driverId: me.id,
-            tripId: eventTripId,
-            type: event.type,
-            payload: event.payload as Prisma.InputJsonValue,
-            createdOnPhoneAt: new Date(event.createdOnPhoneAt),
-            seenPlanVersion: event.seenPlanVersion ?? null,
-            appliedAt: this.clock.now(),
-          },
+    switch (event.type as DriverEventType) {
+      case 'SOS_ALERT': {
+        // An SOS is never dropped: a bad or foreign tripId falls back to the active trip, then to none.
+        const trip =
+          (await this.lookupTripForDriver(tx, me.id, event.tripId ?? null)) ??
+          (await this.activeTripForDriver(me.id, tx));
+        const tripId = trip?.id ?? null;
+        const stale = await this.shouldMarkStale(tx, event, tripId);
+        await this.recordEvent(tx, me, event, tripId);
+
+        const location = payload.location as { lat?: unknown; lng?: unknown } | null | undefined;
+        const lat = typeof location?.lat === 'number' ? location.lat : null;
+        const lng = typeof location?.lng === 'number' ? location.lng : null;
+        const severity =
+          typeof payload.severity === 'string' && SOS_SEVERITIES.has(payload.severity)
+            ? (payload.severity as SosSeverity)
+            : SosSeverity.high;
+        const message =
+          typeof payload.message === 'string'
+            ? payload.message
+            : typeof payload.note === 'string'
+              ? payload.note
+              : null;
+
+        const driver = await tx.driver.upsert({
+          where: { userId: me.id },
+          create: { userId: me.id },
+          update: {},
         });
-      } catch (error) {
-        if (this.isUniqueViolation(error)) throw new DuplicateEvent();
-        throw error;
-      }
-      return { accepted: true, stale };
-    }
-
-    if (event.type === 'ARRIVED') {
-      const payload = (event.payload ?? {}) as Record<string, unknown>;
-      const stopId = payload.stopId;
-      if (typeof stopId !== 'string') return accepted(false, 'INVALID_PAYLOAD');
-      const stop = await tx.tripStop.findUnique({
-        where: { id: stopId },
-        include: { trip: { include: { vehicle: true } } },
-      });
-      if (!stop || stop.trip.vehicle.driverId !== me.id) {
-        return accepted(false, 'FORBIDDEN_STOP');
-      }
-      const stale = await this.shouldMarkStale(tx, event, stop.trip.id);
-      const shouldSetWaiting = ['upcoming', 'arrived', 'at_risk'].includes(stop.status);
-      const shouldNotify = shouldSetWaiting && stop.status !== 'waiting';
-      const arrivedAt = shouldSetWaiting ? this.clock.now() : stop.arrivedAt;
-      await tx.driverEvent.create({
-        data: {
-          clientId: event.clientId,
-          driverId: me.id,
-          tripId: stop.tripId,
-          type: event.type,
-          payload: event.payload as Prisma.InputJsonValue,
-          createdOnPhoneAt: new Date(event.createdOnPhoneAt),
-          seenPlanVersion: event.seenPlanVersion ?? null,
-          appliedAt: this.clock.now(),
-        },
-      });
-      await tx.tripStop.update({
-        where: { id: stop.id },
-        data: {
-          status: shouldSetWaiting ? 'waiting' : stop.status,
-          arrivedAt,
-        },
-      });
-      if (shouldNotify) {
-        await this.notifyStoreUsers(
-          tx,
-          stop.orderId,
-          'Driver arrival',
-          'A driver has arrived for this stop.',
-          '/store',
-        );
-      }
-      return { accepted: true, stale };
-    }
-
-    if (event.type === 'ACKNOWLEDGEMENT') {
-      const payload = (event.payload ?? {}) as Record<string, unknown>;
-      const stopId = payload.stopId;
-      if (typeof stopId !== 'string') return accepted(false, 'INVALID_PAYLOAD');
-      const stop = await tx.tripStop.findUnique({
-        where: { id: stopId },
-        include: { trip: { include: { vehicle: true } } },
-      });
-      if (!stop || stop.trip.vehicle.driverId !== me.id) {
-        return accepted(false, 'FORBIDDEN_STOP');
-      }
-      if (!stop.storeConfirmedAt) {
-        return accepted(false, 'ACK_BEFORE_RECEIPT');
-      }
-      const stale = await this.shouldMarkStale(tx, event, stop.trip.id);
-      await tx.driverEvent.create({
-        data: {
-          clientId: event.clientId,
-          driverId: me.id,
-          tripId: stop.tripId,
-          type: event.type,
-          payload: event.payload as Prisma.InputJsonValue,
-          createdOnPhoneAt: new Date(event.createdOnPhoneAt),
-          seenPlanVersion: event.seenPlanVersion ?? null,
-          appliedAt: this.clock.now(),
-        },
-      });
-      await tx.tripStop.update({
-        where: { id: stop.id },
-        data: { driverAckAt: stop.driverAckAt ?? this.clock.now() },
-      });
-      return { accepted: true, stale };
-    }
-
-    if (event.type === 'ROAD_ISSUE') {
-      let tripId = event.tripId;
-      if (tripId) {
-        const trip = await this.lookupTripForDriver(tx, me.id, tripId);
-        if (!trip) return accepted(false, 'FORBIDDEN_TRIP');
-      } else {
-        const trip = await this.activeTripForDriver(me.id, tx);
-        if (!trip) return accepted(false, 'NO_ACTIVE_TRIP');
-        tripId = trip.id;
-      }
-      const stale = await this.shouldMarkStale(tx, event, tripId);
-      try {
-        await tx.driverEvent.create({
+        const vehicle = await tx.vehicle.findUnique({
+          where: { driverId: me.id },
+          select: { id: true, depotId: true },
+        });
+        await tx.driverIncident.create({
           data: {
-            clientId: event.clientId,
-            driverId: me.id,
+            driverId: driver.id,
             tripId,
-            type: event.type,
-            payload: event.payload as Prisma.InputJsonValue,
-            createdOnPhoneAt: new Date(event.createdOnPhoneAt),
-            seenPlanVersion: event.seenPlanVersion ?? null,
-            appliedAt: this.clock.now(),
+            vehicleId: vehicle?.id ?? null,
+            incidentType: 'sos',
+            severity,
+            message,
+            lat,
+            lng,
+            raisedAt: happenedAt,
           },
         });
-      } catch (error) {
-        if (this.isUniqueViolation(error)) throw new DuplicateEvent();
-        throw error;
-      }
-      return { accepted: true, stale };
-    }
 
-    if (event.type === 'FUEL_READING') {
-      const payload = (event.payload ?? {}) as Record<string, unknown>;
-      const remainingLitres = payload.remainingLitres;
-      if (typeof remainingLitres !== 'number' || !Number.isFinite(remainingLitres) || remainingLitres < 0) {
-        return accepted(false, 'INVALID_PAYLOAD');
-      }
-      const vehicle = await tx.vehicle.findUnique({ where: { driverId: me.id } });
-      if (!vehicle) return accepted(false, 'NO_VEHICLE');
-
-      let tripId: string | null = event.tripId ?? null;
-      if (tripId) {
-        const trip = await this.lookupTripForDriver(tx, me.id, tripId);
-        if (!trip) return accepted(false, 'FORBIDDEN_TRIP');
-      } else {
-        const active = await this.activeTripForDriver(me.id, tx);
-        if (active) tripId = active.id;
-      }
-
-      const stale = await this.shouldMarkStale(tx, event, tripId);
-      const latest = await tx.driverEvent.findFirst({
-        where: { driverId: me.id, type: 'FUEL_READING' },
-        orderBy: { createdOnPhoneAt: 'desc' },
-      });
-      const latestTime = latest ? new Date(latest.createdOnPhoneAt).getTime() : null;
-      const thisTime = Date.parse(event.createdOnPhoneAt);
-      const skipUpdates = latestTime !== null && latestTime > thisTime;
-
-      try {
-        await tx.driverEvent.create({
-          data: {
-            clientId: event.clientId,
-            driverId: me.id,
-            tripId,
-            type: event.type,
-            payload: event.payload as Prisma.InputJsonValue,
-            createdOnPhoneAt: new Date(event.createdOnPhoneAt),
-            seenPlanVersion: event.seenPlanVersion ?? null,
-            appliedAt: this.clock.now(),
-          },
+        const depotId = vehicle?.depotId ?? me.depotId;
+        const dispatchers = await tx.user.findMany({
+          where: { role: 'dispatcher', ...(depotId ? { depotId } : {}) },
+          select: { id: true },
         });
-      } catch (error) {
-        if (this.isUniqueViolation(error)) throw new DuplicateEvent();
-        throw error;
+        const body = `${me.name} raised an SOS${message ? `: ${message}` : '.'}`;
+        return {
+          stale,
+          notifications: dispatchers.map((user) => ({
+            userId: user.id,
+            title: 'Driver SOS',
+            body,
+            link: '/dispatch',
+          })),
+        };
       }
 
-      if (!skipUpdates) {
-        await tx.vehicle.update({
-          where: { id: vehicle.id },
-          data: { lastConfirmedLitres: remainingLitres },
-        });
-        if (tripId) {
-          await tx.trip.update({
-            where: { id: tripId },
-            data: { fuelLitresAtEnd: remainingLitres },
-          });
+      case 'ARRIVED': {
+        const stop = await this.ownedStop(tx, me, payload);
+        const stale = await this.shouldMarkStale(tx, event, stop.tripId);
+        await this.recordEvent(tx, me, event, stop.tripId);
+        if (!ARRIVABLE.includes(stop.status)) {
+          return { stale, notifications: [] };
         }
+        await tx.tripStop.update({
+          where: { id: stop.id },
+          // Keep the first arrival time; a repeat ARRIVED must not move it.
+          data: { status: 'waiting', arrivedAt: stop.arrivedAt ?? happenedAt },
+        });
+        return { stale, notifications: await this.storeNotifications(tx, stop.orderId) };
       }
-      return { accepted: true, stale };
-    }
 
-    return accepted(false, 'INVALID_PAYLOAD');
+      case 'ACKNOWLEDGEMENT': {
+        const stop = await this.ownedStop(tx, me, payload);
+        if (!stop.storeConfirmedAt) throw new RejectedEvent('ACK_BEFORE_RECEIPT');
+        const stale = await this.shouldMarkStale(tx, event, stop.tripId);
+        await this.recordEvent(tx, me, event, stop.tripId);
+        // The driver cannot acknowledge before the store confirmed receipt.
+        const ackAt = happenedAt < stop.storeConfirmedAt ? stop.storeConfirmedAt : happenedAt;
+        await tx.tripStop.update({
+          where: { id: stop.id },
+          data: { driverAckAt: stop.driverAckAt ?? ackAt },
+        });
+        return { stale, notifications: [] };
+      }
+
+      case 'ROAD_ISSUE': {
+        let tripId = event.tripId ?? null;
+        if (tripId) {
+          if (!(await this.lookupTripForDriver(tx, me.id, tripId))) {
+            throw new RejectedEvent('FORBIDDEN_TRIP');
+          }
+        } else {
+          const active = await this.activeTripForDriver(me.id, tx);
+          if (!active) throw new RejectedEvent('NO_ACTIVE_TRIP');
+          tripId = active.id;
+        }
+        const stale = await this.shouldMarkStale(tx, event, tripId);
+        await this.recordEvent(tx, me, event, tripId);
+        return { stale, notifications: [] };
+      }
+
+      case 'FUEL_READING': {
+        const remainingLitres = payload.remainingLitres;
+        if (
+          typeof remainingLitres !== 'number' ||
+          !Number.isFinite(remainingLitres) ||
+          remainingLitres < 0
+        ) {
+          throw new RejectedEvent('INVALID_PAYLOAD');
+        }
+        const vehicle = await tx.vehicle.findUnique({ where: { driverId: me.id } });
+        if (!vehicle) throw new RejectedEvent('NO_VEHICLE');
+
+        let tripId = event.tripId ?? null;
+        if (tripId) {
+          if (!(await this.lookupTripForDriver(tx, me.id, tripId))) {
+            throw new RejectedEvent('FORBIDDEN_TRIP');
+          }
+        } else {
+          tripId = (await this.activeTripForDriver(me.id, tx))?.id ?? null;
+        }
+
+        const stale = await this.shouldMarkStale(tx, event, tripId);
+        // Readings can sync out of order: an older one is stored for history but never overwrites a newer one.
+        const latest = await tx.driverEvent.findFirst({
+          where: { driverId: me.id, type: 'FUEL_READING' },
+          orderBy: { createdOnPhoneAt: 'desc' },
+          select: { createdOnPhoneAt: true },
+        });
+        const isNewest =
+          !latest || latest.createdOnPhoneAt.getTime() <= Date.parse(event.createdOnPhoneAt);
+        await this.recordEvent(tx, me, event, tripId);
+
+        if (isNewest) {
+          await tx.vehicle.update({
+            where: { id: vehicle.id },
+            data: { lastConfirmedLitres: remainingLitres },
+          });
+          if (tripId) {
+            await tx.trip.update({
+              where: { id: tripId },
+              data: { fuelLitresAtEnd: remainingLitres },
+            });
+          }
+        }
+        return { stale, notifications: [] };
+      }
+
+      default:
+        throw new RejectedEvent('INVALID_EVENT');
+    }
   }
 
-  private async notifyStoreUsers(
+  /** When the action happened on the phone, clamped so a skewed phone clock cannot write future times. */
+  private happenedAt(event: DriverEventInput): Date {
+    const onPhone = new Date(event.createdOnPhoneAt);
+    const now = this.clock.now();
+    return onPhone > now ? now : onPhone;
+  }
+
+  private async recordEvent(
+    tx: Prisma.TransactionClient,
+    me: AuthUser,
+    event: DriverEventInput,
+    tripId: string | null,
+  ) {
+    try {
+      await tx.driverEvent.create({
+        data: {
+          clientId: event.clientId,
+          driverId: me.id,
+          tripId,
+          type: event.type,
+          payload: event.payload as Prisma.InputJsonValue,
+          createdOnPhoneAt: new Date(event.createdOnPhoneAt),
+          seenPlanVersion: event.seenPlanVersion ?? null,
+          appliedAt: this.clock.now(),
+        },
+      });
+    } catch (error) {
+      if (this.isUniqueViolation(error)) throw new DuplicateEvent();
+      throw error;
+    }
+  }
+
+  private async ownedStop(
+    tx: Prisma.TransactionClient,
+    me: AuthUser,
+    payload: Record<string, unknown>,
+  ) {
+    const stopId = payload.stopId;
+    if (typeof stopId !== 'string') throw new RejectedEvent('INVALID_PAYLOAD');
+    const stop = await tx.tripStop.findUnique({
+      where: { id: stopId },
+      include: { trip: { include: { vehicle: true } } },
+    });
+    if (!stop || stop.trip.vehicle.driverId !== me.id) throw new RejectedEvent('FORBIDDEN_STOP');
+    return stop;
+  }
+
+  private async storeNotifications(
     tx: Prisma.TransactionClient,
     orderId: string,
-    title: string,
-    body: string,
-    link: string,
-  ) {
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      include: { store: { select: { displayName: true, id: true } } },
-    });
-    if (!order) return;
+  ): Promise<NotificationInput[]> {
+    const order = await tx.order.findUnique({ where: { id: orderId }, select: { storeId: true } });
+    if (!order) return [];
     const storeUsers = await tx.user.findMany({
       where: { storeId: order.storeId },
       select: { id: true },
     });
-    for (const user of storeUsers) {
+    return storeUsers.map((user) => ({
+      userId: user.id,
+      title: 'Driver arrival',
+      body: 'A driver has arrived for this stop.',
+      link: '/store',
+    }));
+  }
+
+  /** Best effort: the event is already committed, so a failed notification must not fail the sync. */
+  private async deliver(notifications: NotificationInput[]) {
+    for (const notification of notifications) {
       try {
-        await this.notifier.notify({
-          userId: user.id,
-          title,
-          body,
-          link,
-        });
+        await this.notifier.notify(notification);
       } catch {
         // best effort only
       }
@@ -474,28 +469,15 @@ export class SyncService {
     return Boolean(trip && trip.planVersion !== event.seenPlanVersion);
   }
 
-  private async hasActiveSos(driverId: string): Promise<boolean> {
-    const start = `${this.clock.today()}T00:00:00+05:30`;
-    const count = await this.prisma.driverEvent.count({
-      where: {
-        driverId,
-        type: 'SOS_ALERT',
-        appliedAt: { gte: new Date(start) },
-      },
+  /** An SOS stays active until dispatch resolves its incident (DriverIncident.resolvedAt). */
+  private async hasActiveSos(userId: string): Promise<boolean> {
+    const count = await this.prisma.driverIncident.count({
+      where: { driver: { userId }, incidentType: 'sos', resolvedAt: null },
     });
     return count > 0;
   }
 
-  private isUuid(value: string): boolean {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-  }
-
   private isUniqueViolation(error: unknown): boolean {
-    return Boolean(
-      error &&
-        typeof error === 'object' &&
-        'code' in error &&
-        (error as { code?: string }).code === 'P2002',
-    );
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
   }
 }
