@@ -72,4 +72,3 @@ Overbooked summary and deferral, publish, chilled and van-only blocks, overload 
 4. Export options:
    - Copy values by hand into `tailwind.config.ts` (small token set, fine for this timeline).
    - Or use a plugin such as **Tokens Studio** or **Variables Export** to export JSON, then map it into Tailwind.
-   - Or let Claude read them via the Figma MCP (`get_variable_defs`) given the frame/file URL.
