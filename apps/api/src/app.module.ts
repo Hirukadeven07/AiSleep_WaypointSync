@@ -9,6 +9,7 @@ import { OrdersModule } from './orders/orders.module';
 import { PlanModule } from './plan/plan.module';
 import { TripsModule } from './trips/trips.module';
 import { DispatchModule } from './dispatch/dispatch.module';
+import { FleetModule } from './fleet/fleet.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { LoadsModule } from './loads/loads.module';
 import { StopsModule } from './stops/stops.module';
@@ -36,6 +37,7 @@ class ClockModule {}
     PlanModule,
     TripsModule,
     DispatchModule,
+    FleetModule,
     VehiclesModule,
     LoadsModule,
     StopsModule,
