@@ -21,6 +21,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { CATALOGUE, buildLines } from './catalogue';
 import type { PlaceOrderDto, ReceiptDto } from './dto/store.dto';
+import { PhotosService } from '../photos/photos.service';
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
@@ -34,6 +35,7 @@ function addDays(iso: string, days: number) {
 const deliveryInclude = {
   order: { include: { lines: { orderBy: { name: 'asc' } } } },
   trip: { include: { vehicle: { include: { driver: true } } } },
+  receipt: true,
 } satisfies Prisma.TripStopInclude;
 
 type DeliveryStop = Prisma.TripStopGetPayload<{ include: typeof deliveryInclude }>;
@@ -66,6 +68,8 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
     arrivedAt: s.arrivedAt?.toISOString() ?? null,
     storeConfirmedAt: s.storeConfirmedAt?.toISOString() ?? null,
     driverAckAt: s.driverAckAt?.toISOString() ?? null,
+    signaturePhotoKey: s.receipt?.signaturePhotoKey ?? null,
+    signedAt: s.receipt?.signedAt?.toISOString() ?? null,
     lines: s.order.lines.map((l) => ({
       id: l.id,
       name: l.name,
@@ -84,6 +88,7 @@ export class StoreService {
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
     @Inject(NOTIFIER) private readonly notifier: Notifier,
+    private readonly photos: PhotosService,
   ) {}
 
   async home(me: AuthUser): Promise<StoreHome> {
@@ -198,6 +203,19 @@ export class StoreService {
     if (dto.lines.some((l) => !lineIds.has(l.orderLineId))) {
       throw new BadRequestException('A line does not belong to this delivery');
     }
+    if (!dto.signaturePng) {
+      throw new BadRequestException('A storekeeper signature is required');
+    }
+    let signatureBytes: Buffer;
+    try {
+      signatureBytes = this.photos.decodePngBase64(dto.signaturePng);
+    } catch {
+      throw new BadRequestException('A storekeeper signature is required');
+    }
+    const signaturePhotoKey = await this.photos.put(
+      `receipts/${stop.id}/signature.png`,
+      signatureBytes,
+    );
     const results = stop.order.lines.map((line) => {
       const r = dto.lines.find((l) => l.orderLineId === line.id);
       const receivedQty = Math.min(r?.receivedQty ?? line.qty, line.qty);
@@ -215,7 +233,14 @@ export class StoreService {
 
     await this.prisma.$transaction([
       this.prisma.storeReceipt.create({
-        data: { stopId: stop.id, lineResults: results, chilledWasCold: dto.chilledWasCold ?? null },
+        data: {
+          stopId: stop.id,
+          lineResults: results,
+          chilledWasCold: dto.chilledWasCold ?? null,
+          signaturePhotoKey,
+          signedByUserId: me.id,
+          signedAt: now,
+        },
       }),
       this.prisma.tripStop.update({
         where: { id: stop.id },

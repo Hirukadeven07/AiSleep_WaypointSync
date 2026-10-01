@@ -258,6 +258,7 @@ model User {
   loaderProfile      Loader?
   dispatcherProfile  Dispatcher?
   assignedTrips      Trip[]         @relation("TripAssignedDriver")
+  signedReceipts     StoreReceipt[]
 }
 
 model Session {
@@ -426,13 +427,17 @@ model LoadFlag {
 }
 
 model StoreReceipt {
-  id             String   @id @default(cuid())
-  stopId         String   @unique
-  stop           TripStop @relation(fields: [stopId], references: [id], onDelete: Cascade)
-  lineResults    Json
-  chilledWasCold Boolean?
-  photoKey       String?
-  createdAt      DateTime @default(now())
+  id                 String    @id @default(cuid())
+  stopId             String    @unique
+  stop               TripStop  @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  lineResults        Json
+  chilledWasCold     Boolean?
+  photoKey           String?
+  signaturePhotoKey  String?
+  signedByUserId     String?
+  signedBy           User?     @relation(fields: [signedByUserId], references: [id], onDelete: SetNull)
+  signedAt           DateTime?
+  createdAt          DateTime  @default(now())
 }
 
 model DriverEvent {
@@ -667,6 +672,7 @@ model FieldFlag {
   driverDecision   FieldFlagDecision @default(pending)
   driverDecidedAt  DateTime?
   driverNote       String?
+  photoKey         String?
   resolvedAt       DateTime?
 
   @@index([orderId])
@@ -686,6 +692,7 @@ model LoaderFlag {
   qtyFlagged        Float?
   reason            String
   reasonDetail      String?
+  photoKey          String?
   validationStatus  LoaderFlagStatus @default(pending_dispatcher)
   reviewedById      String?
   reviewedBy        Dispatcher?      @relation(fields: [reviewedById], references: [id])
