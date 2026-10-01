@@ -16,7 +16,6 @@ function Eyebrow({ children, dark = false }: { children: string; dark?: boolean 
 }
 
 function Arrow({ size = 14, src = 'arrow-up-right.svg' }: { size?: number; src?: string }) {
-  // eslint-disable-next-line @next/next/no-img-element
   return <img alt="" src={`${A}/${src}`} width={size} height={size} className="shrink-0" />;
 }
 
@@ -45,7 +44,6 @@ function PillLink({
 function PhotoShade({ top }: { top: number }) {
   return (
     <>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         alt=""
         src={`${A}/photo.webp`}
@@ -191,7 +189,6 @@ export default function LandingPage() {
         <div className="relative flex flex-col gap-10 px-5 pb-10 pt-6 sm:px-10 lg:contents">
           <nav className="flex h-11 items-center gap-8 lg:absolute lg:inset-x-10 lg:top-7">
             <div className="flex items-center gap-[10px]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img alt="" src={`${A}/logo-mark.svg`} className="size-[39.6px]" />
               <p className="whitespace-nowrap text-[19px] font-semibold text-white">
                 Waypoint Sync
@@ -253,7 +250,6 @@ export default function LandingPage() {
       {/* Store strip */}
       <section className="flex flex-wrap items-center gap-x-8 gap-y-4 lg:gap-x-14 border-b border-hairline px-5 py-8 sm:px-10 sm:py-[34px]">
         <div className="flex items-center gap-[14px]">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img alt="" src={`${A}/asterisk.svg`} className="size-[30px]" />
           <p className="whitespace-nowrap text-[12px] font-semibold uppercase leading-[1.4] tracking-[0.48px] text-ink">
             One plan for every store
@@ -286,7 +282,6 @@ export default function LandingPage() {
                 See how it works
               </span>
             </span>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img alt="" src={`${A}/line.svg`} className="h-px w-[230px]" />
           </a>
         </div>
@@ -301,7 +296,6 @@ export default function LandingPage() {
               className={`absolute top-0 h-[420px] overflow-hidden rounded-card ${s.tint} ${s.wide ? 'w-[420px]' : 'w-[300px]'}`}
               style={{ left: s.left }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 alt=""
                 src={`${A}/${s.img}`}
@@ -325,7 +319,6 @@ export default function LandingPage() {
               <p className="text-[56px] font-medium leading-none tracking-[-2.24px] text-ink sm:text-[72px] sm:tracking-[-2.88px]">
                 {n}
               </p>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img alt="" src={`${A}/rule.svg`} className="h-px w-full" />
               <p className="text-[16px] font-semibold text-ink">{label}</p>
               <p className="text-[14px] leading-[1.5] text-muted">{text}</p>
@@ -351,7 +344,6 @@ export default function LandingPage() {
             need it.
           </p>
         </div>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img alt="" src={`${A}/rule-dark.svg`} className="h-px w-full" />
         {STEPS.map(([num, name, who, text]) => (
           <div key={name} className="flex flex-col gap-9">
@@ -366,7 +358,6 @@ export default function LandingPage() {
               <div className="hidden flex-1 lg:block" />
               <p className="w-full text-[16px] lg:w-[460px] leading-[1.5] text-mist">{text}</p>
             </div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img alt="" src={`${A}/rule-dark.svg`} className="h-px w-full" />
           </div>
         ))}
@@ -416,7 +407,6 @@ export default function LandingPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {PRINCIPLES.map(([n, title, text]) => (
             <div key={n} className="flex flex-col gap-[14px]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img alt="" src={`${A}/rule-olive.svg`} className="h-px w-full" />
               <p className="text-[14px] font-semibold text-olive-ink">{n}</p>
               <p className="text-[22px] font-medium tracking-[-0.22px] text-ink">{title}</p>
