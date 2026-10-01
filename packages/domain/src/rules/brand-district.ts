@@ -1,5 +1,6 @@
 /**
- * HARD: one brand and one district per trip. First stop locks both.
+ * Brand is a block. District is a warning: the dispatcher may add a store
+ * from another district on the same trip. Depot is checked separately.
  */
 import { Reason } from '../reasons';
 import type { RuleIssue, StopView } from '../types';
@@ -22,7 +23,7 @@ export function checkBrandDistrict(currentStops: StopView[], candidate: StopView
   if (candidate.outlet.district !== first.outlet.district) {
     issues.push({
       code: Reason.DISTRICT_MISMATCH,
-      severity: 'block',
+      severity: 'warn',
       message: `Trip is ${first.outlet.district}; ${candidate.outlet.id} is ${candidate.outlet.district}.`,
     });
   }
