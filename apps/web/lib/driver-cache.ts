@@ -3,19 +3,14 @@
  * On every successful load we save the session and the day's trips here, so a reload
  * with no signal still renders the last known state.
  *
- * TODO: swap these local types for imports from `@waypoint/contracts` once the
- * /api/me and trips contracts are merged there.
+ * TODO: swap the trip types for imports from `@waypoint/contracts` once the
+ * trips contract is merged there. `Me` already comes from contracts.
  */
 export type EntityId = string | number;
 
 /** GET /api/me */
-export interface Me {
-  id: EntityId; // User.id. For Kasun this is also his driver ID.
-  name: string;
-  role: string; // "driver" for this app
-  depotId: EntityId | null;
-  storeId: EntityId | null;
-}
+export type { Me } from '@waypoint/contracts';
+import type { Me } from '@waypoint/contracts';
 
 export interface StopSummary {
   id: EntityId;
