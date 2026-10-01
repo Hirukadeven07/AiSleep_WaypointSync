@@ -46,6 +46,13 @@ export class IncidentsController {
     return this.incidents.resolve(me, id, dto);
   }
 
+  /** Mark an incident resolved when there is nothing left to recover. */
+  @Post(':id/close')
+  @HttpCode(200)
+  close(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<IncidentDetail> {
+    return this.incidents.close(me, id);
+  }
+
   @Post(':id/reopen')
   @HttpCode(200)
   reopen(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<IncidentDetail> {

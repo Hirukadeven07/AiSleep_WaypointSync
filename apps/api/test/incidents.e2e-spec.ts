@@ -249,8 +249,7 @@ describe('incidents (e2e)', () => {
     const agent = await dispatcher();
     const { body } = await agent.get(`/api/incidents/${ids.inc}`).expect(200);
     expect(body.recoverable).toBe(true);
-    expect(body.stops.map((s: { chip: string }) => s.chip)).toEqual(['Done', 'At risk', 'At risk']);
-    expect(body.stops[0].note).toBe('Delivered 9:40');
+    expect(body.stops.map((s: { chip: string }) => s.chip)).toEqual(['At risk', 'At risk']);
     expect(body.details.driver).toEqual({ name: 'Ruwan Silva', phone: '0771234567' });
 
     const byId = Object.fromEntries(
@@ -314,9 +313,11 @@ describe('incidents (e2e)', () => {
     expect(res.body).toMatchObject({ state: 'resolved', outcome: 'Replaced', recoverable: false });
     expect(res.body.resolution.tripId).toBeTruthy();
     expect(res.body.stops.map((s: { chip: string }) => s.chip)[0]).toBe('Done');
+    expect(res.body.stops[0].note).toBe('Delivered 9:40');
     expect(
-      res.body.stops.slice(1).every((s: { chip: string }) => s.chip.startsWith('Now on IC-V2')),
+      res.body.stops.slice(1).every((s: { chip: string }) => s.chip.startsWith('New ETA')),
     ).toBe(true);
+    expect(res.body.resolution.title).toMatch(/^Replacement IC-V2 sent at /);
 
     const replacement = await prisma.trip.findUniqueOrThrow({
       where: { id: res.body.resolution.tripId },
@@ -345,6 +346,14 @@ describe('incidents (e2e)', () => {
     await agent.post(`/api/incidents/${ids.inc}/resolve`).send({ action: 'tomorrow' }).expect(400);
     const reopened = await agent.post(`/api/incidents/${ids.inc}/reopen`).expect(200);
     expect(reopened.body.state).toBe('open');
+    // Nothing is left to recover, so it can only be closed again, keeping what was done.
+    expect(reopened.body).toMatchObject({ recoverable: false });
+    expect(reopened.body.resolution.title).toMatch(/^Replacement IC-V2 sent at /);
+    expect(reopened.body.details.goods).toBe('200 kg · 2 stops');
+    const closed = await agent.post(`/api/incidents/${ids.inc}/close`).expect(200);
+    expect(closed.body).toMatchObject({ state: 'resolved', outcome: 'Replaced' });
+    await agent.post(`/api/incidents/${ids.inc}/close`).expect(400);
+    await agent.post(`/api/incidents/missing:${ids.load}/close`).expect(400);
   });
 
   it('moves the stops to the next day when nothing can take them', async () => {

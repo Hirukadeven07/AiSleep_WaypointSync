@@ -1,7 +1,7 @@
 'use client';
 
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import { Incidents } from '@/components/incidents/Incidents';
 
 export default function Page() {
-  return <PlaceholderPage title="Incidents" />;
+  return <Incidents />;
 }

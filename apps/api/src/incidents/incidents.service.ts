@@ -78,8 +78,18 @@ const KIND_HEAD: Record<IncidentKind, string> = {
 type Entry = {
   at: string;
   text: string;
-  resolution?: { title: string; text: string; tripId: string | null; stops: IncidentStop[] };
+  resolution?: {
+    title: string;
+    text: string;
+    line: string;
+    outcome: string;
+    /** The goods the trip still carried when it broke down, for the Details box. */
+    goods: string;
+    tripId: string | null;
+    stops: IncidentStop[];
+  };
 };
+const lastResolution = (log: Entry[]) => [...log].reverse().find((e) => e.resolution);
 const entries = (json: unknown): Entry[] => (Array.isArray(json) ? (json as Entry[]) : []);
 
 const driverInclude = { include: { driverProfile: { include: { phones: true } } } } as const;
@@ -146,7 +156,7 @@ export class IncidentsService {
     const kind = i.type as IncidentKind;
     const state = stateOf(i.status);
     const driver = this.driverOf(t);
-    const resolution = entries(i.timeline).find((e) => e.resolution);
+    const resolution = lastResolution(entries(i.timeline));
     const remaining = t.stops.filter((s) => !DONE.has(s.status)).length;
     return {
       id: i.id,
@@ -154,12 +164,12 @@ export class IncidentsService {
       title: `${t.vehicle.plate ?? t.vehicleId} ${KIND_TITLE[kind]}`,
       line:
         state === 'resolved'
-          ? `${resolution?.resolution?.text ?? 'Resolved'} · ${timeOf(new Date(resolution?.at ?? i.createdAt))}`
+          ? `${resolution?.resolution?.line ?? 'Resolved'} · ${timeOf(new Date(resolution?.at ?? i.createdAt))}`
           : `Reported by ${driver ? `${shortName(driver.name)} (driver)` : 'the driver'} · ${timeOf(i.createdAt)} · ${this.minutesSince(i.createdAt)} min ago`,
       brand: t.brand,
       state,
       stopsAffected: state !== 'resolved' && remaining > 0 ? remaining : null,
-      outcome: state === 'resolved' ? (resolution?.resolution?.title ?? 'Resolved') : null,
+      outcome: state === 'resolved' ? (resolution?.resolution?.outcome ?? 'Resolved') : null,
       createdAt: i.createdAt.toISOString(),
     };
   }
@@ -191,12 +201,12 @@ export class IncidentsService {
 
   private missingSummary(m: Missing): IncidentSummary {
     const qty = m.flags.reduce((n, f) => n + (f.qty ?? 1), 0);
-    const bay = m.trip.loadingJob?.bay;
+    const bay = m.trip.loadingJob?.bay?.replace(/^\D*/, '');
     return {
       id: `missing:${m.trip.id}`,
       kind: 'missing_items',
       title: `${qty} ${qty === 1 ? 'item' : 'items'} short on ${m.trip.vehicle.plate ?? m.trip.vehicleId}`,
-      line: `Reported by loader${bay ? ` at ${bay}` : ''} · ${timeOf(m.flags[0].createdAt)}`,
+      line: `Reported by loader${bay ? ` at dock ${bay}` : ''} · ${timeOf(m.flags[0].createdAt)}`,
       brand: m.trip.brand,
       state: 'open',
       stopsAffected: null,
@@ -219,10 +229,13 @@ export class IncidentsService {
       this.missingItems(depotId, day),
     ]);
     const all = rows.map((r) => this.summary(r));
+    // A breakdown comes first, then the newest.
     const newest = (a: IncidentSummary, b: IncidentSummary) =>
+      Number(b.kind === 'breakdown') - Number(a.kind === 'breakdown') ||
       b.createdAt.localeCompare(a.createdAt);
     const resolved = all.filter((i) => i.state === 'resolved').sort(newest);
     return {
+      date: this.clock.today(),
       active: [
         ...all.filter((i) => i.state !== 'resolved'),
         ...missing.map((m) => this.missingSummary(m)),
@@ -245,30 +258,19 @@ export class IncidentsService {
     return `${clockText(s.order.store.windowOpenMin)}-${clockText(s.order.store.windowCloseMin)}`;
   }
 
+  /** The stops still to deliver; the ones already done are not part of the incident. */
   private stopRows(t: TripRow): IncidentStop[] {
     const now = this.clock.minutesNow();
-    return t.stops.map((s) => {
-      const name = s.order.store.displayName ?? s.order.store.id;
-      if (DONE.has(s.status)) {
-        return {
-          id: s.id,
-          storeName: name,
-          windowText: this.windowText(s),
-          chip: 'Done',
-          tone: 'success' as const,
-          note: s.arrivedAt ? `Delivered ${timeOf(s.arrivedAt)}` : null,
-        };
-      }
-      const closesSoon = s.order.store.windowCloseMin - now < 120;
-      return {
+    return t.stops
+      .filter((s) => !DONE.has(s.status))
+      .map((s) => ({
         id: s.id,
-        storeName: name,
+        storeName: s.order.store.displayName ?? s.order.store.id,
         windowText: this.windowText(s),
         chip: 'At risk',
-        tone: closesSoon ? ('danger' as const) : ('warning' as const),
+        tone: s.order.store.windowCloseMin - now < 300 ? ('danger' as const) : ('warning' as const),
         note: null,
-      };
-    });
+      }));
   }
 
   /** Vehicles that could take the remaining stops, best first, with what each would manage. */
@@ -368,9 +370,9 @@ export class IncidentsService {
     const s = this.summary(row);
     const driver = this.driverOf(t);
     const log = entries(row.timeline);
-    const done = log.find((e) => e.resolution);
+    const done = lastResolution(log);
     const remaining = t.stops.filter((x) => !DONE.has(x.status));
-    const recoverable = row.type === 'breakdown' && s.state !== 'resolved';
+    const recoverable = row.type === 'breakdown' && s.state !== 'resolved' && remaining.length > 0;
     const replacements =
       recoverable && remaining.length > 0
         ? (await this.candidates(me, t, remaining, await this.plan.loadLookup())).map(
@@ -387,12 +389,17 @@ export class IncidentsService {
       ...s,
       subtitle: `${KIND_HEAD[s.kind]}  ·  reported ${timeOf(row.createdAt)}${driver ? ` by ${driver.name} (driver)` : ''}`,
       status: `${s.state === 'resolved' ? 'Resolved' : 'Active'} · ${minutes} min`,
-      stops: done?.resolution ? done.resolution.stops : this.stopRows(t),
+      stops:
+        done?.resolution && (s.state === 'resolved' || remaining.length === 0)
+          ? done.resolution.stops
+          : this.stopRows(t),
       replacements,
       details: {
         vehicle: `${t.vehicle.plate ?? t.vehicleId} · ${kind}`,
         trip: `Trip ${t.tripNumber} · ${t.brand} · ${t.district.name}`,
-        goods: `${kg(goods)} · ${remaining.length} ${remaining.length === 1 ? 'stop' : 'stops'}`,
+        goods:
+          done?.resolution?.goods ??
+          `${kg(goods)} · ${remaining.length} ${remaining.length === 1 ? 'stop' : 'stops'}`,
         driver,
       },
       timeline: [
@@ -483,6 +490,48 @@ export class IncidentsService {
         'acknowledged',
       );
     }
+    return this.detail(me, id);
+  }
+
+  /** Close an incident that has nothing left to recover (or never had stops to move). */
+  async close(me: Me, id: string): Promise<IncidentDetail> {
+    if (id.startsWith('missing:')) {
+      throw new BadRequestException("This clears once the loader's flag is dealt with");
+    }
+    const row = await this.load(me, id);
+    if (stateOf(row.status) === 'resolved') {
+      throw new BadRequestException('This incident is already resolved');
+    }
+    const t = row.trip;
+    const remaining = t.stops.filter((s) => !DONE.has(s.status));
+    if (row.type === 'breakdown' && remaining.length > 0) {
+      throw new BadRequestException('Choose how to recover the remaining stops first');
+    }
+    const before = lastResolution(entries(row.timeline))?.resolution;
+    const now = this.clock.now().toISOString();
+    await this.save(
+      id,
+      row.timeline,
+      [
+        { at: now, text: 'You marked the incident resolved' },
+        {
+          at: now,
+          text: 'Resolved',
+          resolution: {
+            title: `Marked resolved at ${timeOf(this.clock.now())}`,
+            text: before?.text ?? 'You closed the incident. It stays logged here.',
+            line: before?.line ?? 'Closed by the dispatcher',
+            outcome: before?.outcome ?? 'Closed',
+            goods:
+              before?.goods ??
+              `${kg(remaining.reduce((n, s) => n + s.order.weightKg, 0))} · ${remaining.length} ${remaining.length === 1 ? 'stop' : 'stops'}`,
+            tripId: before?.tripId ?? null,
+            stops: before?.stops ?? this.stopRows(t),
+          },
+        },
+      ],
+      'resolved',
+    );
     return this.detail(me, id);
   }
 
@@ -582,6 +631,7 @@ export class IncidentsService {
       }
     }
 
+    const goodsLeft = `${kg(remaining.reduce((n, s) => n + s.order.weightKg, 0))} · ${remaining.length} ${remaining.length === 1 ? 'stop' : 'stops'}`;
     const etaOf = new Map((chosen?.etas ?? []).map((e) => [e.orderId, e.arriveMin]));
     const newDate = defer.length > 0 ? await this.nextOperatingDay(t.serviceDate) : null;
     const made: { id: string; plate: string }[] = [];
@@ -636,6 +686,7 @@ export class IncidentsService {
 
     const replacement = made[0] ?? null;
     const stamp = now.toISOString();
+    const lateOrders = new Set((chosen?.etas ?? []).filter((e) => e.atRisk).map((e) => e.orderId));
     const told = new Set<string>();
     const stops: IncidentStop[] = t.stops
       .filter((s) => DONE.has(s.status))
@@ -660,10 +711,8 @@ export class IncidentsService {
         id: s.id,
         storeName: store.displayName ?? store.id,
         windowText: this.windowText(s),
-        chip: eta
-          ? `Now on ${replacement?.plate} · ETA ${clockText(eta)}`
-          : `Now on ${replacement?.plate}`,
-        tone: 'success',
+        chip: eta ? `New ETA ${clockText(eta)}` : `Now on ${replacement?.plate}`,
+        tone: lateOrders.has(s.orderId) ? 'warning' : 'success',
         note: null,
       });
     }
@@ -685,30 +734,66 @@ export class IncidentsService {
       });
     }
 
-    const did = [
-      replacement
-        ? `${replacement.plate} took ${carry.length} ${carry.length === 1 ? 'stop' : 'stops'}`
-        : null,
-      defer.length
-        ? `${defer.length} ${defer.length === 1 ? 'stop' : 'stops'} moved to tomorrow`
-        : null,
-    ].filter(Boolean) as string[];
+    const count = (n: number) => `${n} ${n === 1 ? 'stop' : 'stops'}`;
+    const managers = `${told.size} store ${told.size === 1 ? 'manager' : 'managers'}`;
+    const clock = new Intl.DateTimeFormat('en-GB', {
+      timeZone: TIME_ZONE,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: false,
+    }).format(now);
+    const sentTo = replacement
+      ? await this.prisma.vehicle.findUnique({
+          where: { id: chosen!.option.vehicleId },
+          include: { driver: true },
+        })
+      : null;
+    const firstEta = carry.length ? etaOf.get(carry[0].orderId) : undefined;
+    const lastEta = carry.length ? etaOf.get(carry[carry.length - 1].orderId) : undefined;
+    const towing = `${plate} is marked for towing to the workshop.`;
+    const heading = sentTo?.driver
+      ? `${person(sentTo.driver.name)} is heading to ${t.district.name}`
+      : `${replacement?.plate} is heading to ${t.district.name}`;
+    const moved = defer.length
+      ? ` ${count(defer.length)[0].toUpperCase()}${count(defer.length).slice(1)} moved to tomorrow and ${defer.length === 1 ? 'is' : 'are'} first in line.`
+      : '';
+    const result =
+      dto.action === 'tomorrow'
+        ? {
+            title: `${count(defer.length)[0].toUpperCase()}${count(defer.length).slice(1)} moved to tomorrow at ${clock}`,
+            text: `Store managers were told their delivery arrives on the next delivery day, first in line. ${towing}`,
+            line: `${count(defer.length)} moved to tomorrow`,
+            outcome: 'Moved',
+          }
+        : {
+            title: `${dto.action === 'split' ? 'Split' : 'Replacement'} ${replacement?.plate} sent at ${clock}`,
+            text: `${heading} to pick up the ${count(carry.length)} that fit${firstEta ? `. ETA ${clockText(firstEta)}${lastEta && lastEta !== firstEta ? ` to ${clockText(lastEta)}` : ''}` : ''}.${moved} Store managers got the new plan automatically, and ${towing}`,
+            line: `${replacement?.plate} sent to ${t.district.name}`,
+            outcome: dto.action === 'split' ? 'Split' : 'Replaced',
+          };
     await this.save(
       id,
       row.timeline,
       [
-        { at: stamp, text: did.join('; ') },
         {
           at: stamp,
-          text: `New plan sent to ${told.size} store ${told.size === 1 ? 'manager' : 'managers'}`,
+          text: replacement
+            ? `You sent replacement ${replacement.plate}`
+            : `You moved ${count(defer.length)} to tomorrow`,
         },
+        ...(replacement && defer.length
+          ? [{ at: stamp, text: `${count(defer.length)} moved to tomorrow` }]
+          : []),
+        { at: stamp, text: `New ETAs sent to ${managers}` },
         {
           at: stamp,
           text: 'Resolved',
           resolution: {
-            title:
-              dto.action === 'tomorrow' ? 'Moved' : dto.action === 'split' ? 'Split' : 'Replaced',
-            text: did.join(', '),
+            title: result.title,
+            text: result.text,
+            line: result.line,
+            outcome: result.outcome,
+            goods: goodsLeft,
             tripId: replacement?.id ?? null,
             stops,
           },

@@ -20,6 +20,8 @@ export interface IncidentSummary {
 }
 
 export interface IncidentList {
+  /** Today at the depot, YYYY-MM-DD: the "resolved today" cut-off. */
+  date: string;
   active: IncidentSummary[];
   /** Resolved today and earlier this week, newest first. */
   resolved: IncidentSummary[];
