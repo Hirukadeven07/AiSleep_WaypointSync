@@ -93,7 +93,7 @@ crontab -e                                  # then add:
 
 Example with an off-machine copy: `BACKUP_TARGET=user@otherhost:/srv/waypoint-backups/` in the cron line or in `.env`.
 
-On Windows use `scripts/backup-db.ps1` from Task Scheduler (`powershell -NoProfile -ExecutionPolicy Bypass -File "...\scriptsbackup-db.ps1"`). Set `BACKUP_COPY_DIR` to a folder on another drive or a synced folder for the off-machine copy.
+On Windows use `scripts/backup-db.ps1` from Task Scheduler (`powershell -NoProfile -ExecutionPolicy Bypass -File "D:\path\to\waypoint-sync\scripts\backup-db.ps1"`). Set `BACKUP_COPY_DIR` to a folder on another drive or a synced folder for the off-machine copy.
 
 Restore into an empty database:
 
