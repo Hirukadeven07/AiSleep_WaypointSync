@@ -17,6 +17,7 @@ import {
 import { DomainError } from '@waypoint/domain';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
+import { nextOperatingDay } from '../common/clock/operating-day';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { CATALOGUE, buildLines } from './catalogue';
@@ -26,12 +27,6 @@ import { PhotosService } from '../photos/photos.service';
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
-function addDays(iso: string, days: number) {
-  const d = asDate(iso);
-  d.setUTCDate(d.getUTCDate() + days);
-  return isoDay(d);
-}
-
 const deliveryInclude = {
   order: {
     include: {
@@ -39,7 +34,7 @@ const deliveryInclude = {
       fieldFlags: { include: { item: true }, orderBy: { raisedAt: 'asc' } },
     },
   },
-  trip: { include: { vehicle: { include: { driver: true } } } },
+  trip: { include: { assignedDriver: true, vehicle: { include: { driver: true } } } },
   receipt: true,
 } satisfies Prisma.TripStopInclude;
 
@@ -68,7 +63,7 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
     status: s.status,
     etaMin: s.etaMin,
     plate: s.trip.vehicle.plate ?? s.trip.vehicle.id,
-    driverName: s.trip.vehicle.driver?.name ?? null,
+    driverName: (s.trip.assignedDriver ?? s.trip.vehicle.driver)?.name ?? null,
     chilled: s.order.temp === 'chilled',
     arrivedAt: s.arrivedAt?.toISOString() ?? null,
     storeConfirmedAt: s.storeConfirmedAt?.toISOString() ?? null,
@@ -157,7 +152,7 @@ export class StoreService {
     return orders.map(orderView);
   }
 
-  /** Orders are for tomorrow and close at 16:00 Asia/Colombo. */
+  /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */
   async placeOrder(me: AuthUser, dto: PlaceOrderDto): Promise<StoreOrderView> {
     const store = await this.store(me);
     if (this.clock.minutesNow() >= ORDER_CUTOFF_MIN) {
@@ -176,7 +171,7 @@ export class StoreService {
       data: {
         storeId: store.id,
         brand: store.brand,
-        deliveryDate: asDate(addDays(this.clock.today(), 1)),
+        deliveryDate: asDate(await nextOperatingDay(this.prisma, asDate(this.clock.today()))),
         temp: built.chilled ? 'chilled' : 'ambient',
         status: 'waiting',
         units: built.units,
@@ -289,7 +284,8 @@ export class StoreService {
       }),
     ]);
 
-    const driverId = stop.trip.vehicle.driverId;
+    // The trip's own driver; the vehicle's usual driver when the dispatcher assigned nobody.
+    const driverId = stop.trip.assignedDriverId ?? stop.trip.vehicle.driverId;
     if (driverId) {
       const store = await this.store(me);
       const issues = results.filter((r) => r.issue).length;
