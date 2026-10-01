@@ -77,6 +77,9 @@ function confirmedQty(
   return Math.max(0, qty);
 }
 
+/** What the loader accepted: the orders on the trip right now. */
+const ackedOrders = (trip: SheetTrip) => trip.stops.map((s) => s.orderId);
+
 function storeName(stop: SheetTrip['stops'][number]) {
   return stop.order.store.displayName ?? stop.order.store.id;
 }
@@ -169,7 +172,6 @@ export class LoadsService {
 
   async start(me: AuthUser, tripId: string): Promise<LoadSheet> {
     const trip = await this.findTrip(me, tripId);
-    const stopIds = trip.stops.map((s) => s.id);
     if (!trip.loadSession) {
       await this.prisma.loadSession.create({
         data: {
@@ -177,7 +179,7 @@ export class LoadsService {
           loaderIds: [me.id],
           startedAt: this.clock.now(),
           ackedPlanVersion: trip.planVersion,
-          ackedStopIds: stopIds,
+          ackedStopIds: ackedOrders(trip),
         },
       });
     } else if (!trip.loadSession.loaderIds.includes(me.id)) {
@@ -235,7 +237,7 @@ export class LoadsService {
       where: { tripId: trip.id },
       update: {
         ackedPlanVersion: trip.planVersion,
-        ackedStopIds: trip.stops.map((s) => s.id),
+        ackedStopIds: ackedOrders(trip),
         paused: false,
       },
       create: {
@@ -243,7 +245,7 @@ export class LoadsService {
         loaderIds: [me.id],
         startedAt: this.clock.now(),
         ackedPlanVersion: trip.planVersion,
-        ackedStopIds: trip.stops.map((s) => s.id),
+        ackedStopIds: ackedOrders(trip),
       },
     });
     return this.sheet(me, tripId);
@@ -330,28 +332,35 @@ export class LoadsService {
     const session = trip.loadSession;
     const acked = session?.ackedPlanVersion ?? trip.planVersion;
     const locked = !!session?.startedAt && !session.departedAt && trip.planVersion > acked;
-    const current = new Set(trip.stops.map((s) => s.id));
-    const ackedIds = session?.ackedStopIds ?? [];
-    const removedIds = locked ? ackedIds.filter((id) => !current.has(id)) : [];
-    const removedStops = removedIds.length
-      ? await this.prisma.tripStop.findMany({
+    if (!locked) {
+      return {
+        locked,
+        planVersion: trip.planVersion,
+        ackedPlanVersion: acked,
+        removed: [],
+        added: [],
+      };
+    }
+    // Orders, not stop rows, are compared: a stop taken off the trip is deleted, its order stays.
+    const ackedIds = session.ackedStopIds;
+    const current = new Set(trip.stops.map((s) => s.orderId));
+    const removedIds = ackedIds.filter((id) => !current.has(id));
+    const removedOrders = removedIds.length
+      ? await this.prisma.order.findMany({
           where: { id: { in: removedIds } },
-          include: { order: { include: { store: true } } },
+          include: { store: true },
         })
       : [];
-    const removedNames = new Map(
-      removedStops.map((s) => [s.id, s.order.store.displayName ?? s.order.store.id]),
-    );
+    const names = new Map(removedOrders.map((o) => [o.id, o.store.displayName ?? o.store.id]));
     return {
       locked,
       planVersion: trip.planVersion,
       ackedPlanVersion: acked,
-      // A removed stop may be deleted outright; then only its id is left to show.
       removed: removedIds.map((id) => ({
-        stopId: id,
-        storeName: removedNames.get(id) ?? 'Removed stop',
+        orderId: id,
+        storeName: names.get(id) ?? 'Removed stop',
       })),
-      added: locked ? trip.stops.filter((s) => !ackedIds.includes(s.id)).map((s) => s.id) : [],
+      added: trip.stops.filter((s) => !ackedIds.includes(s.orderId)).map((s) => s.id),
     };
   }
 

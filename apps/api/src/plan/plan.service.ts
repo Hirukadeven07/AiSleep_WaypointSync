@@ -21,6 +21,7 @@ import type { Vehicle as VehicleRow } from '@prisma/client';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import {
+  isAtDepot,
   orderInclude,
   toLookup,
   toOrder,
@@ -189,6 +190,7 @@ export class PlanService {
       tripNumber: row.tripNumber,
       status: row.status,
       state,
+      editable: isAtDepot(row.status),
       overWeight: capacity.overWeight,
       overVolume: capacity.overVolume,
       weightKg: capacity.usedWeightKg,

@@ -318,12 +318,14 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
     const plan = await agent.get(`/api/plan?date=${DAY}`).expect(200);
     expect(plan.body.published).toMatchObject({ tripCount: 2, storeCount: 4 });
     expect(plan.body.trips.every((x: { state: string }) => x.state === 'sent')).toBe(true);
-    // A published plan can no longer be changed.
-    const locked = await agent
-      .post('/api/plan/assign')
-      .send({ orderId: o.f2, tripId: t.reefer })
-      .expect(409);
-    expect(locked.body.reason).toBe('PLAN_LOCKED');
+    // A published trip still at the depot can change; each change raises its plan version for the dock.
+    const version = async () =>
+      (await prisma.trip.findUniqueOrThrow({ where: { id: t.reefer } })).planVersion;
+    const v1 = await version();
+    await agent.post('/api/plan/unassign').send({ orderId: o.f2 }).expect(200);
+    expect(await version()).toBe(v1 + 1);
+    await agent.post('/api/plan/assign').send({ orderId: o.f2, tripId: t.reefer }).expect(200);
+    expect(await version()).toBe(v1 + 2);
   });
 
   it('proposes auto-assign without saving, then applies it', async () => {

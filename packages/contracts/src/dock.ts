@@ -57,8 +57,8 @@ export interface PlanLock {
   locked: boolean;
   planVersion: number;
   ackedPlanVersion: number;
-  /** Stops on the acknowledged plan that the dispatcher removed. */
-  removed: { stopId: string; storeName: string }[];
+  /** Orders on the acknowledged plan that the dispatcher took off this trip. */
+  removed: { orderId: string; storeName: string }[];
   /** Stop ids added since the acknowledged plan. */
   added: string[];
 }

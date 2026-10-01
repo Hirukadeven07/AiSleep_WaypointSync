@@ -413,7 +413,7 @@ model LoadSession {
   departedAt       DateTime?
   paused           Boolean   @default(false)
   ackedPlanVersion Int       @default(0)
-  /// Stop ids the loader last acknowledged; diffed against the live trip for the plan-change lock.
+  /// Order ids on the trip when the loader last acknowledged; diffed against the live trip for the plan-change lock.
   ackedStopIds     String[]  @default([])
 }
 

@@ -133,6 +133,7 @@ The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, th
 - **Move to later:** the new date is a plain row (the next operating day, no date picker); the "3rd time" notice shows only for orders moved before; the store message says "first in line" where the Figma has "first in item". Undo on its toast brings the order back to the queue, not to its old trip.
 - **Auto-assign:** no "1 problem fixed" card and no "Review on board". The domain proposal only places waiting orders and never moves stops between trips. Applying it moves orders that cannot be placed to a later day, with the reason inferred (chilled, van-only, otherwise window).
 - The date line is computed, so it can read "Thu, 1 Oct" where the Figma sample says "Wed".
+- **Changing a sent trip:** the Figma has no re-publish step. A sent trip that has not left the depot can still take, lose or swap stops on the board, and each change goes to the dock at once as a new plan version. Being over capacity blocks the drop on a sent trip, because a published plan must stay inside capacity. The loader's checklist pauses (L5 plan-change lock) until they accept the change.
 
 ### Data
 

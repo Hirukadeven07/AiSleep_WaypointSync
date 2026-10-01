@@ -31,6 +31,10 @@ export type PlanModal =
   | { kind: 'auto'; proposal: AutoAssignProposal };
 
 const tripName = (t: PlanTrip) => t.plate ?? t.vehicleId;
+/** A sent trip that changes pauses its loader until they accept the new plan. */
+const DOCK_NOTE = 'Sent trip changed. The dock must accept the new plan before loading goes on.';
+const touchesDock = (...trips: (PlanTrip | null | undefined)[]) =>
+  trips.some((t) => t && t.status !== 'planning');
 
 /** How much room a trip that was over capacity has now, e.g. "WP-3310 is back under volume (7.6 of 8.0 m³)". */
 function backUnder(before: PlanTrip | undefined, after: PlanTrip): string | null {
@@ -156,7 +160,7 @@ export function usePlanEdit(plan: PlanDay | null, reload: () => Promise<void>) {
           title: moved
             ? `${storeName} moved to ${tripName(res.trip)}`
             : `${storeName} added to ${tripName(res.trip)} as stop ${stop}${stop === 1 ? ' (earliest window)' : ''}`,
-          sub: sub ?? '',
+          sub: touchesDock(res.trip, res.fromTrip) ? DOCK_NOTE : (sub ?? ''),
           undo: () => {
             const back = res.fromTrip
               ? api<AssignResult>('/plan/assign', {
@@ -199,13 +203,13 @@ export function usePlanEdit(plan: PlanDay | null, reload: () => Promise<void>) {
     const d = drag;
     endDrag();
     void api<UnassignResult>('/plan/unassign', { method: 'POST', body: { orderId: d.orderId } })
-      .then(reload)
-      .then(() => {
+      .then(async (res) => {
+        await reload();
         setJustAdded(null);
         setToast({
           kind: 'ok',
           title: `${d.storeName} is waiting again`,
-          sub: '',
+          sub: touchesDock(res.fromTrip) ? DOCK_NOTE : '',
           undo: () => {
             void place(d.orderId, d.storeName, d.fromTripId!).then(() => undefined);
           },

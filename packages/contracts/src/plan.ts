@@ -50,6 +50,8 @@ export interface PlanTrip {
   tripNumber: number;
   status: TripStatus;
   state: PlanTripState;
+  /** Stops can still be added or moved: the trip has not left the depot. A sent trip then asks the dock to accept the change. */
+  editable: boolean;
   overWeight: boolean;
   overVolume: boolean;
   weightKg: number;

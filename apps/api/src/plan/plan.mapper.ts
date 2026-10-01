@@ -17,6 +17,10 @@ export const tripInclude = {
 } satisfies Prisma.TripInclude;
 export type TripRow = Prisma.TripGetPayload<{ include: typeof tripInclude }>;
 
+/** A sent trip can still change until it leaves the depot; the dock then has to accept the new plan. */
+const AT_DEPOT: readonly string[] = ['planning', 'published', 'loading', 'ready'];
+export const isAtDepot = (status: string) => AT_DEPOT.includes(status);
+
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 const asDepot = (id: string) => id as Depot;
 
