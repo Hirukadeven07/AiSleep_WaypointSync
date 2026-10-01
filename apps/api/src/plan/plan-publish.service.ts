@@ -119,6 +119,12 @@ export class PlanPublishService {
     if (trips.length === 0)
       throw new DomainError('PLAN_LOCKED', 'There are no trips with stops to publish.');
 
+    // Stops placed outside the board (seed fixtures) have no ETAs yet; sort and time every trip once more.
+    const depot = this.edit.depotOf(me) as Parameters<PlanEditService['resequence']>[3];
+    await this.prisma.$transaction(async (tx) => {
+      for (const t of trips) await this.edit.resequence(tx, t.id, lookup, depot);
+    });
+
     const now = this.clock.now();
     await this.prisma.trip.updateMany({
       where: { id: { in: trips.map((t) => t.id) } },

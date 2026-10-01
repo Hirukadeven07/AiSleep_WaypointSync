@@ -372,9 +372,9 @@ describe('loader dock and store (e2e)', () => {
 
       const delivery = (await store.get(`/api/store/deliveries/${ids.storeStop}`).expect(200)).body;
       const [first, second] = delivery.lines;
-      const confirmed = await store
-        .post(`/api/store/deliveries/${ids.storeStop}/receipt`)
-        .send({
+      // Two quick taps: one receipt is saved, the other is refused rather than failing.
+      const send = () =>
+        store.post(`/api/store/deliveries/${ids.storeStop}/receipt`).send({
           lines: [
             { orderLineId: first.id, receivedQty: first.qty },
             { orderLineId: second.id, receivedQty: second.qty - 1, issue: 'missing' },
@@ -382,8 +382,11 @@ describe('loader dock and store (e2e)', () => {
           chilledWasCold: true,
           signaturePng:
             'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-        })
-        .expect(200);
+        });
+      const taps = await Promise.all([send(), send()]);
+      expect(taps.map((r) => r.status).sort()).toEqual([200, 409]);
+      const confirmed = taps.find((r) => r.status === 200)!;
+      expect(await prisma.storeReceipt.count({ where: { stopId: ids.storeStop } })).toBe(1);
       expect(confirmed.body.status).toBe('confirmed');
       expect(confirmed.body.storeConfirmedAt).toBeTruthy();
       expect(confirmed.body.signaturePhotoKey).toBe(`receipts/${ids.storeStop}/signature.png`);
