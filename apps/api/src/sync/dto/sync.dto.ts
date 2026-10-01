@@ -1,12 +1,11 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMax,
+  ArrayMaxSize,
   IsArray,
   IsIn,
   IsISO8601,
   IsInt,
   IsNotEmpty,
-  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -51,7 +50,7 @@ export class DriverEventInputDto {
 
 export class SyncPushRequestDto {
   @IsArray()
-  @ArrayMax(100)
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => DriverEventInputDto)
   events!: DriverEventInputDto[];

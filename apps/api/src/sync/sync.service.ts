@@ -480,7 +480,7 @@ export class SyncService {
       where: {
         driverId,
         type: 'SOS_ALERT',
-        appliedAt: { gte: start as unknown as Date },
+        appliedAt: { gte: new Date(start) },
       },
     });
     return count > 0;

@@ -13,9 +13,11 @@ const date = (iso: string) => new Date(`${iso}T00:00:00Z`);
 describe('driver sync (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  let driverAgent: request.SuperTest<request.Test> & request.Test;
+  let driverAgent: ReturnType<typeof request.agent>;
   let driverId: string;
   let vehicleId: string;
+  // The seed already gives kasun a vehicle; Vehicle.driverId is unique, so borrow kasun for the test.
+  let seededVehicleId: string | null = null;
   let tripId: string;
   let stopId: string;
   let storeId: string;
@@ -56,6 +58,11 @@ describe('driver sync (e2e)', () => {
 
     const driver = await prisma.user.findUniqueOrThrow({ where: { loginId: 'kasun' } });
     driverId = driver.id;
+    const seededVehicle = await prisma.vehicle.findUnique({ where: { driverId } });
+    if (seededVehicle) {
+      seededVehicleId = seededVehicle.id;
+      await prisma.vehicle.update({ where: { id: seededVehicle.id }, data: { driverId: null } });
+    }
     vehicleId = `SYNC-VEH-${Date.now()}`;
     await prisma.vehicle.create({
       data: {
@@ -165,6 +172,9 @@ describe('driver sync (e2e)', () => {
     await prisma.order.deleteMany({ where: { storeId } });
     await prisma.store.delete({ where: { id: storeId } });
     await prisma.vehicle.deleteMany({ where: { id: { startsWith: 'SYNC-' } } });
+    if (seededVehicleId) {
+      await prisma.vehicle.update({ where: { id: seededVehicleId }, data: { driverId } });
+    }
     await prisma.user.deleteMany({ where: { loginId: { startsWith: 'driver-' } } });
     await app.close();
   });
