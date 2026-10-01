@@ -6,6 +6,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { DomainErrorFilter } from '../src/common/filters/domain-error.filter';
 import { PrismaService } from '../src/common/prisma/prisma.service';
+import { StoreService } from '../src/store/store.service';
 
 // Needs a seeded database (users only; the CSVs are optional). Builds and removes its own trips.
 // Catalogue items and the loader/dispatcher profiles are upserted so the ERD rows can be checked.
@@ -333,6 +334,36 @@ describe('loader dock and store (e2e)', () => {
         .send({ lines: [] })
         .expect(409);
       expect(again.body.reason).toBe('RECEIPT_NOT_READY');
+    });
+
+    it('shows a deferred order on home and sends the store a notice with the reason', async () => {
+      const deferred = await prisma.order.create({
+        data: {
+          storeId: 'E2E-HOME',
+          brand: 'Fresh',
+          deliveryDate: date('2026-10-03'),
+          movedFromDate: date('2026-10-02'),
+          temp: 'ambient',
+          status: 'deferred',
+          deferReason: 'No truck capacity left',
+          units: 4,
+          weightKg: 20,
+          volumeM3: 0.1,
+        },
+      });
+      await app.get(StoreService).notifyDeferral(deferred.id);
+
+      const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+      const home = (await store.get('/api/store/home').expect(200)).body;
+      expect(home.deferral).toMatchObject({
+        id: deferred.id,
+        deliveryDate: '2026-10-03',
+        deferReason: 'No truck capacity left',
+      });
+      const notices = (await store.get('/api/store/notices').expect(200)).body;
+      const notice = notices.find((n: { title: string }) => n.title === 'Delivery moved to Sat 3 Oct');
+      expect(notice.body).toContain('No truck capacity left');
+      await prisma.notification.deleteMany({ where: { id: notice.id } });
     });
   });
 });

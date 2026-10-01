@@ -279,6 +279,34 @@ export class StoreService {
     return this.delivery(me, stopId);
   }
 
+  /**
+   * Tells the store's managers that an order moved to a later day. Call it after the order is saved
+   * as deferred (dispatcher deferral or breakdown recovery); the notice reads the saved reason and date.
+   */
+  async notifyDeferral(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { store: { include: { users: { where: { role: 'store' } } } } },
+    });
+    if (!order || order.status !== 'deferred') return;
+    const when = order.deliveryDate.toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      timeZone: 'UTC',
+    });
+    const reason = order.deferReason?.trim();
+    const repeat = order.repeatSkip ? ' This store was also moved on the last run.' : '';
+    for (const user of order.store.users) {
+      await this.notifier.notify({
+        userId: user.id,
+        title: `Delivery moved to ${when}`,
+        body: `${reason ? `Reason: ${reason}.` : 'The dispatcher moved this delivery.'}${repeat}`,
+        link: '/store',
+      });
+    }
+  }
+
   async notices(me: AuthUser): Promise<StoreNotice[]> {
     const rows = await this.prisma.notification.findMany({
       where: { userId: me.id },

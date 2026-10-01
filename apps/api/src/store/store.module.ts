@@ -7,5 +7,6 @@ import { StoreService } from './store.service';
   imports: [NotificationsModule],
   controllers: [StoreController],
   providers: [StoreService],
+  exports: [StoreService],
 })
 export class StoreModule {}
