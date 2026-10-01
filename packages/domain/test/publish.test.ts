@@ -80,4 +80,31 @@ describe('publish', () => {
     expect(preview.canDrop).toBe(true);
     expect(preview.capacityWarnings.map((issue) => issue.code)).toContain(Reason.OVER_VOLUME);
   });
+
+  it('allows publish when the only issue is a district warning', () => {
+    const mixed = [
+      ...colomboStops.slice(0, 3),
+      stop(
+        {
+          id: 'G1',
+          brand: 'Fresh',
+          district: 'Gampaha',
+          dockType: 'street',
+          windowOpenMin: parseHhMm('05:00'),
+          windowCloseMin: parseHhMm('08:00'),
+        },
+        { id: 'OG1', volumeM3: 1, weightKg: 100 },
+      ),
+    ];
+    const result = evaluatePublish({
+      vehicle: vehicle(),
+      stops: mixed,
+      lookup,
+      departAtMin: parseHhMm('03:30'),
+      otherLitresThisWeek: 0,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.warnings.map((issue) => issue.code)).toContain(Reason.DISTRICT_MISMATCH);
+    expect(result.blocks).toEqual([]);
+  });
 });

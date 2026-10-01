@@ -93,10 +93,22 @@ export class SyncService {
     };
 
     for (const raw of dto.events) {
-      this.assertValidEventShape(raw);
+      let clientId: string | null = null;
+      try {
+        this.assertValidEventShape(raw);
+      } catch {
+        clientId =
+          raw && typeof raw === 'object' && 'clientId' in raw && typeof raw.clientId === 'string'
+            ? raw.clientId
+            : null;
+        const rejectedId = clientId ?? `invalid:${response.rejected.length + response.duplicate.length}`;
+        response.rejected.push(rejectedId);
+        response.rejectedReasons![rejectedId] = 'INVALID_EVENT';
+        continue;
+      }
 
       const event = raw as DriverEventInput;
-      const clientId = event.clientId;
+      clientId = event.clientId;
 
       if (event.driverId !== me.id) {
         response.rejected.push(clientId);
@@ -168,7 +180,10 @@ export class SyncService {
     if (typeof event.createdOnPhoneAt !== 'string' || Number.isNaN(Date.parse(event.createdOnPhoneAt))) {
       throw new BadRequestException('createdOnPhoneAt must be an ISO timestamp string.');
     }
-    if (event.seenPlanVersion !== null && (typeof event.seenPlanVersion !== 'number' || !Number.isFinite(event.seenPlanVersion))) {
+    if (
+      event.seenPlanVersion !== null &&
+      (typeof event.seenPlanVersion !== 'number' || !Number.isInteger(event.seenPlanVersion))
+    ) {
       throw new BadRequestException('seenPlanVersion must be a finite number or null.');
     }
   }
@@ -182,18 +197,6 @@ export class SyncService {
 
     if (event.type === 'SOS_ALERT') {
       const trip = await this.lookupTripForDriver(tx, me.id, event.tripId ?? null);
-      const payload = (event.payload ?? {}) as Record<string, unknown>;
-      const location = payload.location;
-      if (location !== undefined && location !== null) {
-        if (
-          typeof location !== 'object' ||
-          Array.isArray(location) ||
-          typeof (location as Record<string, unknown>).lat !== 'number' ||
-          typeof (location as Record<string, unknown>).lng !== 'number'
-        ) {
-          return accepted(false, 'INVALID_PAYLOAD');
-        }
-      }
       const eventTripId = trip?.id ?? null;
       const stale = await this.shouldMarkStale(tx, event, eventTripId);
       try {
@@ -229,6 +232,7 @@ export class SyncService {
       }
       const stale = await this.shouldMarkStale(tx, event, stop.trip.id);
       const shouldSetWaiting = ['upcoming', 'arrived', 'at_risk'].includes(stop.status);
+      const shouldNotify = shouldSetWaiting && stop.status !== 'waiting';
       const arrivedAt = shouldSetWaiting ? this.clock.now() : stop.arrivedAt;
       await tx.driverEvent.create({
         data: {
@@ -249,7 +253,15 @@ export class SyncService {
           arrivedAt,
         },
       });
-      await this.notifyStoreUsers(tx, stop.orderId, 'Driver arrival', 'A driver has arrived for this stop.', '/store');
+      if (shouldNotify) {
+        await this.notifyStoreUsers(
+          tx,
+          stop.orderId,
+          'Driver arrival',
+          'A driver has arrived for this stop.',
+          '/store',
+        );
+      }
       return { accepted: true, stale };
     }
 

@@ -2,7 +2,8 @@
  * Rank vehicles (and an open trip, if any) for one waiting order.
  * Hard-blocked options stay in the list with reason codes for the UI.
  *
- * Legal options: fill same brand+district trip first, then tightest leftover volume, then vehicle id.
+ * Legal options: fill a same-brand, same-district trip first, then tightest leftover volume, then vehicle id.
+ * A same-brand trip in another district stays in the list with a warning.
  */
 import { measureCapacity } from './rules/capacity';
 import { evaluateDrop, evaluateNewTrip } from './rules/index';
@@ -25,13 +26,13 @@ export type RankInput = {
   lookup: Lookup;
 };
 
-function scoreLegal(vehicle: Vehicle, stopsAfter: StopView[], fillingExisting: boolean): number {
+function scoreLegal(vehicle: Vehicle, stopsAfter: StopView[], fillingSameDistrict: boolean): number {
   const cap = measureCapacity(
     vehicle,
     stopsAfter.map((stop) => stop.order),
   );
   const leftoverVolume = cap.volumeCapM3 - cap.usedVolumeM3;
-  const existingBonus = fillingExisting ? -1_000_000 : 0;
+  const existingBonus = fillingSameDistrict ? -1_000_000 : 0;
   return existingBonus + leftoverVolume;
 }
 
@@ -43,9 +44,7 @@ export function rankVehiclesForOrder(input: RankInput): FitOption[] {
     const openTrips = input.trips.filter(
       (view) =>
         view.vehicle.id === vehicle.id &&
-        (view.stops.length === 0 ||
-          (view.stops[0].outlet.brand === input.outlet.brand &&
-            view.stops[0].outlet.district === input.outlet.district)),
+        (view.stops.length === 0 || view.stops[0].outlet.brand === input.outlet.brand),
     );
 
     const consider: Array<{ tripId: string | null; currentStops: StopView[] }> =
@@ -64,12 +63,14 @@ export function rankVehiclesForOrder(input: RankInput): FitOption[] {
       const issues = [...newTripIssues, ...dropIssues];
       const hardBlocked = issues.some((issue) => issue.severity === 'block');
       const stopsAfter = [...slot.currentStops, candidate];
+      const fillingSameDistrict =
+        slot.currentStops.length > 0 && slot.currentStops[0].outlet.district === candidate.outlet.district;
       options.push({
         vehicle,
         tripId: slot.tripId,
         issues,
         hardBlocked,
-        score: hardBlocked ? Number.POSITIVE_INFINITY : scoreLegal(vehicle, stopsAfter, slot.tripId !== null),
+        score: hardBlocked ? Number.POSITIVE_INFINITY : scoreLegal(vehicle, stopsAfter, fillingSameDistrict),
       });
     }
   }

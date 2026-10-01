@@ -4,6 +4,7 @@ import {
   IsArray,
   IsIn,
   IsISO8601,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsObject,
@@ -44,7 +45,7 @@ export class DriverEventInputDto {
   createdOnPhoneAt!: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   seenPlanVersion: number | null = null;
 }
 

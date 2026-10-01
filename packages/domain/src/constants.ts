@@ -10,4 +10,7 @@ export const TIME_BUDGET_MIN: Record<Brand, number> = {
   Tech: 480,
 };
 
+/** Overrun inside this many minutes is a warning. More than this blocks. */
+export const TIME_BUDGET_GRACE_MIN = 5;
+
 export const MAX_TRIPS_PER_VEHICLE_PER_DAY = 2;

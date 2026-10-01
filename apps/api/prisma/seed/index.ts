@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { loadAllCsv } from './load-csv';
 import { seedDockStoreDemo } from './dock-store-demo';
+import { seedTeamErd } from './team-erd';
 
 const prisma = new PrismaClient();
 
@@ -64,7 +65,8 @@ async function main() {
   if (reset) {
     await truncateAll();
   } else if ((await prisma.depot.count()) > 0) {
-    console.log('[seed] database already seeded - skipping (use pnpm seed:reset to reseed)');
+    console.log('[seed] database already seeded - skipping CSV (use pnpm seed:reset to reseed)');
+    await seedTeamErd(prisma);
     return;
   }
 
@@ -81,6 +83,7 @@ async function main() {
 
   await seedUsers();
   await seedDockStoreDemo(prisma);
+  await seedTeamErd(prisma);
   console.log('[seed] done');
 }
 

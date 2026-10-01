@@ -27,6 +27,11 @@ const PATHS = {
   monitor: 'M3 5h18v11H3zM8 20h8M12 16v4',
   tablet: 'M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM11 18h2',
   'arrow-up-right': 'M7 17 17 7M8 7h9v9',
+  x: 'M6 6l12 12M18 6 6 18',
+  handset:
+    'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z',
+  'wifi-off':
+    'M3 3l18 18M2 8.8a15 15 0 0 1 4.2-2.6M22 8.8A15 15 0 0 0 10 5.1M5 12.9a10 10 0 0 1 5.2-2.7M19 12.9a10 10 0 0 0-3.4-2.2M8.5 16.4a5 5 0 0 1 7 0M12 20h.01',
 } as const;
 
 export type IconName = keyof typeof PATHS;
