@@ -122,3 +122,46 @@ export function HandoffTimeline({ delivery }: { delivery: StoreDelivery }) {
     </ol>
   );
 }
+
+const ISSUE_LABEL: Record<string, string> = {
+  missing: 'Missing',
+  damaged: 'Damaged',
+  wrong_quantity: 'Wrong quantity',
+};
+
+const DECISION = {
+  pending: { label: 'Waiting for driver', className: 'bg-warning-tint text-warning' },
+  accepted: { label: 'Driver accepted', className: 'bg-success-tint text-success' },
+  rejected: { label: 'Driver disputed', className: 'bg-danger-tint text-danger' },
+} as const;
+
+/** Lines the store flagged at receipt, with the driver's decision on each. */
+export function IssueList({ delivery }: { delivery: StoreDelivery }) {
+  if (delivery.issues.length === 0) return null;
+  return (
+    <ul className="space-y-xs">
+      {delivery.issues.map((i) => {
+        const d = DECISION[i.driverDecision];
+        return (
+          <li
+            key={i.id}
+            className="flex items-center justify-between gap-sm rounded-input bg-danger-tint px-md py-sm"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-label font-semibold text-ink">{i.itemName}</span>
+              <span className="block text-caption text-danger">
+                {ISSUE_LABEL[i.reason] ?? i.reason}
+                {i.qty !== null ? ` · ${i.qty}` : ''}
+              </span>
+            </span>
+            <span
+              className={`shrink-0 rounded-pill px-chip py-xs text-caption font-semibold ${d.className}`}
+            >
+              {d.label}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

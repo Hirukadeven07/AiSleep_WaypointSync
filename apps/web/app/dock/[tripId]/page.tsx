@@ -13,6 +13,7 @@ import { Icon } from '@/components/ui/Icon';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { Toast } from '@/components/ui/Toast';
 import { FlagSheet } from '@/components/dock/FlagSheet';
+import { JobNote } from '@/components/dock/JobNote';
 import { LoadSummary } from '@/components/dock/LoadSummary';
 import { PlanLockBanner } from '@/components/dock/PlanLockBanner';
 
@@ -130,6 +131,8 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
         </div>
         <StatusChip status={sheet.status} />
       </div>
+
+      <JobNote job={sheet.job} />
 
       {locked && (
         <PlanLockBanner

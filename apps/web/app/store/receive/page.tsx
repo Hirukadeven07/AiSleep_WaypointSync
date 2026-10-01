@@ -9,7 +9,7 @@ import { usePoll } from '@/lib/poll';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Toast } from '@/components/ui/Toast';
-import { HandoffTimeline, PageTitle } from '@/components/store/parts';
+import { HandoffTimeline, IssueList, PageTitle } from '@/components/store/parts';
 
 type LineState = { receivedQty: number; issue: FlagType | null };
 
@@ -78,6 +78,7 @@ export default function ReceivePage() {
         <div key={d.stopId} className="space-y-sm rounded-card bg-surface p-lg">
           <p className="text-title text-ink">{d.plate} · checked</p>
           <HandoffTimeline delivery={d} />
+          <IssueList delivery={d} />
         </div>
       ))}
     </section>

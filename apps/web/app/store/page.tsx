@@ -11,6 +11,7 @@ import { StatusChip } from '@/components/ui/StatusChip';
 import {
   DeferralCard,
   HandoffTimeline,
+  IssueList,
   PageTitle,
   formatDate,
   formatDuration,
@@ -93,6 +94,7 @@ export default function StoreHomePage() {
               {data.delivery.lines.length} lines
             </p>
             <HandoffTimeline delivery={data.delivery} />
+            <IssueList delivery={data.delivery} />
           </>
         ) : (
           <p className="text-body text-muted">No delivery planned for {formatDate(data.today)}.</p>
@@ -117,6 +119,26 @@ export default function StoreHomePage() {
           </Link>
         )}
       </div>
+
+      {data.phones.length > 0 && (
+        <div className="space-y-sm rounded-card bg-surface p-lg">
+          <p className="text-title text-ink">Store phones</p>
+          <ul className="space-y-xs">
+            {data.phones.map((p) => (
+              <li key={p.phoneNo}>
+                <a
+                  href={`tel:${p.phoneNo}`}
+                  className="flex min-h-[44px] items-center gap-sm text-body text-ink"
+                >
+                  <Icon name="phone" size={18} />
+                  <span className="flex-1 capitalize text-muted">{p.label}</span>
+                  <span className="font-semibold">{p.phoneNo}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
