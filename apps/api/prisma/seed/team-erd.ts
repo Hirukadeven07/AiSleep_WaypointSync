@@ -141,14 +141,15 @@ async function seedOps(prisma: PrismaClient) {
   const dispatcher = nimal
     ? await prisma.dispatcher.findUnique({ where: { userId: nimal.id } })
     : null;
-  const sunil = await prisma.user.findUnique({
-    where: { loginId: 'sunil' },
-    include: { store: true },
-  });
 
   const onRoad = await prisma.trip.findFirst({
     where: { status: 'on_road', depotId: 'Peliyagoda' },
-    include: { stops: { include: { order: { include: { lines: true, store: true } } } } },
+    include: {
+      stops: {
+        orderBy: { sequence: 'asc' },
+        include: { order: { include: { lines: true, store: true } } },
+      },
+    },
     orderBy: { publishedAt: 'desc' },
   });
   const published = await prisma.trip.findFirst({
@@ -188,7 +189,7 @@ async function seedOps(prisma: PrismaClient) {
   const homeStop = onRoad?.stops[0];
   const homeOrder = homeStop?.order;
   if (homeOrder && loader && (await prisma.deliveryNote.count({ where: { orderId: homeOrder.id } })) === 0) {
-    const dnId = `DN-${homeOrder.id.slice(0, 10).toUpperCase()}`;
+    const dnId = `DN-${homeOrder.id}`;
     const lines = homeOrder.lines.filter((l) => l.itemId);
     await prisma.deliveryNote.create({
       data: {
@@ -242,10 +243,10 @@ async function seedOps(prisma: PrismaClient) {
     });
   }
 
-  if (sunil?.store && homeOrder && (await prisma.fieldFlag.count({ where: { orderId: homeOrder.id } })) === 0) {
+  if (homeOrder && (await prisma.fieldFlag.count({ where: { orderId: homeOrder.id } })) === 0) {
     await prisma.fieldFlag.create({
       data: {
-        storeId: sunil.store.id,
+        storeId: homeOrder.storeId,
         orderId: homeOrder.id,
         tripId: onRoad?.id,
         itemId: 'F-MILK',
@@ -275,42 +276,49 @@ async function seedOps(prisma: PrismaClient) {
     });
   }
 
-  if (onRoad && driver && (await prisma.locationPing.count({ where: { tripId: onRoad.id } })) === 0) {
-    const t0 = new Date();
-    await prisma.locationPing.createMany({
-      data: [
-        {
-          clientUuid: 'ping-kasun-demo-1',
-          tripId: onRoad.id,
-          driverId: driver.id,
-          lat: 6.958,
-          lng: 79.899,
-          accuracyM: 8,
-          speedKmh: 34,
-          recordedAt: new Date(t0.getTime() - 12 * 60_000),
-        },
-        {
-          clientUuid: 'ping-kasun-demo-2',
-          tripId: onRoad.id,
-          driverId: driver.id,
-          lat: 6.941,
-          lng: 79.863,
-          accuracyM: 6,
-          speedKmh: 18,
-          recordedAt: new Date(t0.getTime() - 4 * 60_000),
-        },
-        {
-          clientUuid: 'ping-kasun-demo-3',
-          tripId: onRoad.id,
-          driverId: driver.id,
-          lat: homeStop?.order.store.lat ?? 6.927,
-          lng: homeStop?.order.store.lng ?? 79.861,
-          accuracyM: 5,
-          speedKmh: 0,
-          recordedAt: t0,
-        },
-      ],
+  if (onRoad && driver) {
+    const pingUuids = [1, 2, 3].map((n) => `ping-${onRoad.id}-${n}`);
+    const alreadyPinged = await prisma.locationPing.count({
+      where: { OR: [{ tripId: onRoad.id }, { clientUuid: { in: pingUuids } }] },
     });
+    if (alreadyPinged === 0) {
+      const t0 = new Date();
+      await prisma.locationPing.createMany({
+        skipDuplicates: true,
+        data: [
+          {
+            clientUuid: pingUuids[0]!,
+            tripId: onRoad.id,
+            driverId: driver.id,
+            lat: 6.958,
+            lng: 79.899,
+            accuracyM: 8,
+            speedKmh: 34,
+            recordedAt: new Date(t0.getTime() - 12 * 60_000),
+          },
+          {
+            clientUuid: pingUuids[1]!,
+            tripId: onRoad.id,
+            driverId: driver.id,
+            lat: 6.941,
+            lng: 79.863,
+            accuracyM: 6,
+            speedKmh: 18,
+            recordedAt: new Date(t0.getTime() - 4 * 60_000),
+          },
+          {
+            clientUuid: pingUuids[2]!,
+            tripId: onRoad.id,
+            driverId: driver.id,
+            lat: homeStop?.order.store.lat ?? 6.927,
+            lng: homeStop?.order.store.lng ?? 79.861,
+            accuracyM: 5,
+            speedKmh: 0,
+            recordedAt: t0,
+          },
+        ],
+      });
+    }
   }
 
   if (onRoad && driver && (await prisma.driverIncident.count({ where: { tripId: onRoad.id } })) === 0) {
