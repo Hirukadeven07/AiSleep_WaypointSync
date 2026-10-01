@@ -13,6 +13,7 @@ import { LoadsModule } from './loads/loads.module';
 import { StopsModule } from './stops/stops.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { SyncModule } from './sync/sync.module';
+import { DriverModule } from './driver/driver.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StoreModule } from './store/store.module';
 import { PhotosModule } from './photos/photos.module';
@@ -38,6 +39,7 @@ class ClockModule {}
     StopsModule,
     IncidentsModule,
     SyncModule,
+    DriverModule,
     NotificationsModule,
     StoreModule,
     PhotosModule,
