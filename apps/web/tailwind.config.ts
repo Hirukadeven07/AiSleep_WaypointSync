@@ -46,6 +46,14 @@ const config: Config = {
         'tech-tint': '#efe6d3',
         chilled: '#2b8a9e',
         'chilled-tint': '#ddeff2',
+
+        // Driver screens: SOS page (Figma "Driver / SOS"), offline banner, peek and call cards
+        sos: '#7f1d1d',
+        'sos-mid': '#991b1b',
+        'sos-soft': '#fecaca',
+        banner: '#eceff3',
+        peek: '#d9e1ea',
+        sage: '#dce3dc',
       },
       fontFamily: {
         sans: ['var(--font-dm-sans)', 'DM Sans', 'system-ui', 'sans-serif'],
