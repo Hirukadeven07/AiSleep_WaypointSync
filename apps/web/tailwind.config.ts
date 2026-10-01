@@ -54,6 +54,11 @@ const config: Config = {
         banner: '#eceff3',
         peek: '#d9e1ea',
         sage: '#dce3dc',
+
+        // Plan board (Figma "Plan v2"): row wash and the over-capacity trip card
+        wash: '#f7f9fb',
+        'danger-wash': '#fcf1f1',
+        'danger-line': '#e8b4b4',
       },
       fontFamily: {
         sans: ['var(--font-dm-sans)', 'DM Sans', 'system-ui', 'sans-serif'],

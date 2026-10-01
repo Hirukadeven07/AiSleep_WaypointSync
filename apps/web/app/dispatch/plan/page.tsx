@@ -1,7 +1,7 @@
 'use client';
 
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import { PlanBoard } from '@/components/plan/PlanBoard';
 
 export default function Page() {
-  return <PlaceholderPage title="Plan board" />;
+  return <PlanBoard />;
 }
