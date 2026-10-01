@@ -94,7 +94,49 @@ _To be written._
 
 ## Departures from the Designathon design
 
-- **Sync Dock sign-in (L1):** the design has a shared dock password on the keypad. The screen sends the code, but the API signs a loader in by loader ID and depot only, so any code (or none) works. Kept this way so judges can sign in as `sampath` without a code.
+The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, the reason is here. Anything the Figma shows that the data does not have yet is left out rather than invented.
+
+### Layout and breakpoints
+
+- The Figma gives frame sizes (1440 desktop, 412 phone), not breakpoints. Desktop layouts start at 1024px; below that the phone layout is used. The Figma has no tablet design.
+- The store app has no desktop design, so on a laptop it stays a centred phone column.
+- The dispatcher console and the plan board are built for the 1440 desktop console. On narrow screens the console rail collapses to a scrolling strip and the plan board's trip rows truncate their titles instead of reflowing.
+
+### Landing page and sign-in
+
+- Signed-in visitors skip the landing page and go straight to their workspace. Every "Sign in" and workspace card goes to the role chooser, because the Figma has no role parameter.
+- **Sync Dock sign-in (L1):** the design has a shared dock password on the keypad, and no loader ID. The API signs a loader in by loader ID and depot only, so the screen has a "Loader ID" field (judges sign in as `sampath`) and the keypad code is optional and not checked.
+- Depot cards show the depot name only; "12 trips today" has no data behind it yet.
+- "Forgot password?" is drawn but not wired. "Keep me signed in" and "Remember this phone" only remember the login id on the device, because the API sets the session length.
+
+### Shells
+
+- The Figma has no sign-out, so it lives in an account menu: the rail avatar on the console, the account pill on the dock, and a slim avatar row at the top of phone screens (the Figma `Driver / Profile` frame should replace that row).
+- The console's Settings button and the Incidents red dot are drawn but not wired.
+- The driver sidebar card shows the name and depot, not "DRV-2031", because the session has no driver number.
+
+### Driver app
+
+- **Home:** the trip title has no district ("Trip 1 · Colombo"), and there are no departure times, item counts or vehicle temperature range, because the driver payload does not return them. The vehicle reads "Truck" or "Van", not "Refrigerated".
+- **SOS:** shows "Dispatch · <depot>" instead of the dispatcher's name. There is no desktop frame, so the same red page is centred. Opening it sends one alert through the offline outbox; there is no confirm step.
+- **Offline:** the banner counts "actions" because the outbox holds more than deliveries. When online with actions still waiting, the green line reads "Online · N waiting to sync" (the Figma only shows the all-synced state).
+- Loading, wrong-account and "no signal and nothing saved" have no Figma frame, so they show a blank canvas, a redirect to `/no-access`, and only the offline banner.
+- Still placeholders: Trip overview, Next stop, Waiting for store, Report issue, Break, Vehicle and the other driver screens.
+
+### Plan board (dispatcher)
+
+- **Map view** is not built; the List / Map switch shows Map disabled.
+- **Ready vs Draft** is derived: Draft means a trip has no stops yet or a domain warning other than fuel (fuel is judged per week, which the board does not total yet); Ready means clean. "Capacity used" is planned weight against the vehicles that have a trip. "Moved 2x" means a repeat-skip, because the data has no move counter. The Fresh run is assumed to leave at 03:30 and the other brands at 08:00 for the window-risk check.
+- **Publishing:** the Figma shows "Publish anyway" for an over-volume trip, but capacity problems block publishing (build plan and domain rules): the button is disabled and a line says why. Other warnings, such as a window at risk, can be published through. A trip with no stops is skipped.
+- **Refusals** (a rule broken on drop) have no Figma frame, so they reuse the drop-hint pill and toast in red. The drop hint sits on the bottom edge of the hovered trip rather than inside it.
+- **Order drawer:** the warning says "Already moved twice (reason)"; the Figma's "about 30% stock left" has no data. Dropping a stop back on the queue takes it off its trip, which the Figma does not show.
+- **Move to later:** the new date is a plain row (the next operating day, no date picker); the "3rd time" notice shows only for orders moved before; the store message says "first in line" where the Figma has "first in item". Undo on its toast brings the order back to the queue, not to its old trip.
+- **Auto-assign:** no "1 problem fixed" card and no "Review on board". The domain proposal only places waiting orders and never moves stops between trips. Applying it moves orders that cannot be placed to a later day, with the reason inferred (chilled, van-only, otherwise window).
+- The date line is computed, so it can read "Thu, 1 Oct" where the Figma sample says "Wed".
+
+### Data
+
+- The competition CSVs are not in `data/` in the repository, so the plan board has only been tried on a small demo day. Seed the real files (`docs/data-model.md`) before judging.
 
 ## Docs
 
