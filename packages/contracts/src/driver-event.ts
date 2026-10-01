@@ -1,33 +1,62 @@
-export type DriverEventType =
-  | 'ARRIVED'
-  | 'WAITING'
-  | 'ACKNOWLEDGEMENT'
-  | 'ROAD_ISSUE'
-  | 'SOS_ALERT';
+/** Single source of truth for driver event types: the API validates against it, the outbox queues it. */
+export const DRIVER_EVENT_TYPES = [
+  'SOS_ALERT',
+  'ARRIVED',
+  'WAITING',
+  'ACKNOWLEDGEMENT',
+  'ROAD_ISSUE',
+] as const;
 
-export interface DriverEvent {
-  clientId: string; // UUID generated on the phone; unique on the server
-  driverId?: string;
-  tripId: string | null; // null = SOS (or similar) with no active trip
+export type DriverEventType = (typeof DRIVER_EVENT_TYPES)[number];
+
+export type SyncRejectReason =
+  | 'INVALID_EVENT'
+  | 'DRIVER_MISMATCH'
+  | 'FORBIDDEN_STOP'
+  | 'FORBIDDEN_TRIP'
+  | 'ACK_BEFORE_RECEIPT'
+  | 'NO_ACTIVE_TRIP'
+  | 'NO_VEHICLE'
+  | 'INVALID_PAYLOAD';
+
+/** One phone action in POST /api/sync. tripId is null for SOS with no active trip. */
+export interface DriverEventInput {
+  clientId: string;
+  driverId: string;
+  tripId: string | null;
   type: DriverEventType;
   payload: Record<string, unknown>;
-  createdOnPhoneAt: string; // ISO timestamp
+  createdOnPhoneAt: string;
   seenPlanVersion: number | null;
 }
 
-export interface SyncPushRequest {
-  events: DriverEvent[];
-}
+/** @deprecated Use DriverEventInput — kept so older imports still type-check. */
+export type DriverEvent = DriverEventInput;
 
-export interface SyncPushResult {
-  clientId: string;
-  status: 'applied' | 'duplicate' | 'rejected';
-  reason?: string;
+export interface SyncPushRequest {
+  events: DriverEventInput[];
 }
 
 export interface SyncPushResponse {
-  results: SyncPushResult[];
-  /** clientIds that were already stored; rest of the batch still applied */
+  applied: string[];
   duplicate: string[];
-  serverTime: string;
+  rejected: string[];
+  stale?: string[];
+  rejectedReasons?: Record<string, SyncRejectReason>;
+}
+
+export interface SyncPullStop {
+  id: string;
+  sequence: number;
+  status: string;
+  arrivedAt: string | null;
+  storeConfirmedAt: string | null;
+  driverAckAt: string | null;
+}
+
+export interface SyncPullResponse {
+  tripId: string | null;
+  planVersion: number | null;
+  stops: SyncPullStop[];
+  activeSos: boolean;
 }
