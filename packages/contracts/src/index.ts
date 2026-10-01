@@ -9,4 +9,5 @@ export * from './dock';
 export * from './store';
 export * from './plan';
 export * from './dispatch';
+export * from './fleet';
 export * from './driver-day';
