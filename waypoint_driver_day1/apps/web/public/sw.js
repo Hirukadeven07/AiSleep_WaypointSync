@@ -1,3 +1,4 @@
+/* global self, caches, fetch, Request, URL, AbortController, setTimeout, clearTimeout */
 /* Waypoint Sync Driver service worker.
  * Hand-written on purpose: no build plugin, so it cannot clash with the monorepo build.
  * Strategy: pre-cache the /drive shell, then network-first with cache fallback.
