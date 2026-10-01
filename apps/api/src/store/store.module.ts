@@ -8,5 +8,6 @@ import { StoreService } from './store.service';
   imports: [NotificationsModule, PhotosModule],
   controllers: [StoreController],
   providers: [StoreService],
+  exports: [StoreService],
 })
 export class StoreModule {}

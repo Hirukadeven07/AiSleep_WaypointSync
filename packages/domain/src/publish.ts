@@ -1,7 +1,7 @@
 /**
  * Publish gate.
- * Hard rules still apply. OVER_WEIGHT / OVER_VOLUME become blocks here.
- * Window-at-risk and fuel-quota stay warnings.
+ * Brand, depot, van-only, chilled, and a large time overrun still block.
+ * District mismatch, ambient-on-reefer, a small time overrun, window-at-risk, and fuel-quota are warnings.
  */
 import { checkFuelQuota, estimateTripLitres } from './fuel';
 import { capacityIssues } from './rules/capacity';
@@ -25,26 +25,28 @@ export type PublishResult = {
   warnings: RuleIssue[];
 };
 
-function hardIssuesOnTrip(vehicle: Vehicle, stops: StopView[], lookup: Lookup): RuleIssue[] {
+function dropIssuesOnTrip(vehicle: Vehicle, stops: StopView[], lookup: Lookup): RuleIssue[] {
   const issues: RuleIssue[] = [];
   const built: StopView[] = [];
   for (const stop of stops) {
     issues.push(...evaluateDrop({ vehicle, currentStops: built, candidate: stop, lookup }));
     built.push(stop);
   }
-  return issues.filter((issue) => issue.severity === 'block');
+  return issues;
 }
 
 export function evaluatePublish(input: PublishInput): PublishResult {
   const deliveryOrder = sortStopsByWindow(input.stops);
+  const dropIssues = dropIssuesOnTrip(input.vehicle, deliveryOrder, input.lookup);
   const blocks: RuleIssue[] = [
-    ...hardIssuesOnTrip(input.vehicle, deliveryOrder, input.lookup),
+    ...dropIssues.filter((issue) => issue.severity === 'block'),
     ...capacityIssues(input.vehicle, deliveryOrder, true),
   ];
 
   const etas = stopEtas(deliveryOrder, input.lookup, input.vehicle.depot, input.departAtMin) ?? [];
   const litres = estimateTripLitres(deliveryOrder, input.lookup, input.vehicle) ?? 0;
   const warnings: RuleIssue[] = [
+    ...dropIssues.filter((issue) => issue.severity === 'warn'),
     ...windowRiskIssues(etas),
     ...checkFuelQuota(
       deliveryOrder[0]?.order.serviceDate ?? '',

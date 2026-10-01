@@ -7,6 +7,7 @@ import { usePoll } from '@/lib/poll';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { Icon } from '@/components/ui/Icon';
+import { JobNote } from '@/components/dock/JobNote';
 
 /** L2: today's published trips for this depot, in loading order. */
 export default function DockQueuePage() {
@@ -81,6 +82,8 @@ function QueueCard({ trip }: { trip: LoadQueueItem }) {
       <p className="text-body text-ink">
         {trip.stopCount} stops · {trip.lineCount} lines
       </p>
+
+      <JobNote job={trip.job} compact />
 
       <div className="mt-auto flex items-center justify-between gap-sm">
         <p className="flex min-w-0 items-center gap-xs text-label text-muted">

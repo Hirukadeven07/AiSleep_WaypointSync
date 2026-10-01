@@ -33,7 +33,12 @@ function addDays(iso: string, days: number) {
 }
 
 const deliveryInclude = {
-  order: { include: { lines: { orderBy: { name: 'asc' } } } },
+  order: {
+    include: {
+      lines: { orderBy: { name: 'asc' } },
+      fieldFlags: { include: { item: true }, orderBy: { raisedAt: 'asc' } },
+    },
+  },
   trip: { include: { vehicle: { include: { driver: true } } } },
   receipt: true,
 } satisfies Prisma.TripStopInclude;
@@ -79,6 +84,16 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
       unitWeightKg: l.unitWeightKg,
       unitVolumeM3: l.unitVolumeM3,
     })),
+    // Only this trip's flags; an order moved off a broken-down truck keeps its old ones apart.
+    issues: s.order.fieldFlags
+      .filter((f) => f.tripId === s.tripId)
+      .map((f) => ({
+        id: f.id,
+        itemName: f.item?.itemName ?? 'Whole delivery',
+        qty: f.qtyFlagged,
+        reason: f.reason,
+        driverDecision: f.driverDecision,
+      })),
   };
 }
 
@@ -124,6 +139,7 @@ export class StoreService {
       nextOrder: upcoming ? orderView(upcoming) : null,
       deferral: deferral ? orderView(deferral) : null,
       unreadNotices,
+      phones: store.phones.map((p) => ({ label: p.label, phoneNo: p.phoneNo })),
     };
   }
 
@@ -221,6 +237,8 @@ export class StoreService {
       const receivedQty = Math.min(r?.receivedQty ?? line.qty, line.qty);
       const issue = r?.issue ?? (receivedQty < line.qty ? 'missing' : undefined);
       return {
+        itemId: line.itemId,
+        chilled: line.chilled,
         orderLineId: line.id,
         name: line.name,
         orderedQty: line.qty,
@@ -230,17 +248,35 @@ export class StoreService {
     });
     const partial = results.some((r) => r.issue);
     const now = this.clock.now();
+    const lineResults = results.map(({ itemId: _i, chilled: _c, ...r }) => r);
+    const warm = dto.chilledWasCold === false;
 
     await this.prisma.$transaction([
       this.prisma.storeReceipt.create({
         data: {
           stopId: stop.id,
-          lineResults: results,
+          lineResults,
           chilledWasCold: dto.chilledWasCold ?? null,
           signaturePhotoKey,
           signedByUserId: me.id,
           signedAt: now,
         },
+      }),
+      // Each problem line becomes a FieldFlag the driver accepts or disputes at acknowledgement.
+      this.prisma.fieldFlag.createMany({
+        data: results
+          .filter((r) => r.issue)
+          .map((r) => ({
+            raisedAt: now,
+            storeId: stop.order.storeId,
+            orderId: stop.orderId,
+            tripId: stop.tripId,
+            itemId: r.itemId,
+            qtyFlagged: r.issue === 'damaged' ? r.orderedQty : r.orderedQty - r.receivedQty,
+            reason: r.issue!,
+            reasonDetail: `${r.name}: ${r.receivedQty} of ${r.orderedQty} received`,
+            severity: r.chilled && warm ? ('high' as const) : ('medium' as const),
+          })),
       }),
       this.prisma.tripStop.update({
         where: { id: stop.id },
@@ -266,6 +302,34 @@ export class StoreService {
       });
     }
     return this.delivery(me, stopId);
+  }
+
+  /**
+   * Tells the store's managers that an order moved to a later day. Call it after the order is saved
+   * as deferred (dispatcher deferral or breakdown recovery); the notice reads the saved reason and date.
+   */
+  async notifyDeferral(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { store: { include: { users: { where: { role: 'store' } } } } },
+    });
+    if (!order || order.status !== 'deferred') return;
+    const when = order.deliveryDate.toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      timeZone: 'UTC',
+    });
+    const reason = order.deferReason?.trim();
+    const repeat = order.repeatSkip ? ' This store was also moved on the last run.' : '';
+    for (const user of order.store.users) {
+      await this.notifier.notify({
+        userId: user.id,
+        title: `Delivery moved to ${when}`,
+        body: `${reason ? `Reason: ${reason}.` : 'The dispatcher moved this delivery.'}${repeat}`,
+        link: '/store',
+      });
+    }
   }
 
   async notices(me: AuthUser): Promise<StoreNotice[]> {
@@ -294,7 +358,10 @@ export class StoreService {
 
   private async store(me: AuthUser) {
     if (!me.storeId) throw new ForbiddenException('This account is not linked to a store');
-    const store = await this.prisma.store.findUnique({ where: { id: me.storeId } });
+    const store = await this.prisma.store.findUnique({
+      where: { id: me.storeId },
+      include: { phones: { orderBy: { label: 'asc' } } },
+    });
     if (!store) throw new NotFoundException('Store not found');
     return store;
   }

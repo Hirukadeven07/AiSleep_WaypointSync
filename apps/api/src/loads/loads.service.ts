@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import type {
   DepartSummary,
   LoadFlagView,
+  LoadJob,
   LoadQueueItem,
   LoadSheet,
   LoadStop,
@@ -19,6 +20,7 @@ const sheetInclude = {
   vehicle: true,
   district: true,
   loadSession: true,
+  loadingJob: true,
   stops: {
     orderBy: { sequence: 'asc' },
     include: {
@@ -47,6 +49,34 @@ function vehicleView(v: SheetTrip['vehicle']) {
   return { id: v.id, plate: v.plate, type: v.type, temp: v.temp };
 }
 
+function jobView(j: SheetTrip['loadingJob']): LoadJob | null {
+  if (!j) return null;
+  return {
+    bay: j.bay,
+    loadByTime: j.loadByTime?.toISOString() ?? null,
+    instructions: j.instructions,
+    priority: j.priority,
+    status: j.status,
+  };
+}
+
+/** Delivery-note id for an order. Each change adds a version; the current one has validTo = null. */
+const dnId = (orderId: string) => `DN-${orderId}`;
+
+/** Quantity actually loaded for a line, after the loader's missing and wrong-quantity flags. */
+function confirmedQty(
+  line: { id: string; qty: number },
+  flags: { orderLineId: string | null; type: string; qty: number | null }[],
+) {
+  let qty = line.qty;
+  for (const f of flags) {
+    if (f.orderLineId !== line.id) continue;
+    if (f.type === 'missing') qty -= f.qty ?? line.qty;
+    if (f.type === 'wrong_quantity' && f.qty != null) qty = Math.min(qty, f.qty);
+  }
+  return Math.max(0, qty);
+}
+
 function storeName(stop: SheetTrip['stops'][number]) {
   return stop.order.store.displayName ?? stop.order.store.id;
 }
@@ -70,10 +100,13 @@ export class LoadsService {
         vehicle: true,
         district: true,
         loadSession: true,
+        loadingJob: true,
         stops: { include: { order: { select: { _count: { select: { lines: true } } } } } },
       },
       orderBy: [{ tripNumber: 'asc' }, { vehicleId: 'asc' }],
     });
+    // Jobs the dispatcher marked urgent come first; the rest keep trip order.
+    trips.sort((a, b) => (b.loadingJob?.priority ?? 0) - (a.loadingJob?.priority ?? 0));
     const names = await this.loaderNames(trips.flatMap((t) => t.loadSession?.loaderIds ?? []));
     return trips.map((t) => ({
       tripId: t.id,
@@ -86,6 +119,7 @@ export class LoadsService {
       lineCount: t.stops.reduce((s, st) => s + st.order._count.lines, 0),
       loaderNames: (t.loadSession?.loaderIds ?? []).map((id) => names.get(id) ?? 'Loader'),
       planVersion: t.planVersion,
+      job: jobView(t.loadingJob),
     }));
   }
 
@@ -129,6 +163,7 @@ export class LoadsService {
           }
         : null,
       lock: await this.lockFor(trip),
+      job: jobView(trip.loadingJob),
     };
   }
 
@@ -154,6 +189,13 @@ export class LoadsService {
     if (trip.status === 'published') {
       await this.prisma.trip.update({ where: { id: trip.id }, data: { status: 'loading' } });
     }
+    if (trip.loadingJob?.status === 'assigned') {
+      await this.prisma.loadingJob.update({
+        where: { tripId: trip.id },
+        data: { status: 'picking', startedAt: this.clock.now() },
+      });
+    }
+    await this.openDeliveryNotes(me, trip);
     return this.sheet(me, tripId);
   }
 
@@ -220,12 +262,38 @@ export class LoadsService {
       throw new DomainError('PLAN_LOCKED', 'Start loading before confirming departure.');
     }
     const departedAt = this.clock.now();
+    const lines = trip.stops.flatMap((s) => s.order.lines);
+    const round = (n: number, dp: number) => Math.round(n * 10 ** dp) / 10 ** dp;
     await this.prisma.$transaction([
       this.prisma.loadSession.update({
         where: { tripId: trip.id },
         data: { finishedAt: departedAt, departedAt },
       }),
-      this.prisma.trip.update({ where: { id: trip.id }, data: { status: 'on_road' } }),
+      this.prisma.trip.update({
+        where: { id: trip.id },
+        data: { status: 'on_road', startingTime: departedAt },
+      }),
+      ...(trip.loadingJob
+        ? [
+            this.prisma.loadingJob.update({
+              where: { tripId: trip.id },
+              data: {
+                status: 'handed_over',
+                loadedAt: departedAt,
+                handedOverAt: departedAt,
+                totalWeightKg: round(
+                  lines.reduce((s, l) => s + l.qty * l.unitWeightKg, 0),
+                  2,
+                ),
+                totalVolumeM3: round(
+                  lines.reduce((s, l) => s + l.qty * l.unitVolumeM3, 0),
+                  3,
+                ),
+              },
+            }),
+          ]
+        : []),
+      ...(await this.loadedDeliveryNotes(me, trip, departedAt)),
     ]);
 
     const lineName = new Map(
@@ -241,6 +309,7 @@ export class LoadsService {
           ...flagView(f),
           storeName: storeName(s),
           lineName: f.orderLineId ? (lineName.get(f.orderLineId) ?? null) : null,
+          reviewStatus: 'pending_dispatcher' as const,
         })),
       ),
     };
@@ -293,6 +362,137 @@ export class LoadsService {
         'The plan changed. Acknowledge the new plan to continue.',
       );
     }
+  }
+
+  private async loaderProfile(me: AuthUser) {
+    return this.prisma.loader.findUnique({ where: { userId: me.id } });
+  }
+
+  /** On start, each order gets a delivery note in 'picking' with this loader on it. */
+  private async openDeliveryNotes(me: AuthUser, trip: SheetTrip) {
+    const loader = await this.loaderProfile(me);
+    const now = this.clock.now();
+    for (const stop of trip.stops) {
+      const order = stop.order;
+      let note = await this.prisma.deliveryNote.findFirst({
+        where: { orderId: order.id, validTo: null },
+        orderBy: { versionAt: 'desc' },
+      });
+      if (!note) {
+        note = await this.prisma.deliveryNote.create({
+          data: {
+            dnId: dnId(order.id),
+            versionAt: now,
+            orderId: order.id,
+            status: 'picking',
+            changedById: loader?.id ?? null,
+            changeReason: 'loading started',
+            lines: {
+              create: order.lines.flatMap((l) =>
+                l.itemId ? [{ itemId: l.itemId, qtyConfirmed: null }] : [],
+              ),
+            },
+          },
+        });
+      }
+      if (loader) {
+        await this.prisma.deliveryNoteLoader.upsert({
+          where: {
+            dnId_versionAt_loaderId: {
+              dnId: note.dnId,
+              versionAt: note.versionAt,
+              loaderId: loader.id,
+            },
+          },
+          update: {},
+          create: {
+            dnId: note.dnId,
+            versionAt: note.versionAt,
+            loaderId: loader.id,
+            role: 'picking',
+            startedAt: now,
+          },
+        });
+      }
+    }
+  }
+
+  /**
+   * At departure each order's delivery note gets a 'loaded' version with the quantities actually
+   * loaded, and every dock flag becomes a LoaderFlag for the dispatcher to review.
+   */
+  private async loadedDeliveryNotes(me: AuthUser, trip: SheetTrip, at: Date) {
+    const loader = await this.loaderProfile(me);
+    const ops: Prisma.PrismaPromise<unknown>[] = [];
+    for (const stop of trip.stops) {
+      const order = stop.order;
+      const current = await this.prisma.deliveryNote.findFirst({
+        where: { orderId: order.id, validTo: null },
+        orderBy: { versionAt: 'desc' },
+      });
+      // DEMO_NOW freezes the clock, so keep the new version strictly after the current one.
+      const versionAt =
+        current && current.versionAt >= at ? new Date(current.versionAt.getTime() + 1) : at;
+      if (current) {
+        ops.push(
+          this.prisma.deliveryNote.update({
+            where: { dnId_versionAt: { dnId: current.dnId, versionAt: current.versionAt } },
+            data: { validTo: versionAt },
+          }),
+        );
+      }
+      const lineItem = new Map(order.lines.map((l) => [l.id, l.itemId]));
+      ops.push(
+        this.prisma.deliveryNote.create({
+          data: {
+            dnId: current?.dnId ?? dnId(order.id),
+            versionAt,
+            orderId: order.id,
+            status: 'loaded',
+            changedById: loader?.id ?? null,
+            changeReason: stop.flags.length ? 'departure with dock flags' : 'departure',
+            lines: {
+              create: order.lines.flatMap((l) => {
+                if (!l.itemId) return [];
+                const lineFlags = stop.flags.filter((f) => f.orderLineId === l.id);
+                return [
+                  {
+                    itemId: l.itemId,
+                    qtyConfirmed: confirmedQty(l, lineFlags),
+                    shortageReason: lineFlags.length
+                      ? lineFlags.map((f) => f.note ?? f.type).join('; ')
+                      : null,
+                  },
+                ];
+              }),
+            },
+            // LoaderFlag needs a Loader profile; without one the dock flags stay on LoadFlag only.
+            ...(loader
+              ? {
+                  loaders: {
+                    create: { loaderId: loader.id, role: 'confirming' as const, finishedAt: at },
+                  },
+                  loaderFlags: {
+                    create: stop.flags.map((f) => {
+                      const itemId = f.orderLineId ? (lineItem.get(f.orderLineId) ?? null) : null;
+                      return {
+                        loaderId: loader.id,
+                        raisedAt: f.createdAt,
+                        scope: itemId ? ('item' as const) : ('dn' as const),
+                        itemId,
+                        qtyFlagged: f.qty,
+                        reason: f.type,
+                        reasonDetail: f.note,
+                      };
+                    }),
+                  },
+                }
+              : {}),
+          },
+        }),
+      );
+    }
+    return ops;
   }
 
   private async loaderNames(ids: string[]) {

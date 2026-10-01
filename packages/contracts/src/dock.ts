@@ -10,6 +10,15 @@ export interface LoadVehicle {
   temp: 'reefer' | 'ambient';
 }
 
+/** The dispatcher's handoff for a trip (ERD LoadingJob): bay, deadline and instructions. */
+export interface LoadJob {
+  bay: string | null;
+  loadByTime: string | null;
+  instructions: string | null;
+  priority: number;
+  status: 'assigned' | 'picking' | 'loaded' | 'handed_over' | 'cancelled';
+}
+
 /** One card in the loader's queue. */
 export interface LoadQueueItem {
   tripId: string;
@@ -22,6 +31,7 @@ export interface LoadQueueItem {
   lineCount: number;
   loaderNames: string[];
   planVersion: number;
+  job: LoadJob | null;
 }
 
 export interface LoadFlagView {
@@ -69,6 +79,7 @@ export interface LoadSheet {
     loaderNames: string[];
   } | null;
   lock: PlanLock;
+  job: LoadJob | null;
 }
 
 export interface FlagRequest {
@@ -88,5 +99,10 @@ export interface DepartSummary {
   departedAt: string;
   stopCount: number;
   lineCount: number;
-  flags: (LoadFlagView & { storeName: string; lineName: string | null })[];
+  flags: (LoadFlagView & {
+    storeName: string;
+    lineName: string | null;
+    /** Every flag goes to the dispatcher as a LoaderFlag for review. */
+    reviewStatus: 'pending_dispatcher' | 'approved' | 'rejected';
+  })[];
 }

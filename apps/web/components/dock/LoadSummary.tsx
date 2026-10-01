@@ -33,6 +33,11 @@ export function LoadSummary({ sheet }: { sheet: LoadSheet }) {
             {sheet.vehicle.plate ?? sheet.vehicle.id} · {sheet.loadOrder.length} stops ·{' '}
             {lines.length} lines
           </p>
+          {sheet.job?.status === 'handed_over' && (
+            <p className="text-label text-muted">
+              Handed over{sheet.job.bay ? ` at ${sheet.job.bay}` : ''}
+            </p>
+          )}
         </div>
       </div>
 
@@ -52,6 +57,7 @@ export function LoadSummary({ sheet }: { sheet: LoadSheet }) {
                   {(f.orderLineId && lineName.get(f.orderLineId)) || 'Whole stop'} · {f.storeName}
                 </p>
                 {f.note && <p className="text-caption text-muted">{f.note}</p>}
+                <p className="text-caption text-muted">Waiting for dispatcher review</p>
               </li>
             ))}
           </ul>

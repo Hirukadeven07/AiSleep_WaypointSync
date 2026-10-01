@@ -6,8 +6,10 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { DomainErrorFilter } from '../src/common/filters/domain-error.filter';
 import { PrismaService } from '../src/common/prisma/prisma.service';
+import { StoreService } from '../src/store/store.service';
 
 // Needs a seeded database (users only; the CSVs are optional). Builds and removes its own trips.
+// Catalogue items and the loader/dispatcher profiles are upserted so the ERD rows can be checked.
 const DAY = '2026-10-01';
 const MORNING = `${DAY}T09:00:00+05:30`;
 const EVENING = `${DAY}T16:30:00+05:30`;
@@ -26,7 +28,7 @@ describe('loader dock and store (e2e)', () => {
     return agent;
   }
 
-  async function order(storeId: string, lines: { name: string; qty: number }[]) {
+  async function order(storeId: string, lines: { name: string; qty: number; itemId?: string }[]) {
     return prisma.order.create({
       data: {
         storeId,
@@ -60,6 +62,26 @@ describe('loader dock and store (e2e)', () => {
     app.useGlobalFilters(new DomainErrorFilter());
     await app.init();
     prisma = app.get(PrismaService);
+
+    for (const [id, itemName] of [
+      ['F-MILK', 'Fresh milk'],
+      ['F-BREAD', 'Bread'],
+      ['F-YOG', 'Yoghurt'],
+    ] as const) {
+      await prisma.item.upsert({ where: { id }, update: {}, create: { id, itemName } });
+    }
+    const sampath = await prisma.user.findUniqueOrThrow({ where: { loginId: 'sampath' } });
+    await prisma.loader.upsert({
+      where: { userId: sampath.id },
+      update: {},
+      create: { userId: sampath.id },
+    });
+    const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+    const dispatcher = await prisma.dispatcher.upsert({
+      where: { userId: nimal.id },
+      update: {},
+      create: { userId: nimal.id },
+    });
 
     const district = await prisma.district.create({
       data: { name: `E2E District ${Date.now()}`, depotId: 'Peliyagoda' },
@@ -107,10 +129,19 @@ describe('loader dock and store (e2e)', () => {
       data: { ...base, tripNumber: 1, status: 'published' },
     });
     ids.loadTrip = loadTrip.id;
-    const a = await order('E2E-A', [{ name: 'Milk', qty: 4 }]);
+    await prisma.loadingJob.create({
+      data: {
+        tripId: loadTrip.id,
+        depot: 'Peliyagoda',
+        assignedById: dispatcher.id,
+        bay: 'Bay-9',
+        instructions: 'Chilled first.',
+      },
+    });
+    const a = await order('E2E-A', [{ name: 'Milk', qty: 4, itemId: 'F-MILK' }]);
     const b = await order('E2E-B', [
-      { name: 'Yoghurt', qty: 2 },
-      { name: 'Bread', qty: 3 },
+      { name: 'Yoghurt', qty: 2, itemId: 'F-YOG' },
+      { name: 'Bread', qty: 3, itemId: 'F-BREAD' },
     ]);
     await prisma.tripStop.create({ data: { tripId: loadTrip.id, orderId: a.id, sequence: 1 } });
     await prisma.tripStop.create({ data: { tripId: loadTrip.id, orderId: b.id, sequence: 2 } });
@@ -120,7 +151,7 @@ describe('loader dock and store (e2e)', () => {
     });
     ids.storeTrip = storeTrip.id;
     const home = await order('E2E-HOME', [
-      { name: 'Milk', qty: 6 },
+      { name: 'Milk', qty: 6, itemId: 'F-MILK' },
       { name: 'Chicken', qty: 2 },
     ]);
     const stop = await prisma.tripStop.create({
@@ -138,6 +169,9 @@ describe('loader dock and store (e2e)', () => {
   afterAll(async () => {
     process.env.DEMO_NOW = previousDemoNow;
     if (prisma) {
+      const e2eStores = { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] };
+      await prisma.fieldFlag.deleteMany({ where: { storeId: e2eStores } });
+      await prisma.deliveryNote.deleteMany({ where: { order: { storeId: e2eStores } } });
       await prisma.trip.deleteMany({ where: { id: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.order.deleteMany({ where: { storeId: { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] } } });
       await prisma.user.update({ where: { loginId: 'sunil' }, data: { storeId: sunilStoreId } });
@@ -152,12 +186,25 @@ describe('loader dock and store (e2e)', () => {
     it('lists the published trip and loads it last stop first', async () => {
       const loader = await login({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' });
       const queue = await loader.get('/api/loads').expect(200);
-      expect(queue.body.map((t: { tripId: string }) => t.tripId)).toContain(ids.loadTrip);
+      const card = queue.body.find((t: { tripId: string }) => t.tripId === ids.loadTrip);
+      expect(card.job).toMatchObject({ bay: 'Bay-9', status: 'assigned' });
 
       const started = await loader.post(`/api/loads/${ids.loadTrip}/start`).expect(200);
       expect(started.body.status).toBe('loading');
       expect(started.body.loadOrder.map((s: { sequence: number }) => s.sequence)).toEqual([2, 1]);
       expect(started.body.session.loaderNames).toContain('Sampath (Loader)');
+      expect(started.body.job.status).toBe('picking');
+
+      const notes = await prisma.deliveryNote.findMany({
+        where: { order: { storeId: { in: ['E2E-A', 'E2E-B'] } } },
+        include: { lines: true, loaders: true },
+      });
+      expect(notes).toHaveLength(2);
+      for (const n of notes) {
+        expect(n.status).toBe('picking');
+        expect(n.validTo).toBeNull();
+        expect(n.loaders).toHaveLength(1);
+      }
     });
 
     it('flags a line, locks on a plan change, and departs after acknowledging', async () => {
@@ -193,8 +240,31 @@ describe('loader dock and store (e2e)', () => {
         .send({ planVersion: 2 })
         .expect(200);
       expect(departed.body.flags).toHaveLength(1);
-      const trip = await prisma.trip.findUniqueOrThrow({ where: { id: ids.loadTrip } });
+      expect(departed.body.flags[0].reviewStatus).toBe('pending_dispatcher');
+      const trip = await prisma.trip.findUniqueOrThrow({
+        where: { id: ids.loadTrip },
+        include: { loadingJob: true },
+      });
       expect(trip.status).toBe('on_road');
+      expect(trip.loadingJob?.status).toBe('handed_over');
+
+      // Loading order is LIFO, so loadOrder[0] is E2E-B; its first line by name is Bread (3).
+      const loaded = await prisma.deliveryNote.findFirstOrThrow({
+        where: { order: { storeId: 'E2E-B' }, validTo: null },
+        include: { lines: true, loaderFlags: true },
+      });
+      expect(loaded.status).toBe('loaded');
+      expect(loaded.lines.find((l) => l.itemId === 'F-BREAD')?.qtyConfirmed).toBe(2);
+      expect(loaded.lines.find((l) => l.itemId === 'F-YOG')?.qtyConfirmed).toBe(2);
+      expect(loaded.loaderFlags).toHaveLength(1);
+      expect(loaded.loaderFlags[0]).toMatchObject({
+        scope: 'item',
+        itemId: 'F-BREAD',
+        reason: 'missing',
+        validationStatus: 'pending_dispatcher',
+      });
+      const versions = await prisma.deliveryNote.count({ where: { dnId: loaded.dnId } });
+      expect(versions).toBe(2);
     });
 
     it('keeps the store out of loader routes', async () => {
@@ -212,6 +282,8 @@ describe('loader dock and store (e2e)', () => {
         .expect(201);
       expect(placed.body.deliveryDate).toBe('2026-10-02');
       expect(placed.body.status).toBe('waiting');
+      const lines = await prisma.orderLine.findMany({ where: { orderId: placed.body.id } });
+      expect(lines.map((l) => l.itemId)).toEqual(['F-MILK']);
 
       process.env.DEMO_NOW = EVENING;
       try {
@@ -229,6 +301,7 @@ describe('loader dock and store (e2e)', () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
       const home = (await store.get('/api/store/home').expect(200)).body;
       expect(home.delivery.stopId).toBe(ids.storeStop);
+      expect(Array.isArray(home.phones)).toBe(true);
 
       const delivery = (await store.get(`/api/store/deliveries/${ids.storeStop}`).expect(200)).body;
       const [first, second] = delivery.lines;
@@ -254,12 +327,47 @@ describe('loader dock and store (e2e)', () => {
         include: { order: true },
       });
       expect(stop.order.status).toBe('partial');
+      expect(confirmed.body.issues).toEqual([
+        expect.objectContaining({ reason: 'missing', qty: 1, driverDecision: 'pending' }),
+      ]);
+      const flag = await prisma.fieldFlag.findFirstOrThrow({ where: { orderId: stop.orderId } });
+      expect(flag).toMatchObject({ tripId: ids.storeTrip, itemId: 'F-MILK', severity: 'medium' });
 
       const again = await store
         .post(`/api/store/deliveries/${ids.storeStop}/receipt`)
         .send({ lines: [] })
         .expect(409);
       expect(again.body.reason).toBe('RECEIPT_NOT_READY');
+    });
+
+    it('shows a deferred order on home and sends the store a notice with the reason', async () => {
+      const deferred = await prisma.order.create({
+        data: {
+          storeId: 'E2E-HOME',
+          brand: 'Fresh',
+          deliveryDate: date('2026-10-03'),
+          movedFromDate: date('2026-10-02'),
+          temp: 'ambient',
+          status: 'deferred',
+          deferReason: 'No truck capacity left',
+          units: 4,
+          weightKg: 20,
+          volumeM3: 0.1,
+        },
+      });
+      await app.get(StoreService).notifyDeferral(deferred.id);
+
+      const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+      const home = (await store.get('/api/store/home').expect(200)).body;
+      expect(home.deferral).toMatchObject({
+        id: deferred.id,
+        deliveryDate: '2026-10-03',
+        deferReason: 'No truck capacity left',
+      });
+      const notices = (await store.get('/api/store/notices').expect(200)).body;
+      const notice = notices.find((n: { title: string }) => n.title === 'Delivery moved to Sat 3 Oct');
+      expect(notice.body).toContain('No truck capacity left');
+      await prisma.notification.deleteMany({ where: { id: notice.id } });
     });
   });
 });
