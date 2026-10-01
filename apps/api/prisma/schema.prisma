@@ -439,12 +439,12 @@ model DriverEvent {
   id               String    @id @default(cuid())
   clientId         String    @unique
   driverId         String
-  tripId           String
-  trip             Trip      @relation(fields: [tripId], references: [id])
+  tripId           String?
+  trip             Trip?     @relation(fields: [tripId], references: [id], onDelete: SetNull)
   type             String
   payload          Json
   createdOnPhoneAt DateTime
-  seenPlanVersion  Int
+  seenPlanVersion  Int?
   appliedAt        DateTime?
 }
 
