@@ -8,4 +8,5 @@ export * from './auth';
 export * from './dock';
 export * from './store';
 export * from './plan';
+export * from './dispatch';
 export * from './driver-day';
