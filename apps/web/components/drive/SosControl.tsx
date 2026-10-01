@@ -42,13 +42,13 @@ export function SosControl() {
   return (
     <>
       {/* Pinned top-right so it never sits on the tab bar. */}
-      <div className="pointer-events-none fixed inset-x-0 top-0 z-40 mx-auto max-w-[480px]">
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-40 mx-auto max-w-[430px] lg:max-w-none">
         <button
           ref={triggerRef}
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Send emergency SOS alert"
-          className="pointer-events-auto absolute right-5 top-[calc(3.5rem+env(safe-area-inset-top))] flex min-h-12 items-center gap-2 rounded-pill border-2 border-white bg-danger px-[18px] py-3 text-[16px] font-bold tracking-[0.5px] text-white shadow-[0_4px_14px_0_rgba(196,48,48,0.35)] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-black"
+          className="pointer-events-auto absolute right-5 top-[calc(3.5rem+env(safe-area-inset-top))] lg:right-10 lg:top-8 flex min-h-12 items-center gap-2 rounded-pill border-2 border-white bg-danger px-[18px] py-3 text-[16px] font-bold tracking-[0.5px] text-white shadow-[0_4px_14px_0_rgba(196,48,48,0.35)] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-black"
         >
           <Icon name="alert" size={20} />
           SOS

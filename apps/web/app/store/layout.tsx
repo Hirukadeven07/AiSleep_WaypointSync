@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { RoleGate } from '@/components/shell/RoleGate';
+import { PhoneColumn } from '@/components/shell/PhoneColumn';
 import { PhoneTabBar, type PhoneTab } from '@/components/shell/PhoneTabBar';
 import { PhoneTopRow } from '@/components/shell/PhoneTopRow';
 
@@ -17,11 +18,11 @@ export default function StoreLayout({ children }: { children: ReactNode }) {
   return (
     <RoleGate role="store">
       {(me) => (
-        <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col">
+        <PhoneColumn>
           <PhoneTopRow me={me} />
           <main className="flex-1 px-5 pb-[130px] pt-2">{children}</main>
           <PhoneTabBar tabs={TABS} />
-        </div>
+        </PhoneColumn>
       )}
     </RoleGate>
   );
