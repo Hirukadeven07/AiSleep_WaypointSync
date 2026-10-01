@@ -315,6 +315,13 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
       'published',
     );
 
+    // Published stops carry ETAs: a Fresh trip leaves at 03:30 (210) and the district is 20 minutes out.
+    const etas = (
+      await prisma.tripStop.findMany({ where: { tripId: t.reefer }, orderBy: { sequence: 'asc' } })
+    ).map((s) => s.etaMin);
+    expect(etas[0]).toBe(230);
+    expect(etas[1]).toBeGreaterThan(230);
+
     const plan = await agent.get(`/api/plan?date=${DAY}`).expect(200);
     expect(plan.body.published).toMatchObject({ tripCount: 2, storeCount: 4 });
     expect(plan.body.trips.every((x: { state: string }) => x.state === 'sent')).toBe(true);

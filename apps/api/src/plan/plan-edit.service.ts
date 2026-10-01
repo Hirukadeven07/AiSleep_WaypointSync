@@ -225,27 +225,33 @@ export class PlanEditService {
   }
 
   /**
-   * Stops follow delivery windows, so every change re-sorts the trip and refreshes its planned minutes.
+   * Stops follow delivery windows, so every change re-sorts the trip and refreshes its planned minutes
+   * and each stop's ETA (read by the store, the driver and the dispatch board).
    * A change to a sent trip also raises its plan version, which pauses the dock until the loader accepts it.
    */
   async resequence(tx: Prisma.TransactionClient, tripId: string, lookup: Lookup, depot: Depot) {
+    const trip = await tx.trip.findUniqueOrThrow({
+      where: { id: tripId },
+      select: { status: true, brand: true },
+    });
     const stops = await tx.tripStop.findMany({
       where: { tripId },
       include: { order: { include: orderInclude } },
     });
     const views = new Map(stops.map((s) => [toStopView(s.order), s.id]));
     const sorted = sortStopsByWindow([...views.keys()]);
+    // Null when the travel or allowance rows for the district are missing.
+    const etas = stopEtas(sorted, lookup, depot, DEPART_MIN[trip.brand]);
     // The (tripId, sequence) pair is unique, so park every stop out of the way before numbering.
     for (const [i, view] of sorted.entries()) {
       await tx.tripStop.update({ where: { id: views.get(view)! }, data: { sequence: 1000 + i } });
     }
     for (const [i, view] of sorted.entries()) {
-      await tx.tripStop.update({ where: { id: views.get(view)! }, data: { sequence: i + 1 } });
+      await tx.tripStop.update({
+        where: { id: views.get(view)! },
+        data: { sequence: i + 1, etaMin: etas?.[i]?.arriveMin ?? null },
+      });
     }
-    const trip = await tx.trip.findUniqueOrThrow({
-      where: { id: tripId },
-      select: { status: true },
-    });
     await tx.trip.update({
       where: { id: tripId },
       data: {
