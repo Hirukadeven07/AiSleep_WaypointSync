@@ -52,6 +52,15 @@ export interface LiveTrip {
   bay: string | null;
   /** Cartons or items the loader flagged missing. */
   missingCount: number;
+  /** The same vehicle's earlier trip today, once it is done. */
+  previousTrip: {
+    tripNumber: number;
+    delivered: number;
+    total: number;
+    backAt: string | null;
+  } | null;
+  /** The same vehicle's later trip today. */
+  nextTrip: { tripNumber: number; stops: number } | null;
   hasIssue: boolean;
   stops: LiveStop[];
 }
@@ -73,6 +82,8 @@ export interface LiveDay {
   asOf: string; // ISO
   /** Earliest departure today, if any trip has left. */
   liveSince: string | null;
+  /** Vehicles with a trip that has not finished. */
+  vehiclesWorking: number;
   kpis: {
     tripsOnRoad: number;
     dispatched: number;
@@ -89,4 +100,22 @@ export interface LiveDay {
   /** Orders that were moved from an earlier day and are due today. */
   carryovers: { total: number; onTrips: number; delivered: number };
   tomorrow: { date: string; ordersReceived: number; cutoffMin: number; minutesToCutoff: number };
+}
+
+/** The stores a delay would reach, and the message they would get. */
+export interface NotifyPreview {
+  tripId: string;
+  /** "WP-3310 · Trip 1  ·  running about 25 min late" */
+  subtitle: string;
+  recipients: { stopId: string; storeName: string; detail: string }[];
+  message: string;
+}
+
+export interface NotifyRequest {
+  stopIds: string[];
+  message: string;
+}
+
+export interface NotifyResult {
+  sent: number;
 }

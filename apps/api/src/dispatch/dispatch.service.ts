@@ -1,4 +1,10 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   ORDER_CUTOFF_MIN,
   type AttentionItem,
@@ -7,14 +13,19 @@ import {
   type LiveStop,
   type LiveTrip,
   type Me,
+  type NotifyPreview,
+  type NotifyResult,
 } from '@waypoint/contracts';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 
 /** A trip counts as late from this many minutes past a stop's window. */
 const LATE_MIN = 5;
 /** A trip on the road that has not synced for this long is shown as "Not synced". */
 const SYNC_STALE_MIN = 20;
+/** A stop is "at risk" when its ETA is within this many minutes of the end of its window. */
+const AT_RISK_MIN = 15;
 const DONE = new Set(['delivered', 'confirmed', 'partial', 'deferred']);
 
 const dateOnly = (iso: string) => new Date(`${iso}T00:00:00Z`);
@@ -30,7 +41,64 @@ export class DispatchService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
+    @Inject(NOTIFIER) private readonly notifier: Notifier,
   ) {}
+
+  /** The stores a delay would reach (their ETA misses the window or is within 15 minutes of it) and the message they would get. */
+  async notifyPreview(me: Me, tripId: string): Promise<NotifyPreview> {
+    const day = await this.live(me);
+    const trip = day.trips.find((t) => t.id === tripId);
+    if (!trip) throw new NotFoundException('Trip not found');
+    const plate = trip.plate ?? trip.vehicleId;
+    const minutes = (m: number) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+    const affected = trip.stops.filter(
+      (s) =>
+        !DONE.has(s.status) &&
+        s.etaMin !== null &&
+        (s.missBy !== null || s.windowCloseMin - s.etaMin <= AT_RISK_MIN),
+    );
+    const late = trip.lateMin ?? Math.max(0, ...trip.stops.map((s) => s.missBy ?? 0));
+    return {
+      tripId,
+      subtitle: `${plate} · Trip ${trip.tripNumber}  ·  running about ${late} min late`,
+      recipients: affected.map((s) => ({
+        stopId: s.id,
+        storeName: s.storeName,
+        detail:
+          s.missBy !== null
+            ? `New ETA ${minutes(s.etaMin!)} · window was ${minutes(s.windowOpenMin)}-${minutes(s.windowCloseMin)}`
+            : `New ETA ${minutes(s.etaMin!)} · window ${minutes(s.windowOpenMin)}-${minutes(s.windowCloseMin)}`,
+      })),
+      message: `Hi, your ${trip.brand} delivery on ${plate} is running about ${late} min late. New ETA is shown in your app. Sorry for the wait.`,
+    };
+  }
+
+  /** Tells the stores of the chosen stops, in their app. */
+  async notify(me: Me, tripId: string, stopIds: string[], message: string): Promise<NotifyResult> {
+    if (!me.depotId) throw new ForbiddenException('This account has no depot');
+    const text = message.trim();
+    if (!text || stopIds.length === 0)
+      throw new BadRequestException('Choose at least one store and write a message');
+    const stops = await this.prisma.tripStop.findMany({
+      where: { id: { in: stopIds }, tripId, trip: { depotId: me.depotId } },
+      include: { order: true },
+    });
+    if (stops.length !== new Set(stopIds).size)
+      throw new NotFoundException('Stop not found on this trip');
+    const stores = [...new Set(stops.map((s) => s.order.storeId))];
+    for (const storeId of stores) {
+      const users = await this.prisma.user.findMany({ where: { storeId, role: 'store' } });
+      for (const u of users) {
+        await this.notifier.notify({
+          userId: u.id,
+          title: 'Delivery running late',
+          body: text,
+          link: '/store',
+        });
+      }
+    }
+    return { sent: stores.length };
+  }
 
   async live(me: Me): Promise<LiveDay> {
     if (!me.depotId) throw new ForbiddenException('This account has no depot');
@@ -224,6 +292,8 @@ export class DispatchService {
         backAt: t.status === 'completed' ? (t.endingTime?.toISOString() ?? null) : null,
         bay: t.loadingJob?.bay ?? null,
         missingCount,
+        previousTrip: previous(rows, t),
+        nextTrip: next(rows, t),
         hasIssue: broke || notSynced || missingCount > 0 || stops.some((s) => s.issueNote !== null),
         stops,
       };
@@ -251,6 +321,8 @@ export class DispatchService {
       depotId,
       asOf: now.toISOString(),
       liveSince: departures[0]?.toISOString() ?? null,
+      vehiclesWorking: new Set(trips.filter((t) => t.live !== 'completed').map((t) => t.vehicleId))
+        .size,
       kpis: {
         tripsOnRoad: trips.filter((t) => t.status === 'on_road' || t.status === 'breakdown').length,
         dispatched,
@@ -295,4 +367,34 @@ function clockText(d: Date): string {
     minute: '2-digit',
     hour12: false,
   }).format(d);
+}
+
+type Row = {
+  vehicleId: string;
+  tripNumber: number;
+  status: string;
+  endingTime: Date | null;
+  stops: { status: string }[];
+};
+
+/** The vehicle's earlier trip today, once it is done, for "Trip 1 done · back at depot 10:40". */
+function previous(rows: Row[], t: Row) {
+  const p = rows
+    .filter(
+      (r) => r.vehicleId === t.vehicleId && r.tripNumber < t.tripNumber && r.status === 'completed',
+    )
+    .pop();
+  if (!p) return null;
+  return {
+    tripNumber: p.tripNumber,
+    delivered: p.stops.filter((s) => DONE.has(s.status)).length,
+    total: p.stops.length,
+    backAt: p.endingTime?.toISOString() ?? null,
+  };
+}
+
+/** The vehicle's later trip today, for "Next: Trip 2 · 6 stops". */
+function next(rows: Row[], t: Row) {
+  const n = rows.find((r) => r.vehicleId === t.vehicleId && r.tripNumber > t.tripNumber);
+  return n ? { tripNumber: n.tripNumber, stops: n.stops.length } : null;
 }

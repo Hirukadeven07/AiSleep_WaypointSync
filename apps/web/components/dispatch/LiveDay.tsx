@@ -3,11 +3,11 @@
 import { useState } from 'react';
 import type { LiveDay as LiveDayData, LiveTrip } from '@waypoint/contracts';
 import { Icon, type IconName } from '@/components/ui/Icon';
-import { api } from '@/lib/api';
-import { usePoll } from '@/lib/poll';
 import { useSession } from '@/lib/session';
 import { dayLabel } from '@/components/plan/format';
 import { GlancePanel } from './GlancePanel';
+import { useLiveDay } from './useLiveDay';
+import { useTripPanels } from './useTripPanels';
 import { BRAND_TAG, firstName, greeting, lastUpdate, time12, timeOf, toneOf } from './live-format';
 
 type Filter = 'all' | 'on_time' | 'late' | 'issue' | 'done';
@@ -57,11 +57,27 @@ function Kpi({
   );
 }
 
-function TripRow({ trip, zebra }: { trip: LiveTrip; zebra: boolean }) {
+function TripRow({
+  trip,
+  zebra,
+  onOpen,
+  onActions,
+}: {
+  trip: LiveTrip;
+  zebra: boolean;
+  onOpen: () => void;
+  onActions: () => void;
+}) {
   const tone = toneOf(trip);
   const pct = trip.stopsTotal > 0 ? (trip.stopsDone / trip.stopsTotal) * 100 : 0;
   return (
-    <div className={`flex shrink-0 items-center gap-3 rounded-input p-3 ${zebra ? 'bg-wash' : ''}`}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => e.key === 'Enter' && onOpen()}
+      className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-input p-3 ${zebra ? 'bg-wash' : ''}`}
+    >
       <div className="flex w-[200px] shrink-0 flex-col gap-px overflow-hidden whitespace-nowrap">
         <p className="text-[14px] font-semibold leading-5 text-ink">
           {trip.plate ?? trip.vehicleId} · Trip {trip.tripNumber}
@@ -99,7 +115,21 @@ function TripRow({ trip, zebra }: { trip: LiveTrip; zebra: boolean }) {
       <div className="w-[160px] shrink-0 truncate text-[12px] leading-[17px] text-muted">
         {lastUpdate(trip)}
       </div>
-      <div className="h-[38px] w-[44px] shrink-0" />
+      <div className="flex h-[38px] w-[44px] shrink-0 items-center justify-center">
+        {(trip.live === 'late' || trip.live === 'not_synced') && (
+          <button
+            type="button"
+            aria-label="Vehicle actions"
+            onClick={(e) => {
+              e.stopPropagation();
+              onActions();
+            }}
+            className="flex size-8 items-center justify-center rounded-full bg-info-tint text-slate"
+          >
+            <Icon name="truck" size={15} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -107,7 +137,8 @@ function TripRow({ trip, zebra }: { trip: LiveTrip; zebra: boolean }) {
 /** Figma "Home / Live day": greeting, four numbers, today's trips, and the side panel. */
 export function LiveDay() {
   const { me } = useSession();
-  const { data: day, error } = usePoll(() => api<LiveDayData>('/dispatch/live'), 30_000);
+  const { day, error } = useLiveDay();
+  const panels = useTripPanels(day);
   const [filter, setFilter] = useState<Filter>('all');
 
   if (!day) {
@@ -204,12 +235,19 @@ export function LiveDay() {
             <p className="px-3 py-6 text-[13px] text-muted">No trips in this view.</p>
           )}
           {rows.map((t, i) => (
-            <TripRow key={t.id} trip={t} zebra={i % 2 === 0} />
+            <TripRow
+              key={t.id}
+              trip={t}
+              zebra={i % 2 === 0}
+              onOpen={() => panels.openTrip(t.id)}
+              onActions={() => panels.openActions(t.id)}
+            />
           ))}
         </section>
       </div>
 
       <GlancePanel day={day} className="lg:w-[340px] lg:shrink-0" />
+      {panels.element}
     </div>
   );
 }

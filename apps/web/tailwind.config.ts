@@ -60,6 +60,10 @@ const config: Config = {
         'danger-wash': '#fcf1f1',
         'danger-line': '#e8b4b4',
         'olive-wash': '#f3f5e6', // an empty trip you just created
+
+        // Dispatch board (Figma "Dispatch board"): trips on the road, the next stop, a later stop
+        blue: '#3b6ea8',
+        quiet: '#6e7b8a',
       },
       fontFamily: {
         sans: ['var(--font-dm-sans)', 'DM Sans', 'system-ui', 'sans-serif'],
