@@ -1,0 +1,22 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="262" height="100" viewBox="0 0 262 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Illustration" clip-path="url(#clip0_0_23)">
+<circle id="Ellipse" cx="131" cy="33" r="23" fill="#EFE6D3"/>
+<ellipse id="Ellipse_2" opacity="0.8" cx="40" cy="25" rx="20" ry="7" fill="white"/>
+<ellipse id="Ellipse_3" opacity="0.8" cx="216" cy="33" rx="24" ry="7" fill="white"/>
+<ellipse id="Ellipse_4" cx="70" cy="100" rx="110" ry="70" fill="#D4D9AC"/>
+<ellipse id="Ellipse_5" cx="212" cy="100" rx="120" ry="80" fill="#C3CA92"/>
+<ellipse id="Ellipse_6" cx="190" cy="115" rx="130" ry="60" fill="#A9B274"/>
+<rect id="Rectangle" x="-10" y="82" width="282" height="16" fill="#C9D3DE"/>
+<rect id="Rectangle_2" x="86" y="42" width="62" height="38" rx="6" fill="#1B263B"/>
+<path id="Rectangle_3" d="M150 56C150 53.7909 151.791 52 154 52H170C175.523 52 180 56.4772 180 62V76C180 78.2091 178.209 80 176 80H154C151.791 80 150 78.2091 150 76V56Z" fill="#415A77"/>
+<rect id="Rectangle_4" x="164" y="56" width="12" height="10" rx="3" fill="#E1E8F0"/>
+<rect id="Rectangle_5" x="96" y="56" width="26" height="6" rx="3" fill="#C3CA92"/>
+<circle id="Ellipse_7" cx="104" cy="80" r="6.5" fill="#0D1B2A" stroke="#F4F6F8" stroke-width="3"/>
+<circle id="Ellipse_8" cx="162" cy="80" r="6.5" fill="#0D1B2A" stroke="#F4F6F8" stroke-width="3"/>
+</g>
+<defs>
+<clipPath id="clip0_0_23">
+<rect width="262" height="100" fill="white"/>
+</clipPath>
+</defs>
+</svg>
