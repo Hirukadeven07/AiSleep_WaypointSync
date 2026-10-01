@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Brand, PlanTrip, PlanTripState } from '@waypoint/contracts';
+import type { Brand, DropCheck, PlanTrip, PlanTripState } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
-import { kgText, m3Text, stopWindow, tone, tripSubtitle } from './format';
+import { kgText, m3Text, stopCount, stopWindow, tone, vehicleKind } from './format';
+import { dragImage } from './OrderQueue';
+import type { PlanEdit } from './usePlanEdit';
 
 const TILE: Record<Brand, string> = {
   Fresh: 'bg-fresh-tint text-fresh',
@@ -59,28 +61,76 @@ function stateChip(trip: PlanTrip) {
   return { ...STATE.over, label: `Over ${what}` };
 }
 
+/** Figma "Drop hint": says where the stop will land, or why the drop is refused. */
+function DropHint({ check }: { check: DropCheck }) {
+  const refused = !check.canDrop;
+  return (
+    <span
+      className={`pointer-events-none absolute right-4 top-full z-10 flex -translate-y-1/2 items-center gap-2 rounded-pill px-4 py-[10px] text-[13px] font-semibold leading-[18px] text-bg ${
+        refused ? 'bg-danger' : 'bg-primary'
+      }`}
+    >
+      <Icon name={refused ? 'alert' : 'plus'} size={16} />
+      {refused
+        ? check.blocks[0]?.message
+        : `Drop to add · slots in as stop ${check.placedSequence} by delivery window`}
+    </span>
+  );
+}
+
 function TripRow({
   trip,
   open,
   onToggle,
+  edit,
 }: {
   trip: PlanTrip;
   open: boolean;
   onToggle: () => void;
+  edit: PlanEdit;
 }) {
+  const hover = edit.hover?.tripId === trip.id ? edit.hover : null;
+  const check = hover?.check ?? null;
+  const preview = check?.after;
+  const droppable = edit.drag !== null && trip.state !== 'sent';
   const chip = stateChip(trip);
   const over = trip.state === 'over';
-  const stops = trip.stops.length;
+  const refused = check ? !check.canDrop : false;
+
+  // While an order hovers over the trip, the bars show what the trip would look like with it.
+  const weight = preview?.weightKg ?? trip.weightKg;
+  const volume = preview?.volumeM3 ?? trip.volumeM3;
+  const minutes = preview ? preview.minutes : trip.minutes;
+  const stopsNow = preview?.stopCount ?? trip.stops.length;
+
+  const frame = hover
+    ? refused
+      ? 'border-2 border-danger-line bg-danger-wash'
+      : 'border-2 border-slate bg-wash'
+    : over
+      ? 'border border-danger-line bg-danger-wash'
+      : open
+        ? 'border border-border bg-wash'
+        : '';
+
   return (
     <div
       id={`trip-${trip.id}`}
-      className={`flex flex-col rounded-note ${
-        over
-          ? 'border border-danger-line bg-danger-wash'
-          : open
-            ? 'border border-border bg-wash'
-            : ''
-      }`}
+      onDragOver={(e) => {
+        if (!droppable) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        edit.enter(trip.id);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) edit.leave(trip.id);
+      }}
+      onDrop={(e) => {
+        if (!droppable || !edit.drag) return;
+        e.preventDefault();
+        edit.drop(trip.id);
+      }}
+      className={`relative flex flex-col rounded-note ${frame}`}
     >
       <button
         type="button"
@@ -93,29 +143,31 @@ function TripRow({
         >
           <Icon name="truck" size={16} />
         </span>
-        <span className="flex min-w-px flex-[1_0_0] flex-col gap-px whitespace-nowrap">
-          <span className="text-[14px] font-semibold leading-5 text-ink">
+        <span className="flex min-w-px flex-[1_0_0] flex-col gap-px overflow-hidden whitespace-nowrap">
+          <span className="block truncate text-[14px] font-semibold leading-5 text-ink">
             {trip.plate ?? trip.vehicleId} · Trip {trip.tripNumber}
           </span>
-          <span className="text-[12px] leading-[15px] text-muted">{tripSubtitle(trip)}</span>
+          <span className="block truncate text-[12px] leading-[15px] text-muted">
+            {vehicleKind(trip)} · {trip.brand} · {trip.district} · {stopCount(stopsNow)}
+          </span>
         </span>
         <Capacity
           unit="kg"
-          used={trip.weightKg}
+          used={weight}
           cap={trip.weightCapKg}
-          text={`${kgText(trip.weightKg)}/${kgText(trip.weightCapKg)}`}
+          text={`${kgText(weight)}/${kgText(trip.weightCapKg)}`}
         />
         <Capacity
           unit="m³"
-          used={trip.volumeM3}
+          used={volume}
           cap={trip.volumeCapM3}
-          text={`${m3Text(trip.volumeM3)}/${m3Text(trip.volumeCapM3)}`}
+          text={`${m3Text(volume)}/${m3Text(trip.volumeCapM3)}`}
         />
         <Capacity
           unit="min"
-          used={trip.minutes ?? 0}
+          used={minutes ?? 0}
           cap={trip.budgetMin}
-          text={`${trip.minutes ?? '–'}/${trip.budgetMin}`}
+          text={`${minutes ?? '–'}/${trip.budgetMin}`}
         />
         <span className="flex w-[196px] shrink-0 items-center justify-end">
           <span
@@ -133,15 +185,25 @@ function TripRow({
           {trip.stops.map((s) => (
             <div
               key={s.id}
-              className="flex items-center gap-[10px] rounded-[10px] bg-surface px-[10px] py-[7px]"
+              draggable={trip.state !== 'sent'}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', s.orderId);
+                dragImage(e.currentTarget, e);
+                edit.startDrag({ orderId: s.orderId, storeName: s.storeName, fromTripId: trip.id });
+              }}
+              onDragEnd={edit.endDrag}
+              className={`flex items-center gap-[10px] rounded-[10px] bg-surface px-[10px] py-[7px] ${
+                trip.state !== 'sent' ? 'cursor-grab' : ''
+              }`}
             >
               <span
                 className={`flex size-5 items-center justify-center rounded-[10px] text-[12px] font-bold leading-[14px] ${TILE[trip.brand]}`}
               >
                 {s.sequence}
               </span>
-              <span className="min-w-px flex-[1_0_0] text-[13px] font-medium leading-[18px] text-ink">
-                {s.storeName}
+              <span className="min-w-px flex-[1_0_0] whitespace-pre text-[13px] font-medium leading-[18px] text-ink">
+                {edit.justAdded === s.orderId ? `${s.storeName}  ·  just added` : s.storeName}
               </span>
               <span className="whitespace-nowrap text-[12px] leading-[17px] text-muted">
                 {stopWindow(s)}
@@ -157,7 +219,7 @@ function TripRow({
           </p>
         </div>
       )}
-      <span className="sr-only">{stops} stops</span>
+      {check && <DropHint check={check} />}
     </div>
   );
 }
@@ -165,12 +227,11 @@ function TripRow({
 /** Figma "Trips": a card of trip rows with kg, m³ and minute bars, a status chip and the stops when open. */
 export function TripList({
   trips,
-  focusTripId,
+  edit,
   className = '',
 }: {
   trips: PlanTrip[];
-  /** Opens and scrolls to this trip (the "View" button on the problems pill). */
-  focusTripId: string | null;
+  edit: PlanEdit;
   className?: string;
 }) {
   const [openId, setOpenId] = useState<string | null>(trips[0]?.id ?? null);
@@ -185,17 +246,20 @@ export function TripList({
     }
   }, [trips]);
 
+  // "View" on the problems pill, or a trip that just received an order, opens and scrolls to that trip.
+  const focus = edit.focus;
   useEffect(() => {
-    if (!focusTripId) return;
-    setOpenId(focusTripId);
-    const index = trips.findIndex((t) => t.id === focusTripId);
+    if (!focus) return;
+    setOpenId(focus.id);
+    const index = trips.findIndex((t) => t.id === focus.id);
     if (index >= VISIBLE) setAll(true);
     requestAnimationFrame(() =>
       document
-        .getElementById(`trip-${focusTripId}`)
+        .getElementById(`trip-${focus.id}`)
         ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
     );
-  }, [focusTripId, trips]);
+    // Only a new focus request should run this, not every refresh of the trips.
+  }, [focus?.id, focus?.n]);
 
   const shown = all ? trips : trips.slice(0, VISIBLE);
   const hidden = trips.length - shown.length;
@@ -233,6 +297,7 @@ export function TripList({
           trip={t}
           open={openId === t.id}
           onToggle={() => setOpenId(openId === t.id ? null : t.id)}
+          edit={edit}
         />
       ))}
 
