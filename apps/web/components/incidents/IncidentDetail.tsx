@@ -79,7 +79,54 @@ const OPTIONS: { action: RecoveryAction; title: string; hint?: string }[] = [
   },
   { action: 'tomorrow', title: 'Move remaining stops to tomorrow' },
   { action: 'split', title: 'Split it' },
+  {
+    action: 'defer_one',
+    title: 'Defer one store, send the rest',
+    hint: 'Pick the store that waits for the next delivery day. The vehicle you pick takes the others. The store gets a notice with the reason and the new date.',
+  },
 ];
+
+/** The store that waits for the next delivery day (defer_one). */
+function StorePicker({
+  stops,
+  value,
+  onPick,
+}: {
+  stops: Detail['stops'];
+  value: string | null;
+  onPick: (id: string) => void;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-[6px] py-[6px]">
+      <p className="text-[12px] font-semibold leading-4 text-muted">Store to defer</p>
+      {stops.map((s) => {
+        const on = s.id === value;
+        return (
+          <button
+            key={s.id}
+            type="button"
+            aria-pressed={on}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPick(s.id);
+            }}
+            className={`flex w-full items-center gap-[10px] rounded-[12px] px-3 py-[9px] text-left ${
+              on
+                ? 'border-[1.5px] border-slate bg-surface'
+                : 'border-[1.5px] border-transparent bg-wash'
+            }`}
+          >
+            <Radio on={on} size={14} />
+            <span className="min-w-px flex-1 truncate text-[13px] font-semibold leading-[18px] text-ink">
+              {s.storeName}
+            </span>
+            <span className="shrink-0 text-[12px] leading-[15px] text-muted">{s.windowText}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function Picker({
   options,
@@ -148,6 +195,8 @@ export function IncidentDetail({
   const firstFree = d.replacements.find((r) => r.available)?.vehicleId ?? null;
   const [action, setAction] = useState<RecoveryAction>('replacement');
   const [vehicleId, setVehicleId] = useState<string | null>(firstFree);
+  const [deferStopId, setDeferStopId] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -155,6 +204,8 @@ export function IncidentDetail({
   useEffect(() => {
     setAction('replacement');
     setVehicleId(firstFree);
+    setDeferStopId(null);
+    setReason('');
     setError(null);
   }, [d.id]);
   // The chosen vehicle can stop being free while the page is open.
@@ -166,15 +217,21 @@ export function IncidentDetail({
 
   const chosen = d.replacements.find((r) => r.vehicleId === vehicleId);
   const needsVehicle = action !== 'tomorrow';
-  const canConfirm = !busy && (!needsVehicle || !!chosen);
+  const deferStop = d.stops.find((s) => s.id === deferStopId);
+  const canConfirm =
+    !busy && (!needsVehicle || !!chosen) && (action !== 'defer_one' || !!deferStop);
   const confirmText =
     action === 'tomorrow'
       ? 'Move to tomorrow'
-      : chosen
-        ? action === 'split'
-          ? `Confirm split with ${plateOf(chosen.label)}`
-          : `Confirm and send ${plateOf(chosen.label)}`
-        : 'Choose a vehicle';
+      : action === 'defer_one' && !deferStop
+        ? 'Choose the store to defer'
+        : chosen
+          ? action === 'defer_one'
+            ? `Defer ${deferStop!.storeName}, send ${plateOf(chosen.label)}`
+            : action === 'split'
+              ? `Confirm split with ${plateOf(chosen.label)}`
+              : `Confirm and send ${plateOf(chosen.label)}`
+          : 'Choose a vehicle';
 
   async function run<T extends Detail>(path: string, body?: unknown, done?: (r: T) => void) {
     setBusy(true);
@@ -312,7 +369,9 @@ export function IncidentDetail({
                   {OPTIONS.map((o) => {
                     const on = action === o.action;
                     const unavailable =
-                      d.stops.length === 0 || (o.action !== 'tomorrow' && !firstFree);
+                      d.stops.length === 0 ||
+                      (o.action !== 'tomorrow' && !firstFree) ||
+                      (o.action === 'defer_one' && d.stops.length < 2);
                     return (
                       <div
                         key={o.action}
@@ -335,6 +394,31 @@ export function IncidentDetail({
                           <p className="text-[14px] font-semibold leading-5 text-ink">{o.title}</p>
                           {on && o.hint && (
                             <p className="text-[12px] leading-[17px] text-muted">{o.hint}</p>
+                          )}
+                          {on && o.action === 'defer_one' && (
+                            <>
+                              <StorePicker
+                                stops={d.stops}
+                                value={deferStopId}
+                                onPick={setDeferStopId}
+                              />
+                              <label
+                                className="flex w-full flex-col gap-[6px] py-[6px] text-[12px] font-semibold leading-4 text-muted"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                Reason the store sees (optional)
+                                <input
+                                  value={reason}
+                                  maxLength={300}
+                                  onChange={(e) => setReason(e.target.value)}
+                                  placeholder="The truck broke down on the road"
+                                  className="rounded-[12px] border border-mist bg-surface px-3 py-[9px] text-[13px] font-normal text-ink"
+                                />
+                              </label>
+                              <p className="text-[12px] font-semibold leading-4 text-muted">
+                                Vehicle for the other stops
+                              </p>
+                            </>
                           )}
                           {on && o.action !== 'tomorrow' && (
                             <Picker
@@ -367,7 +451,13 @@ export function IncidentDetail({
                       onClick={() =>
                         run<Detail>(
                           'resolve',
-                          { action, vehicleId: needsVehicle ? vehicleId : undefined },
+                          {
+                            action,
+                            vehicleId: needsVehicle ? vehicleId : undefined,
+                            ...(action === 'defer_one'
+                              ? { deferStopId, reason: reason.trim() || undefined }
+                              : {}),
+                          },
                           onResolved,
                         )
                       }

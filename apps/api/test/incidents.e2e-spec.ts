@@ -364,10 +364,10 @@ describe('incidents (e2e)', () => {
       .expect(200);
     expect(res.body).toMatchObject({ state: 'resolved', outcome: 'Moved' });
     expect(res.body.resolution.tripId).toBeNull();
-    expect(res.body.stops.map((s: { chip: string }) => s.chip)).toEqual([
-      'Moved to tomorrow',
-      'Moved to tomorrow',
-    ]);
+    // The chip names the real next delivery day, e.g. "Moved to Wed 13 Aug".
+    const chips = res.body.stops.map((s: { chip: string }) => s.chip);
+    expect(chips).toHaveLength(2);
+    for (const chip of chips) expect(chip).toMatch(/^Moved to \w{3} \d{1,2} \w{3}$/);
 
     const orders = await prisma.order.findMany({
       where: { id: { in: [ids['bd2-order1'], ids['bd2-order2']] } },

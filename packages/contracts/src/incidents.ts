@@ -49,7 +49,8 @@ export interface ReplacementOption {
   available: boolean;
 }
 
-export type RecoveryAction = 'replacement' | 'tomorrow' | 'split';
+/** defer_one: the dispatcher picks one store to move to the next delivery day; the rest go on the replacement. */
+export type RecoveryAction = 'replacement' | 'tomorrow' | 'split' | 'defer_one';
 
 export interface IncidentDetail extends IncidentSummary {
   /** "Engine overheating  ·  reported 10:12 by Ruwan Silva (driver)". */
@@ -74,6 +75,16 @@ export interface IncidentDetail extends IncidentSummary {
 
 export interface ResolveRequest {
   action: RecoveryAction;
-  /** The replacement vehicle, for "replacement" and "split". */
+  /** The replacement vehicle, for "replacement", "split" and "defer_one". */
   vehicleId?: string;
+  /** The stop to move to the next delivery day, for "defer_one". */
+  deferStopId?: string;
+  /** Why the store's delivery moved; shown to the store. Defaults to "<plate> broke down". */
+  reason?: string;
+}
+
+/** A dispatcher logs that a truck broke down (POST /api/incidents/breakdown). */
+export interface BreakdownRequest {
+  tripId: string;
+  note?: string;
 }

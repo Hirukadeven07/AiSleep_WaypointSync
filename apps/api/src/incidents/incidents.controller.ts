@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import type { IncidentDetail, IncidentList } from '@waypoint/contracts';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { ResolveDto } from './dto';
+import { BreakdownDto, ResolveDto } from './dto';
 import { IncidentsService } from './incidents.service';
 
 @Controller('incidents')
@@ -14,6 +14,13 @@ export class IncidentsController {
   @Get()
   list(@CurrentUser() me: AuthUser): Promise<IncidentList> {
     return this.incidents.list(me);
+  }
+
+  /** A truck broke down: stop its trip and open a breakdown incident to recover the remaining stops. */
+  @Post('breakdown')
+  @HttpCode(200)
+  breakdown(@CurrentUser() me: AuthUser, @Body() dto: BreakdownDto): Promise<IncidentDetail> {
+    return this.incidents.reportBreakdown(me, dto.tripId, dto.note);
   }
 
   @Get(':id')
@@ -35,7 +42,7 @@ export class IncidentsController {
     return this.incidents.notifyStores(me, id);
   }
 
-  /** Recover from a breakdown: replacement vehicle, tomorrow, or split. */
+  /** Recover from a breakdown: replacement vehicle, tomorrow, split, or defer one chosen store. */
   @Post(':id/resolve')
   @HttpCode(200)
   resolve(

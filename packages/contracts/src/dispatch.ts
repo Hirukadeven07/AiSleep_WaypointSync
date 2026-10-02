@@ -47,6 +47,12 @@ export interface LiveTrip {
   /** Where the last update came from (the last store served) and when. */
   lastPlace: string | null;
   lastAt: string | null;
+  /** When the server last heard from this trip (a synced driver action or GPS ping). Never a guess. */
+  lastSyncAt: string | null;
+  /** When the trip left the depot, if it has. */
+  departedAt: string | null;
+  /** Open SOS alerts from this trip's driver. */
+  openSos: number;
   /** When the vehicle got back to the depot (completed trips). */
   backAt: string | null;
   bay: string | null;
@@ -65,7 +71,7 @@ export interface LiveTrip {
   stops: LiveStop[];
 }
 
-export type AttentionKind = 'breakdown' | 'damaged' | 'missing' | 'not_synced';
+export type AttentionKind = 'breakdown' | 'damaged' | 'missing' | 'not_synced' | 'sos';
 
 export interface AttentionItem {
   id: string;
@@ -74,6 +80,8 @@ export interface AttentionItem {
   text: string;
   tripId: string;
   phone: string | null;
+  /** The driver's SOS (DriverIncident) id, for kind "sos". */
+  incidentId?: string;
 }
 
 export interface LiveDay {
@@ -118,4 +126,33 @@ export interface NotifyRequest {
 
 export interface NotifyResult {
   sent: number;
+}
+
+/** "Move a stop": where each remaining stop of a trip could go (GET /api/dispatch/trips/:id/move-options). */
+export interface MoveTarget {
+  tripId: string;
+  /** "WP-3140 · Trip 2 · loading" */
+  label: string;
+  /** Per stop id: can it go there, and if not, why (the domain rule's message). */
+  fits: Record<string, { ok: boolean; reason: string | null }>;
+}
+
+export interface MoveOptions {
+  tripId: string;
+  stops: { id: string; storeName: string; windowText: string }[];
+  targets: MoveTarget[];
+}
+
+export interface MoveStopRequest {
+  stopId: string;
+  toTripId: string;
+}
+
+export interface MoveStopResult {
+  stopId: string;
+  storeName: string;
+  toTripId: string;
+  /** "WP-3140 · Trip 2" */
+  toLabel: string;
+  etaMin: number | null;
 }
