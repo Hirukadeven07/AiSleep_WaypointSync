@@ -3,6 +3,8 @@
  *  - Trip A: published Fresh trip with 3 stops, for the loader queue and LIFO checklist.
  *  - Trip B: on the road, with sunil's store stop arrived, for the store receipt.
  *  - A deferred order for sunil's store, with its notice.
+ *  - Trip C: completed yesterday at a store outside trips A and B, so the team ERD seed has a
+ *    delivered stop for its sample receipt, load flag and driver events.
  * Idempotent: does nothing if today's demo trips already exist.
  */
 import type { Brand, PrismaClient, Store } from '@prisma/client';
@@ -205,6 +207,45 @@ export async function seedDockStoreDemo(prisma: PrismaClient) {
       ackedPlanVersion: 1,
     },
   });
+
+  // Trip C: completed yesterday, one delivered stop at a store outside trips A and B.
+  const doneStore = candidates.find((s) => !tripAStores.some((a) => a.id === s.id));
+  if (doneStore) {
+    const yesterday = colomboDate(-1);
+    // Window opening yesterday, Colombo time (UTC+05:30).
+    const deliveredAt = new Date(
+      asDate(yesterday).getTime() + (doneStore.windowOpenMin - 330) * 60_000,
+    );
+    const tripC = await prisma.trip.create({
+      data: {
+        vehicleId: vehicleB.id,
+        assignedDriverId: kasun?.id ?? null,
+        depotId: DEPOT,
+        brand: doneStore.brand,
+        districtId: doneStore.districtId,
+        serviceDate: asDate(yesterday),
+        tripNumber: 1,
+        status: 'completed',
+        planVersion: 1,
+        publishedAt: new Date(deliveredAt.getTime() - 4 * 60 * 60_000),
+        startingTime: new Date(deliveredAt.getTime() - 60 * 60_000),
+        endingTime: new Date(deliveredAt.getTime() + 60 * 60_000),
+      },
+    });
+    const doneOrder = await createOrder(prisma, doneStore, yesterday, 0);
+    await prisma.order.update({ where: { id: doneOrder.id }, data: { status: 'delivered' } });
+    await prisma.tripStop.create({
+      data: {
+        tripId: tripC.id,
+        orderId: doneOrder.id,
+        sequence: 1,
+        status: 'delivered',
+        etaMin: doneStore.windowOpenMin,
+        arrivedAt: deliveredAt,
+        storeConfirmedAt: deliveredAt,
+      },
+    });
+  }
 
   // A deferred order with its notice.
   const reason = 'Fleet over capacity at Peliyagoda today';

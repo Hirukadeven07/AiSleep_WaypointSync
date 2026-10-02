@@ -343,11 +343,21 @@ async function seedOps(prisma: PrismaClient) {
     });
   }
 
-  // Dummy rows for tables the rest of seed never writes. Use a published-trip
-  // stop — never sunil's live arrived receive stop.
-  const doneStop = published?.stops[0];
+  // Dummy rows for tables the rest of seed never writes. Use yesterday's completed
+  // trip — never the published trip on the loader queue or sunil's live arrived receive stop.
+  const done = await prisma.trip.findFirst({
+    where: { status: 'completed', depotId: 'Peliyagoda' },
+    include: {
+      stops: {
+        orderBy: { sequence: 'asc' },
+        include: { order: { include: { lines: true, store: true } } },
+      },
+    },
+    orderBy: { serviceDate: 'desc' },
+  });
+  const doneStop = done?.stops[0];
   if (doneStop && (await prisma.storeReceipt.count({ where: { stopId: doneStop.id } })) === 0) {
-    const confirmedAt = new Date();
+    const confirmedAt = doneStop.arrivedAt ?? new Date();
     await prisma.tripStop.update({
       where: { id: doneStop.id },
       data: {
@@ -398,28 +408,33 @@ async function seedOps(prisma: PrismaClient) {
     });
   }
 
-  if (kasun && published && (await prisma.driverEvent.count({ where: { driverId: kasun.id } })) === 0) {
-    const stopId = doneStop?.id;
-    const t0 = new Date();
+  if (
+    kasun &&
+    done &&
+    doneStop &&
+    (await prisma.driverEvent.count({ where: { driverId: kasun.id } })) === 0
+  ) {
+    const stopId = doneStop.id;
+    const arrivedAt = doneStop.arrivedAt ?? new Date();
     await prisma.driverEvent.createMany({
       data: [
         {
-          clientId: `seed-arrived-${published.id}`,
+          clientId: `seed-arrived-${done.id}`,
           driverId: kasun.id,
-          tripId: published.id,
+          tripId: done.id,
           type: 'ARRIVED',
           payload: { stopId },
-          createdOnPhoneAt: new Date(t0.getTime() - 20 * 60_000),
-          seenPlanVersion: published.planVersion,
+          createdOnPhoneAt: arrivedAt,
+          seenPlanVersion: done.planVersion,
         },
         {
-          clientId: `seed-ack-${published.id}`,
+          clientId: `seed-ack-${done.id}`,
           driverId: kasun.id,
-          tripId: published.id,
+          tripId: done.id,
           type: 'ACKNOWLEDGEMENT',
           payload: { stopId },
-          createdOnPhoneAt: new Date(t0.getTime() - 5 * 60_000),
-          seenPlanVersion: published.planVersion,
+          createdOnPhoneAt: new Date(arrivedAt.getTime() + 15 * 60_000),
+          seenPlanVersion: done.planVersion,
         },
       ],
     });
