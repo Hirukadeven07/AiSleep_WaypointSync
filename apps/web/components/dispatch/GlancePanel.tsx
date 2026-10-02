@@ -171,9 +171,18 @@ export function GlancePanel({ day, className = '' }: { day: LiveDay; className?:
       className={`flex flex-col gap-[14px] overflow-y-auto rounded-hero bg-border p-[18px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}
     >
       <div className="flex shrink-0 items-center">
-        <span className="flex size-10 items-center justify-center rounded-full bg-surface text-slate">
+        <Link
+          href="/dispatch/incidents"
+          aria-label={`Incidents, ${day.attention.length} need attention`}
+          className="relative flex size-10 items-center justify-center rounded-full bg-surface text-slate"
+        >
           <Icon name="bell" size={18} />
-        </span>
+          {day.attention.length > 0 && (
+            <span className="absolute -right-1 -top-1 flex min-w-[18px] items-center justify-center rounded-pill bg-danger px-1 text-[11px] font-semibold leading-[18px] text-bg">
+              {day.attention.length}
+            </span>
+          )}
+        </Link>
         <span className="min-w-px flex-1" />
         <p className="whitespace-nowrap text-[13px] font-semibold leading-[18px] text-muted">
           Today at a glance
