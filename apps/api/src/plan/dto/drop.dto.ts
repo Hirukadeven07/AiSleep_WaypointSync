@@ -1,4 +1,6 @@
 import {
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsOptional,
@@ -53,9 +55,11 @@ export class CreateTripDto {
   @IsIn(['Fresh', 'Style', 'Tech'])
   brand: 'Fresh' | 'Style' | 'Tech';
 
-  @IsString()
-  @MinLength(1)
-  districtId: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  districts: string[];
 
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)

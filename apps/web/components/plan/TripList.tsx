@@ -92,6 +92,21 @@ const hourText = (min: number) =>
     : `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
 
 /** A trip you just created: a drop area and the orders the rules let onto it (Figma "New · empty"). */
+/** Opens the "Remove trip" confirmation; only trips still being planned can be removed. */
+function RemoveTripButton({ trip, edit }: { trip: PlanTrip; edit: PlanEdit }) {
+  return (
+    <button
+      type="button"
+      onClick={() => edit.openModal({ kind: 'removeTrip', trip })}
+      aria-label={`Remove ${trip.plate ?? trip.vehicleId} · Trip ${trip.tripNumber}`}
+      className="flex shrink-0 items-center gap-[6px] whitespace-nowrap rounded-pill border border-danger-line bg-surface px-3 py-[6px] text-[12px] font-semibold leading-[15px] text-danger"
+    >
+      <Icon name="x" size={12} />
+      Remove trip
+    </button>
+  );
+}
+
 function EmptyTrip({ trip, edit }: { trip: PlanTrip; edit: PlanEdit }) {
   const [suggestions, setSuggestions] = useState<TripSuggestion[]>([]);
 
@@ -131,6 +146,7 @@ function EmptyTrip({ trip, edit }: { trip: PlanTrip; edit: PlanEdit }) {
         <span className="rounded-pill bg-olive-tint px-[9px] py-[3px] text-[12px] font-semibold leading-[15px] text-olive-ink">
           New · empty
         </span>
+        <RemoveTripButton trip={trip} edit={edit} />
       </div>
       <div className="flex flex-col items-center gap-[2px] whitespace-nowrap rounded-[12px] border-[1.5px] border-dashed border-olive-ink bg-surface px-[14px] py-3">
         <p className="text-[13px] font-semibold leading-[18px] text-olive-ink">
@@ -337,10 +353,13 @@ function TripRow({
               </span>
             </div>
           ))}
-          <p className="whitespace-nowrap text-[12px] font-medium leading-[15px] text-muted">
-            Stops stay sorted by delivery window, earliest first. The loader list and driver route
-            follow this order.
-          </p>
+          <div className="flex items-center gap-3 pb-2">
+            <p className="min-w-px flex-1 text-[12px] font-medium leading-[15px] text-muted">
+              Stops stay sorted by delivery window, earliest first. The loader list and driver route
+              follow this order.
+            </p>
+            {trip.status === 'planning' && <RemoveTripButton trip={trip} edit={edit} />}
+          </div>
         </div>
       )}
       {check && <DropHint check={check} />}
