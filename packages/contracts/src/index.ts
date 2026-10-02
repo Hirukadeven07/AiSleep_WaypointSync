@@ -10,4 +10,5 @@ export * from './store';
 export * from './plan';
 export * from './dispatch';
 export * from './incidents';
+export * from './fleet';
 export * from './driver-day';

@@ -7,5 +7,6 @@ import { DispatchService } from './dispatch.service';
   imports: [NotificationsModule],
   controllers: [DispatchController],
   providers: [DispatchService],
+  exports: [DispatchService],
 })
 export class DispatchModule {}

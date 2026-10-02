@@ -1,7 +1,7 @@
 'use client';
 
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import { Fleet } from '@/components/fleet/Fleet';
 
 export default function Page() {
-  return <PlaceholderPage title="Fleet" />;
+  return <Fleet />;
 }
