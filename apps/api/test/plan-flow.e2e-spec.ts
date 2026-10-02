@@ -21,6 +21,7 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let districtId = '';
+  const districtName = `BR District ${Date.now()}`;
   let storeUserId = '';
   const o: Record<string, string> = {};
   const t: Record<string, string> = {};
@@ -40,7 +41,7 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
     districtId = (
       await prisma.district.create({
         data: {
-          name: `BR District ${Date.now()}`,
+          name: districtName,
           depotId: 'Peliyagoda',
           depotToDistrictKm: 10,
           depotToDistrictMin: 20,
@@ -241,30 +242,120 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
 
     const reefer = await agent
       .post('/api/plan/trips')
-      .send({ vehicleId: 'BR-REEFER', tripNumber: 1, brand: 'Fresh', districtId, date: DAY })
+      .send({
+        vehicleId: 'BR-REEFER',
+        tripNumber: 1,
+        brand: 'Fresh',
+        districts: [districtName],
+        date: DAY,
+      })
       .expect(200);
     t.reefer = reefer.body.id;
     expect(reefer.body).toMatchObject({ plate: 'BR-REEFER', state: 'draft', stops: [] });
     const van = await agent
       .post('/api/plan/trips')
-      .send({ vehicleId: 'BR-VAN', tripNumber: 1, brand: 'Style', districtId, date: DAY })
+      .send({
+        vehicleId: 'BR-VAN',
+        tripNumber: 1,
+        brand: 'Style',
+        districts: [districtName],
+        date: DAY,
+      })
       .expect(200);
     t.van = van.body.id;
 
     const again = await agent
       .post('/api/plan/trips')
-      .send({ vehicleId: 'BR-VAN', tripNumber: 1, brand: 'Style', districtId, date: DAY })
+      .send({
+        vehicleId: 'BR-VAN',
+        tripNumber: 1,
+        brand: 'Style',
+        districts: [districtName],
+        date: DAY,
+      })
       .expect(409);
     expect(again.body.reason).toBe('VEHICLE_UNAVAILABLE');
     const oos = await agent
       .post('/api/plan/trips')
-      .send({ vehicleId: 'BR-OOS', tripNumber: 1, brand: 'Fresh', districtId, date: DAY })
+      .send({
+        vehicleId: 'BR-OOS',
+        tripNumber: 1,
+        brand: 'Fresh',
+        districts: [districtName],
+        date: DAY,
+      })
       .expect(409);
     expect(oos.body.reason).toBe('VEHICLE_UNAVAILABLE');
     await agent
       .post('/api/plan/trips')
-      .send({ vehicleId: 'BR-VAN', tripNumber: 3, brand: 'Style', districtId })
+      .send({ vehicleId: 'BR-VAN', tripNumber: 3, brand: 'Style', districts: [districtName] })
       .expect(400);
+
+    // Every district of Sri Lanka is offered, and a trip can cover more than one.
+    expect(opts.body.districts).toEqual(
+      expect.arrayContaining(['Colombo', 'Jaffna', districtName]),
+    );
+    expect(opts.body.districts.length).toBeGreaterThanOrEqual(25);
+    await agent
+      .post('/api/plan/trips')
+      .send({ vehicleId: 'BR-VAN', tripNumber: 2, brand: 'Style', districts: [], date: DAY })
+      .expect(400);
+    await agent
+      .post('/api/plan/trips')
+      .send({
+        vehicleId: 'BR-VAN',
+        tripNumber: 2,
+        brand: 'Style',
+        districts: ['Atlantis'],
+        date: DAY,
+      })
+      .expect(400);
+    const multi = await agent
+      .post('/api/plan/trips')
+      .send({
+        vehicleId: 'BR-VAN',
+        tripNumber: 2,
+        brand: 'Style',
+        districts: [districtName, 'colombo'],
+        date: DAY,
+      })
+      .expect(200);
+    expect(multi.body.district).toBe(`${districtName} + Colombo`);
+    const saved = await prisma.trip.findUniqueOrThrow({
+      where: { id: multi.body.id },
+      include: { district: true, extraDistricts: true },
+    });
+    expect(saved.district.name).toBe(districtName);
+    expect(saved.extraDistricts.map((d) => d.name)).toEqual(['Colombo']);
+    await prisma.trip.delete({ where: { id: multi.body.id } });
+  });
+
+  it("lists a district's stores for the order queue's Store filter", async () => {
+    const agent = await dispatcher();
+    const fresh = await agent
+      .get('/api/plan/stores')
+      .query({ district: districtName.toUpperCase(), brand: 'Fresh' })
+      .expect(200);
+    expect(fresh.body.map((s: { id: string }) => s.id)).toEqual([
+      'BR-A1',
+      'BR-A2',
+      'BR-A3',
+      'BR-F1',
+      'BR-F2',
+    ]);
+    expect(fresh.body[0]).toEqual({
+      id: 'BR-A1',
+      name: 'Store BR-A1',
+      brand: 'Fresh',
+      district: districtName,
+    });
+    const all = await agent.get('/api/plan/stores').query({ district: districtName }).expect(200);
+    expect(all.body).toHaveLength(STORES.length);
+    await agent
+      .get('/api/plan/stores')
+      .query({ district: districtName, brand: 'Food' })
+      .expect(400);
+    await agent.get('/api/plan/stores').expect(400);
   });
 
   it('suggests only the orders the rules let onto an empty trip', async () => {
@@ -273,12 +364,41 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
     expect(body.map((s: { orderId: string }) => s.orderId).sort()).toEqual([o.f1, o.f2].sort());
   });
 
+  it('removes a planned trip and puts its orders back in the queue', async () => {
+    const agent = await dispatcher();
+    const spare = await agent
+      .post('/api/plan/trips')
+      .send({
+        vehicleId: 'BR-REEFER',
+        tripNumber: 2,
+        brand: 'Fresh',
+        districts: [districtName],
+        date: DAY,
+      })
+      .expect(200);
+    await agent.post('/api/plan/assign').send({ orderId: o.f1, tripId: spare.body.id }).expect(200);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: o.f1 } })).status).toBe('planned');
+
+    const removed = await agent.delete(`/api/plan/trips/${spare.body.id}`).expect(200);
+    expect(removed.body).toEqual({ tripId: spare.body.id, ordersReturned: 1 });
+    expect(await prisma.trip.findUnique({ where: { id: spare.body.id } })).toBeNull();
+    expect(await prisma.tripStop.count({ where: { orderId: o.f1 } })).toBe(0);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: o.f1 } })).status).toBe('waiting');
+    const plan = await agent.get(`/api/plan?date=${DAY}`).expect(200);
+    expect(plan.body.orders.map((x: { id: string }) => x.id)).toContain(o.f1);
+    await agent.delete(`/api/plan/trips/${spare.body.id}`).expect(404);
+  });
+
   it('blocks publishing a capacity problem, then publishes once it is fixed', async () => {
     const agent = await dispatcher();
     for (const id of [o.f1, o.f2])
       await agent.post('/api/plan/assign').send({ orderId: id, tripId: t.reefer }).expect(200);
     for (const id of [o.s1, o.b1, o.b2])
       await agent.post('/api/plan/assign').send({ orderId: id, tripId: t.van }).expect(200);
+
+    // Reefer 700 / 3000 kg, van 1900 / 1500 kg: 2600 of 4500 kg (58%) beats 5 of 23 m³ (22%).
+    const board = await agent.get(`/api/plan?date=${DAY}`).expect(200);
+    expect(board.body.summary.capacityUsedPct).toBe(58);
 
     const check = await agent.post('/api/plan/publish/check').send({ date: DAY }).expect(200);
     expect(check.body.canPublish).toBe(false);
@@ -333,6 +453,9 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
     expect(await version()).toBe(v1 + 1);
     await agent.post('/api/plan/assign').send({ orderId: o.f2, tripId: t.reefer }).expect(200);
     expect(await version()).toBe(v1 + 2);
+    // A sent trip stays on the plan.
+    const locked = await agent.delete(`/api/plan/trips/${t.reefer}`).expect(409);
+    expect(locked.body.reason).toBe('PLAN_LOCKED');
   });
 
   it('proposes auto-assign without saving, then applies it', async () => {

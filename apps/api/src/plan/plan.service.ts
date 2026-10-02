@@ -28,7 +28,10 @@ import {
   toOutlet,
   toStopView,
   toVehicle,
+  tripAreaLabel,
   tripInclude,
+  usedPct,
+  withoutCoveredDistricts,
   type OrderRow,
   type TripRow,
 } from './plan.mapper';
@@ -183,7 +186,11 @@ export class PlanService {
         departAtMin: DEPART_MIN[row.brand],
         otherLitresThisWeek: 0,
       });
-      const issues = [...check.blocks, ...check.warnings].filter((i) => i.code !== 'FUEL_QUOTA');
+      const issues = withoutCoveredDistricts(
+        [...check.blocks, ...check.warnings],
+        row,
+        stopViews,
+      ).filter((i) => i.code !== 'FUEL_QUOTA');
       state = stopViews.length === 0 || issues.length > 0 ? 'draft' : 'ready';
     }
 
@@ -194,7 +201,7 @@ export class PlanService {
       vehicleType: row.vehicle.type,
       vehicleTemp: row.vehicle.temp,
       brand: row.brand,
-      district: row.district.name,
+      district: tripAreaLabel(row),
       tripNumber: row.tripNumber,
       status: row.status,
       state,
@@ -230,10 +237,15 @@ export class PlanService {
     const busy = new Set(tripRows.map((t) => t.vehicleId));
     const available = vehicles.filter((v) => v.status === 'available');
 
-    // Capacity used = planned weight against the vehicles that have a trip.
-    const plannedKg = trips.reduce((sum, t) => sum + t.weightKg, 0);
-    const tripVehicles = new Map(trips.map((t) => [t.vehicleId, t.weightCapKg]));
-    const capKg = [...tripVehicles.values()].reduce((a, b) => a + b, 0);
+    // Capacity used = what is planned against what the day's trips can carry. Each trip is a
+    // full load, so a vehicle on two runs counts twice; weight or volume, whichever is fuller.
+    const sum = (f: (t: PlanTrip) => number) => trips.reduce((total, t) => total + f(t), 0);
+    const capacityUsedPct = usedPct(
+      sum((t) => t.weightKg),
+      sum((t) => t.weightCapKg),
+      sum((t) => t.volumeM3),
+      sum((t) => t.volumeCapM3),
+    );
 
     const over = trips.filter((t) => t.overWeight || t.overVolume);
     const overVolume = over.some((t) => t.overVolume);
@@ -250,7 +262,7 @@ export class PlanService {
     return {
       vehiclesFree: available.filter((v) => !busy.has(v.id)).length,
       vehiclesTotal: vehicles.length,
-      capacityUsedPct: capKg > 0 ? Math.round((plannedKg / capKg) * 100) : 0,
+      capacityUsedPct,
       overCount: over.length,
       overWhat:
         overVolume && overWeight ? 'both' : overVolume ? 'volume' : overWeight ? 'weight' : null,

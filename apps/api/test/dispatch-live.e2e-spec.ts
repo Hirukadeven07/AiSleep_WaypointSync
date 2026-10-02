@@ -313,4 +313,42 @@ describe('live day (e2e)', () => {
       await prisma.user.delete({ where: { id: user.id } });
     }
   });
+
+  it("shows trips still being planned today, and tomorrow's trips as they are planned", async () => {
+    const agent = await dispatcher();
+    const make = (vehicleId: string, day: string, status: 'planning' | 'published') =>
+      prisma.trip.create({
+        data: {
+          vehicleId,
+          depotId: 'Peliyagoda',
+          brand: 'Style',
+          districtId,
+          serviceDate: date(day),
+          tripNumber: 5,
+          status,
+        },
+      });
+    const next = new Date(date(DAY));
+    next.setUTCDate(next.getUTCDate() + 1);
+    const TOMORROW = next.toISOString().slice(0, 10);
+    const todayPlanned = await make('DL-V1', DAY, 'planning');
+    const tomorrowPlanned = await make('DL-V1', TOMORROW, 'planning');
+    const tomorrowSent = await make('DL-V2', TOMORROW, 'published');
+
+    const { body } = await agent.get('/api/dispatch/live').expect(200);
+    expect(body.trips.find((t: { id: string }) => t.id === todayPlanned.id)).toMatchObject({
+      live: 'planned',
+      status: 'planning',
+      plate: 'DL-V1',
+      stopsTotal: 0,
+    });
+    const tomorrow = body.tomorrowTrips.filter((t: { vehicleId: string }) =>
+      VEHICLES.includes(t.vehicleId),
+    );
+    expect(tomorrow.map((t: { id: string; live: string }) => [t.id, t.live])).toEqual([
+      [tomorrowPlanned.id, 'planned'],
+      [tomorrowSent.id, 'assigned'],
+    ]);
+    expect(body.trips.some((t: { id: string }) => t.id === tomorrowPlanned.id)).toBe(false);
+  });
 });

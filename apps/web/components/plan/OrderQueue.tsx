@@ -1,8 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import type { Brand, PlanOrder } from '@waypoint/contracts';
+import { useEffect, useMemo, useState } from 'react';
+import type { Brand, PlanOrder, PlanStore } from '@waypoint/contracts';
+import { allDistricts, districtKey } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
+import { api } from '@/lib/api';
+import { Select } from './Select';
 import type { PlanEdit } from './usePlanEdit';
 import { SECTION_LABEL, dayLabel, kgText, orderWindow, sectionOf, type Section } from './format';
 
@@ -113,37 +116,6 @@ function MovedCard({ order, edit }: { order: PlanOrder; edit: PlanEdit }) {
   );
 }
 
-function Dropdown({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <label className="relative flex min-w-px flex-[1_0_0] cursor-pointer items-center gap-[6px] rounded-pill bg-bg py-2 pl-3 pr-[10px]">
-      <span className="text-[12px] font-medium leading-[15px] text-muted">{label}</span>
-      <span className="text-[12px] font-semibold leading-[15px] text-ink">{value}</span>
-      <span className="min-w-px flex-1" />
-      <Icon name="chevron-down" size={12} className="text-muted" />
-      <select
-        aria-label={label}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 cursor-pointer opacity-0"
-      >
-        {options.map((o) => (
-          <option key={o}>{o}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 const SECTIONS: Section[] = ['fresh', 'morning', 'afternoon'];
 
 /** Figma "Order queue": Waiting / Moved to later tabs, search, Type and District filters, orders by window. */
@@ -163,17 +135,35 @@ export function OrderQueue({
   const [tab, setTab] = useState<'waiting' | 'moved'>('waiting');
   const [type, setType] = useState('All');
   const [district, setDistrict] = useState('All');
+  const [store, setStore] = useState('All');
+  const [stores, setStores] = useState<PlanStore[] | null>(null);
   const [search, setSearch] = useState('');
+
+  // Once a district is picked, offer that area's stores (of the picked type) as a third filter.
+  useEffect(() => {
+    setStore('All');
+    setStores(null);
+    if (district === 'All') return;
+    let live = true;
+    const qs = new URLSearchParams({ district, ...(type === 'All' ? {} : { brand: type }) });
+    api<PlanStore[]>(`/plan/stores?${qs}`)
+      .then((rows) => live && setStores(rows))
+      .catch(() => live && setStores([]));
+    return () => {
+      live = false;
+    };
+  }, [type, district]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return orders.filter(
       (o) =>
         (type === 'All' || o.brand === type) &&
-        (district === 'All' || o.district === district) &&
+        (district === 'All' || districtKey(o.district) === districtKey(district)) &&
+        (store === 'All' || o.storeId === store) &&
         (!q || o.storeName.toLowerCase().includes(q) || o.district.toLowerCase().includes(q)),
     );
-  }, [orders, type, district, search]);
+  }, [orders, type, district, store, search]);
 
   return (
     <aside
@@ -223,19 +213,44 @@ export function OrderQueue({
           </label>
 
           <div className="flex shrink-0 gap-2">
-            <Dropdown
+            <Select
               label="Type"
               value={type}
-              options={['All', 'Fresh', 'Style', 'Tech']}
+              options={['All', 'Fresh', 'Style', 'Tech'].map((t) => ({ value: t, label: t }))}
               onChange={setType}
+              className="flex-[1_0_0]"
             />
-            <Dropdown
+            <Select
               label="District"
               value={district}
-              options={['All', ...districts]}
+              options={['All', ...allDistricts(districts)].map((d) => ({ value: d, label: d }))}
               onChange={setDistrict}
+              searchable
+              className="flex-[1_0_0]"
             />
           </div>
+          {district !== 'All' && (
+            <Select
+              label="Store"
+              value={store}
+              options={[
+                {
+                  value: 'All',
+                  label:
+                    stores === null
+                      ? 'Loading…'
+                      : stores.length === 0
+                        ? `No ${type === 'All' ? '' : `${type} `}stores in ${district}`
+                        : `All ${stores.length} stores`,
+                },
+                ...(stores ?? []).map((s) => ({ value: s.id, label: s.name })),
+              ]}
+              onChange={setStore}
+              searchable={(stores?.length ?? 0) > 8}
+              disabled={!stores || stores.length === 0}
+              className="w-full shrink-0"
+            />
+          )}
 
           <p className="shrink-0 text-[12px] font-medium leading-[15px] text-muted">
             Sorted by delivery window, earliest first

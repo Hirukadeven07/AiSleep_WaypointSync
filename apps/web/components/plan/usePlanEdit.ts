@@ -28,7 +28,8 @@ export type PlanModal =
   | { kind: 'defer'; orderId: string }
   | { kind: 'newTrip' }
   | { kind: 'publish'; check: PublishCheck }
-  | { kind: 'auto'; proposal: AutoAssignProposal };
+  | { kind: 'auto'; proposal: AutoAssignProposal }
+  | { kind: 'removeTrip'; trip: PlanTrip };
 
 const tripName = (t: PlanTrip) => t.plate ?? t.vehicleId;
 /** A sent trip that changes pauses its loader until they accept the new plan. */

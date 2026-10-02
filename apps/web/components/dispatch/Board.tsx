@@ -25,7 +25,13 @@ const tripName = (t: LiveTrip) =>
     : (t.plate ?? t.vehicleId);
 
 const COLUMNS: { id: ColumnId; title: string; dot: string; test: (t: LiveTrip) => boolean }[] = [
-  { id: 'assigned', title: 'Assigned', dot: 'bg-faint', test: (t) => t.live === 'assigned' },
+  {
+    id: 'assigned',
+    title: 'Assigned',
+    dot: 'bg-faint',
+    // Trips still being planned for today wait here with a "Planned" chip.
+    test: (t) => t.live === 'assigned' || t.live === 'planned',
+  },
   { id: 'loading', title: 'Loading', dot: 'bg-warning', test: (t) => t.live === 'loading' },
   {
     id: 'dispatched',

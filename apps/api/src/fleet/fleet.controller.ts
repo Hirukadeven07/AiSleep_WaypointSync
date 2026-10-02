@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import type { FleetDay, FleetVehicle, OutOfServiceResult } from '@waypoint/contracts';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { OutOfServiceDto } from './dto';
+import { AddVehicleDto, OutOfServiceDto } from './dto';
 import { FleetService } from './fleet.service';
 
 @Controller('fleet')
@@ -14,6 +14,13 @@ export class FleetController {
   @Get()
   day(@CurrentUser() me: AuthUser): Promise<FleetDay> {
     return this.fleet.day(me);
+  }
+
+  /** Add a vehicle to the depot's fleet. A plate already in use is refused with 409. */
+  @Post()
+  @HttpCode(200)
+  add(@CurrentUser() me: AuthUser, @Body() dto: AddVehicleDto): Promise<FleetVehicle> {
+    return this.fleet.addVehicle(me, dto);
   }
 
   /** Take a vehicle out of service; trips that have not started go back to Planning. */

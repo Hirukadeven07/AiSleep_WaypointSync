@@ -74,7 +74,10 @@ export type LimitingResource = 'weight' | 'volume' | 'chilled' | 'vans' | 'none'
 export interface PlanSummary {
   vehiclesFree: number;
   vehiclesTotal: number;
-  /** Planned weight against the capacity of the vehicles that have a trip. */
+  /**
+   * Planned load against the capacity of the day's trips (a vehicle on two runs counts twice),
+   * by weight or volume, whichever is fuller. Can pass 100 when trips are over.
+   */
   capacityUsedPct: number;
   overCount: number;
   overWhat: 'volume' | 'weight' | 'both' | null;
@@ -215,14 +218,30 @@ export interface NewTripOptions {
   runs: { tripNumber: 1 | 2; label: string }[];
   /** Vehicles keyed by the run they would take. */
   vehicles: Record<'1' | '2', NewTripVehicle[]>;
-  districts: { id: string; name: string }[];
+  /** Every district a trip can be set up for, A to Z. */
+  districts: string[];
 }
 
 export interface CreateTripRequest {
   vehicleId: string;
   tripNumber: 1 | 2;
   brand: 'Fresh' | 'Style' | 'Tech';
-  districtId: string;
+  /** One or more district names; the first is the trip's main district. */
+  districts: string[];
+}
+
+export interface RemoveTripResult {
+  tripId: string;
+  /** Orders that were on the trip and are waiting in the queue again. */
+  ordersReturned: number;
+}
+
+/** A store the order queue's Store filter offers for the picked type and district. */
+export interface PlanStore {
+  id: string;
+  name: string;
+  brand: 'Fresh' | 'Style' | 'Tech';
+  district: string;
 }
 
 export interface TripSuggestion {
