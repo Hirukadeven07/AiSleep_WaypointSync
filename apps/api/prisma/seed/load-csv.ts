@@ -131,8 +131,12 @@ export async function loadOutlets(prisma: PrismaClient, dir: string) {
       dockType: dockOf(pick(r, 'dock_type', 'dock')),
       parkingConstraint: parkingOf(pick(r, 'parking_constraint', 'parking')),
       mallWindow: pick(r, 'mall_window') ?? null,
-      windowOpenMin: hhmmToMin(pick(r, 'window_open', 'delivery_window_open', 'open')) ?? 8 * 60,
-      windowCloseMin: hhmmToMin(pick(r, 'window_close', 'delivery_window_close', 'close')) ?? 17 * 60,
+      windowOpenMin:
+        hhmmToMin(pick(r, 'window_open', 'window_open_time', 'delivery_window_open', 'open')) ??
+        8 * 60,
+      windowCloseMin:
+        hhmmToMin(pick(r, 'window_close', 'window_close_time', 'delivery_window_close', 'close')) ??
+        17 * 60,
       lat: num(pick(r, 'lat', 'latitude')) ?? null,
       lng: num(pick(r, 'lng', 'lon', 'longitude')) ?? null,
       phone: pick(r, 'phone') ?? null,
@@ -196,7 +200,9 @@ export async function loadServiceAllowance(prisma: PrismaClient, dir: string) {
   const rows = readCsv(dir, 'service_allowance.csv');
   if (!rows) return;
   for (const r of rows) {
-    const minutes = int(pick(r, 'minutes', 'allowance_min', 'service_min'));
+    const minutes = int(
+      pick(r, 'service_allowance_min', 'minutes', 'allowance_min', 'service_min'),
+    );
     if (minutes === undefined) continue;
     const brand = brandOf(pick(r, 'brand'));
     const dockType = dockOf(pick(r, 'dock_type', 'dock'));

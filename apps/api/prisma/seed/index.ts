@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { loadAllCsv } from './load-csv';
+import { loadAllCsv, loadServiceAllowance } from './load-csv';
 import { seedDockStoreDemo } from './dock-store-demo';
 import { seedTeamErd } from './team-erd';
 
@@ -60,12 +60,54 @@ async function seedUsers() {
   console.log(`[seed] ${users.length} users ready`);
 }
 
+/** One outlet manager per store. Login id = outlet id (OUT001…), password waypoint. */
+async function seedOutletManagers() {
+  const stores = await prisma.store.findMany({ orderBy: { id: 'asc' } });
+  if (stores.length === 0) {
+    console.warn('[seed] no stores - skipping outlet managers');
+    return;
+  }
+  const passwordHash = await argon2.hash('waypoint');
+  for (const store of stores) {
+    const name = `${store.displayName ?? store.id} manager`;
+    await prisma.user.upsert({
+      where: { loginId: store.id },
+      update: { role: 'store', name, storeId: store.id, passwordHash },
+      create: {
+        loginId: store.id,
+        role: 'store',
+        name,
+        storeId: store.id,
+        passwordHash,
+      },
+    });
+  }
+  console.log(`[seed] ${stores.length} outlet managers ready (login = outlet id, password waypoint)`);
+}
+
+function dataDir() {
+  return resolve(process.env.DATA_DIR ?? resolve(__dirname, '../../../../data'));
+}
+
+async function warnIfCsvEmpty() {
+  const dir = dataDir();
+  if ((await prisma.store.count()) === 0) {
+    console.warn(`[seed] no stores after CSV load - check DATA_DIR (${dir}) has outlets.csv`);
+  }
+  if ((await prisma.vehicle.count()) === 0) {
+    console.warn(`[seed] no vehicles after CSV load - check DATA_DIR (${dir}) has vehicles.csv`);
+  }
+}
+
 async function main() {
   const reset = process.env.SEED_RESET === '1';
+  const dir = dataDir();
   if (reset) {
     await truncateAll();
   } else if ((await prisma.depot.count()) > 0) {
     console.log('[seed] database already seeded - skipping CSV (use pnpm seed:reset to reseed)');
+    await loadServiceAllowance(prisma, dir);
+    await seedOutletManagers();
     await seedTeamErd(prisma);
     return;
   }
@@ -77,11 +119,12 @@ async function main() {
     await prisma.depot.upsert({ where: { id }, update: { name }, create: { id, name } });
   }
 
-  const dataDir = resolve(process.env.DATA_DIR ?? resolve(__dirname, '../../../../data'));
-  console.log(`[seed] reading CSVs from ${dataDir}`);
-  await loadAllCsv(prisma, dataDir);
+  console.log(`[seed] reading CSVs from ${dir}`);
+  await loadAllCsv(prisma, dir);
+  await warnIfCsvEmpty();
 
   await seedUsers();
+  await seedOutletManagers();
   await seedDockStoreDemo(prisma);
   await seedTeamErd(prisma);
   console.log('[seed] done');
