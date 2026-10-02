@@ -51,6 +51,16 @@ const minuteOfDay = (d: Date) => {
   return h * 60 + m;
 };
 const kg = (n: number) => `${Math.round(n).toLocaleString('en-US')} kg`;
+/** A date-only value as the store reads it: "Sun 4 Oct". */
+const dayText = (d: Date) =>
+  d.toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+/** Trips that can break down: loaded or on the road. */
+const BREAKABLE = ['loading', 'ready', 'on_road'];
 
 const KIND_TITLE: Record<IncidentKind, string> = {
   breakdown: 'broke down',
@@ -78,6 +88,8 @@ const KIND_HEAD: Record<IncidentKind, string> = {
 type Entry = {
   at: string;
   text: string;
+  /** Set on the first entry when dispatch (not the driver) logged the incident. */
+  by?: 'dispatcher';
   resolution?: {
     title: string;
     text: string;
@@ -158,6 +170,12 @@ export class IncidentsService {
     const driver = this.driverOf(t);
     const resolution = lastResolution(entries(i.timeline));
     const remaining = t.stops.filter((s) => !DONE.has(s.status)).length;
+    const byDispatch = entries(i.timeline)[0]?.by === 'dispatcher';
+    const reporter = byDispatch
+      ? 'dispatch'
+      : driver
+        ? `${shortName(driver.name)} (driver)`
+        : 'the driver';
     return {
       id: i.id,
       kind,
@@ -165,7 +183,7 @@ export class IncidentsService {
       line:
         state === 'resolved'
           ? `${resolution?.resolution?.line ?? 'Resolved'} · ${timeOf(new Date(resolution?.at ?? i.createdAt))}`
-          : `Reported by ${driver ? `${shortName(driver.name)} (driver)` : 'the driver'} · ${timeOf(i.createdAt)} · ${this.minutesSince(i.createdAt)} min ago`,
+          : `Reported by ${reporter} · ${timeOf(i.createdAt)} · ${this.minutesSince(i.createdAt)} min ago`,
       brand: t.brand,
       state,
       stopsAffected: state !== 'resolved' && remaining > 0 ? remaining : null,
@@ -385,9 +403,10 @@ export class IncidentsService {
       : this.minutesSince(row.createdAt);
     const kind =
       t.vehicle.type === 'van' ? 'Van' : t.vehicle.temp === 'reefer' ? 'Refrigerated' : 'Ambient';
+    const byDispatch = log[0]?.by === 'dispatcher';
     return {
       ...s,
-      subtitle: `${KIND_HEAD[s.kind]}  ·  reported ${timeOf(row.createdAt)}${driver ? ` by ${driver.name} (driver)` : ''}`,
+      subtitle: `${KIND_HEAD[s.kind]}  ·  reported ${timeOf(row.createdAt)}${byDispatch ? ' by dispatch' : driver ? ` by ${driver.name} (driver)` : ''}`,
       status: `${s.state === 'resolved' ? 'Resolved' : 'Active'} · ${minutes} min`,
       stops:
         done?.resolution && (s.state === 'resolved' || remaining.length === 0)
@@ -403,10 +422,14 @@ export class IncidentsService {
         driver,
       },
       timeline: [
-        {
-          at: row.createdAt.toISOString(),
-          text: `${driver ? shortName(driver.name) : 'The driver'} reported it`,
-        },
+        ...(byDispatch
+          ? []
+          : [
+              {
+                at: row.createdAt.toISOString(),
+                text: `${driver ? shortName(driver.name) : 'The driver'} reported it`,
+              },
+            ]),
         ...log.filter((e) => !e.resolution).map((e) => ({ at: e.at, text: e.text })),
       ],
       resolution: done?.resolution
@@ -477,6 +500,43 @@ export class IncidentsService {
         // best effort: the recovery is already saved
       }
     }
+  }
+
+  /**
+   * Dispatch logs that a truck broke down: the trip stops (status "breakdown") and a breakdown
+   * incident opens, so the remaining stops can be recovered from the incidents screen.
+   * Logging the same trip twice returns the open incident.
+   */
+  async reportBreakdown(me: Me, tripId: string, note?: string): Promise<IncidentDetail> {
+    const depotId = this.depotOf(me);
+    const trip = await this.prisma.trip.findFirst({ where: { id: tripId, depotId } });
+    if (!trip) throw new NotFoundException('Trip not found');
+    const open = await this.prisma.incident.findFirst({
+      where: { tripId, type: 'breakdown', status: { notIn: ['resolved', 'closed'] } },
+    });
+    if (open) return this.detail(me, open.id);
+    if (!BREAKABLE.includes(trip.status)) {
+      throw new BadRequestException(`A ${trip.status.replace('_', ' ')} trip cannot break down`);
+    }
+    const now = this.clock.now();
+    const text = note?.trim()
+      ? `Dispatch logged the breakdown: ${note.trim()}`
+      : 'Dispatch logged the breakdown';
+    const [, created] = await this.prisma.$transaction([
+      this.prisma.trip.update({ where: { id: tripId }, data: { status: 'breakdown' } }),
+      this.prisma.incident.create({
+        data: {
+          type: 'breakdown',
+          tripId,
+          status: 'open',
+          createdAt: now,
+          timeline: [
+            { at: now.toISOString(), text, by: 'dispatcher' },
+          ] as unknown as Prisma.InputJsonValue,
+        },
+      }),
+    ]);
+    return this.detail(me, created.id);
   }
 
   async acknowledge(me: Me, id: string): Promise<IncidentDetail> {
@@ -608,16 +668,29 @@ export class IncidentsService {
       defer = remaining;
     } else {
       if (!dto.vehicleId) throw new BadRequestException('Pick a replacement vehicle');
+      // defer_one: the dispatcher's chosen store moves to the next day; the replacement takes the rest.
+      const deferred =
+        dto.action === 'defer_one' ? remaining.find((s) => s.id === dto.deferStopId) : undefined;
+      if (dto.action === 'defer_one') {
+        if (!deferred) throw new BadRequestException('Pick the store to move to the next day');
+        if (remaining.length < 2) {
+          throw new BadRequestException('Only one stop is left; move it to tomorrow instead');
+        }
+      }
+      const taking = deferred ? remaining.filter((s) => s.id !== deferred.id) : remaining;
       const lookup = await this.plan.loadLookup();
-      chosen = (await this.candidates(me, t, remaining, lookup)).find(
+      chosen = (await this.candidates(me, t, taking, lookup)).find(
         (c) => c.option.vehicleId === dto.vehicleId,
       );
       if (!chosen || !chosen.option.available) {
         throw new BadRequestException('That vehicle cannot take these stops');
       }
-      const order = sortStopsByWindow(remaining.map((s) => toStopView(s.order)));
-      const sorted = order.map((v) => remaining.find((s) => s.orderId === v.order.id)!);
-      if (dto.action === 'split') {
+      const order = sortStopsByWindow(taking.map((s) => toStopView(s.order)));
+      const sorted = order.map((v) => taking.find((s) => s.orderId === v.order.id)!);
+      if (deferred) {
+        carry = sorted;
+        defer = [deferred];
+      } else if (dto.action === 'split') {
         const late = new Set(chosen.etas.filter((e) => e.atRisk).map((e) => e.orderId));
         carry = sorted.filter((s) => !late.has(s.orderId));
         defer = sorted.filter((s) => late.has(s.orderId));
@@ -634,6 +707,8 @@ export class IncidentsService {
     const goodsLeft = `${kg(remaining.reduce((n, s) => n + s.order.weightKg, 0))} · ${remaining.length} ${remaining.length === 1 ? 'stop' : 'stops'}`;
     const etaOf = new Map((chosen?.etas ?? []).map((e) => [e.orderId, e.arriveMin]));
     const newDate = defer.length > 0 ? await this.nextOperatingDay(t.serviceDate) : null;
+    const reason = dto.reason?.trim() || `${plate} broke down`;
+    const newDay = newDate ? dayText(newDate) : '';
     const made: { id: string; plate: string }[] = [];
 
     await this.prisma.$transaction(async (tx) => {
@@ -671,7 +746,7 @@ export class IncidentsService {
             status: 'deferred',
             movedFromDate: s.order.deliveryDate,
             deliveryDate: newDate as Date,
-            deferReason: `${plate} broke down`,
+            deferReason: reason,
             deferredById: me.id,
           },
         });
@@ -720,15 +795,15 @@ export class IncidentsService {
       const store = s.order.store;
       await this.tellStore(
         store.id,
-        'Delivery moved to the next day',
-        `${plate} broke down, so your order now arrives on the next delivery day. You are first in line. Sorry for the delay.`,
+        `Delivery moved to ${newDay}`,
+        `Reason: ${reason}. Your order now arrives on ${newDay}, first in line. Sorry for the delay.`,
       );
       told.add(store.id);
       stops.push({
         id: s.id,
         storeName: store.displayName ?? store.id,
         windowText: this.windowText(s),
-        chip: 'Moved to tomorrow',
+        chip: `Moved to ${newDay}`,
         tone: 'warning',
         note: null,
       });
@@ -755,21 +830,21 @@ export class IncidentsService {
       ? `${person(sentTo.driver.name)} is heading to ${t.district.name}`
       : `${replacement?.plate} is heading to ${t.district.name}`;
     const moved = defer.length
-      ? ` ${count(defer.length)[0].toUpperCase()}${count(defer.length).slice(1)} moved to tomorrow and ${defer.length === 1 ? 'is' : 'are'} first in line.`
+      ? ` ${count(defer.length)[0].toUpperCase()}${count(defer.length).slice(1)} moved to ${newDay} and ${defer.length === 1 ? 'is' : 'are'} first in line.`
       : '';
     const result =
       dto.action === 'tomorrow'
         ? {
-            title: `${count(defer.length)[0].toUpperCase()}${count(defer.length).slice(1)} moved to tomorrow at ${clock}`,
-            text: `Store managers were told their delivery arrives on the next delivery day, first in line. ${towing}`,
-            line: `${count(defer.length)} moved to tomorrow`,
+            title: `${count(defer.length)[0].toUpperCase()}${count(defer.length).slice(1)} moved to ${newDay} at ${clock}`,
+            text: `Store managers were told their delivery arrives on ${newDay}, first in line. ${towing}`,
+            line: `${count(defer.length)} moved to ${newDay}`,
             outcome: 'Moved',
           }
         : {
-            title: `${dto.action === 'split' ? 'Split' : 'Replacement'} ${replacement?.plate} sent at ${clock}`,
+            title: `${dto.action === 'replacement' ? 'Replacement' : 'Split'} ${replacement?.plate} sent at ${clock}`,
             text: `${heading} to pick up the ${count(carry.length)} that fit${firstEta ? `. ETA ${clockText(firstEta)}${lastEta && lastEta !== firstEta ? ` to ${clockText(lastEta)}` : ''}` : ''}.${moved} Store managers got the new plan automatically, and ${towing}`,
             line: `${replacement?.plate} sent to ${t.district.name}`,
-            outcome: dto.action === 'split' ? 'Split' : 'Replaced',
+            outcome: dto.action === 'replacement' ? 'Replaced' : 'Split',
           };
     await this.save(
       id,
@@ -779,10 +854,10 @@ export class IncidentsService {
           at: stamp,
           text: replacement
             ? `You sent replacement ${replacement.plate}`
-            : `You moved ${count(defer.length)} to tomorrow`,
+            : `You moved ${count(defer.length)} to ${newDay}`,
         },
         ...(replacement && defer.length
-          ? [{ at: stamp, text: `${count(defer.length)} moved to tomorrow` }]
+          ? [{ at: stamp, text: `${count(defer.length)} moved to ${newDay}` }]
           : []),
         { at: stamp, text: `New ETAs sent to ${managers}` },
         {

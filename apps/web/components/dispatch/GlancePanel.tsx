@@ -1,13 +1,97 @@
+'use client';
+
 import Link from 'next/link';
-import type { AttentionItem, LiveDay } from '@waypoint/contracts';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import type { AttentionItem, BreakdownRequest, IncidentDetail, LiveDay } from '@waypoint/contracts';
+import { api } from '@/lib/api';
 import { Icon } from '@/components/ui/Icon';
 import { clock12 } from '@/components/plan/format';
 import { untilText } from './live-format';
 
 const BUTTON = 'rounded-pill bg-primary text-bg';
 
-/** One card in "Needs attention": breakdown, store damage report, missing items or a trip that stopped syncing. */
+/** A driver's SOS: call them, log it as a breakdown, or mark it handled (clears it on their phone). */
+function SosCard({ item }: { item: AttentionItem }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function act(run: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await run();
+    } catch {
+      setError('That did not go through. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  const resolve = () =>
+    act(async () => {
+      await api(`/dispatch/sos/${encodeURIComponent(item.incidentId ?? '')}/resolve`, {
+        method: 'POST',
+        body: {},
+      });
+      setDone(true);
+    });
+  const breakdown = () =>
+    act(async () => {
+      const body: BreakdownRequest = { tripId: item.tripId, note: 'Driver SOS' };
+      const incident = await api<IncidentDetail>('/incidents/breakdown', { method: 'POST', body });
+      await api(`/dispatch/sos/${encodeURIComponent(item.incidentId ?? '')}/resolve`, {
+        method: 'POST',
+        body: { note: 'Logged as a breakdown' },
+      });
+      router.push(`/dispatch/incidents?id=${encodeURIComponent(incident.id)}`);
+    });
+
+  if (done) return null;
+  return (
+    <div className="flex flex-col gap-[6px] rounded-note bg-danger-tint p-[14px]">
+      <p className="flex items-center gap-2 text-[13px] font-semibold leading-[18px] text-ink">
+        <span aria-hidden className="size-2 shrink-0 rounded-full bg-danger" />
+        {item.title}
+      </p>
+      <p className="text-[12px] leading-[17px] text-muted">{item.text}</p>
+      {error && <p className="text-[12px] font-semibold text-danger">{error}</p>}
+      <div className="flex flex-wrap gap-2">
+        {item.phone && (
+          <a
+            href={`tel:${item.phone}`}
+            className={`px-3 py-[6px] text-[12px] font-semibold leading-[17px] ${BUTTON}`}
+          >
+            Call driver
+          </a>
+        )}
+        {item.tripId && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void breakdown()}
+            className="rounded-pill bg-danger px-3 py-[6px] text-[12px] font-semibold leading-[17px] text-white disabled:opacity-50"
+          >
+            Truck broke down
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy || !item.incidentId}
+          onClick={() => void resolve()}
+          className="rounded-pill bg-surface px-3 py-[6px] text-[12px] font-semibold leading-[17px] text-ink disabled:opacity-50"
+        >
+          Mark handled
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** One card in "Needs attention": SOS, breakdown, store damage report, missing items or a trip that stopped syncing. */
 function Attention({ item }: { item: AttentionItem }) {
+  if (item.kind === 'sos') return <SosCard item={item} />;
   if (item.kind === 'breakdown') {
     return (
       <div className="flex flex-col gap-[6px] rounded-note bg-danger-tint p-[14px]">

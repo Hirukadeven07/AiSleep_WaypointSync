@@ -43,7 +43,9 @@ export async function seedCatalogue(prisma: PrismaClient) {
         itemId: item.id,
         batchName: `${item.id}-2026-W40`,
         manufacturingDate: new Date('2026-09-20T00:00:00Z'),
-        expiryDate: item.chilled ? new Date('2026-10-20T00:00:00Z') : new Date('2027-09-20T00:00:00Z'),
+        expiryDate: item.chilled
+          ? new Date('2026-10-20T00:00:00Z')
+          : new Date('2027-09-20T00:00:00Z'),
         qty: 80,
       },
     });
@@ -131,13 +133,9 @@ async function linkOrderLines(prisma: PrismaClient) {
 
 async function seedOps(prisma: PrismaClient) {
   const kasun = await prisma.user.findUnique({ where: { loginId: 'kasun' } });
-  const driver = kasun
-    ? await prisma.driver.findUnique({ where: { userId: kasun.id } })
-    : null;
+  const driver = kasun ? await prisma.driver.findUnique({ where: { userId: kasun.id } }) : null;
   const sampath = await prisma.user.findUnique({ where: { loginId: 'sampath' } });
-  const loader = sampath
-    ? await prisma.loader.findUnique({ where: { userId: sampath.id } })
-    : null;
+  const loader = sampath ? await prisma.loader.findUnique({ where: { userId: sampath.id } }) : null;
   const nimal = await prisma.user.findUnique({ where: { loginId: 'nimal' } });
   const dispatcher = nimal
     ? await prisma.dispatcher.findUnique({ where: { userId: nimal.id } })
@@ -176,7 +174,11 @@ async function seedOps(prisma: PrismaClient) {
     });
   }
 
-  if (dispatcher && published && !(await prisma.loadingJob.findUnique({ where: { tripId: published.id } }))) {
+  if (
+    dispatcher &&
+    published &&
+    !(await prisma.loadingJob.findUnique({ where: { tripId: published.id } }))
+  ) {
     await prisma.loadingJob.create({
       data: {
         tripId: published.id,
@@ -194,7 +196,11 @@ async function seedOps(prisma: PrismaClient) {
 
   const homeStop = onRoad?.stops[0];
   const homeOrder = homeStop?.order;
-  if (homeOrder && loader && (await prisma.deliveryNote.count({ where: { orderId: homeOrder.id } })) === 0) {
+  if (
+    homeOrder &&
+    loader &&
+    (await prisma.deliveryNote.count({ where: { orderId: homeOrder.id } })) === 0
+  ) {
     const dnId = `DN-${homeOrder.id}`;
     const lines = homeOrder.lines.filter((l) => l.itemId);
     await prisma.deliveryNote.create({
@@ -327,7 +333,11 @@ async function seedOps(prisma: PrismaClient) {
     }
   }
 
-  if (onRoad && driver && (await prisma.driverIncident.count({ where: { tripId: onRoad.id } })) === 0) {
+  if (
+    onRoad &&
+    driver &&
+    (await prisma.driverIncident.count({ where: { tripId: onRoad.id } })) === 0
+  ) {
     await prisma.driverIncident.create({
       data: {
         driverId: driver.id,
@@ -437,22 +447,6 @@ async function seedOps(prisma: PrismaClient) {
           seenPlanVersion: done.planVersion,
         },
       ],
-    });
-  }
-
-  if (onRoad && (await prisma.incident.count({ where: { tripId: onRoad.id } })) === 0) {
-    await prisma.incident.create({
-      data: {
-        type: 'breakdown',
-        tripId: onRoad.id,
-        status: 'open',
-        timeline: [
-          {
-            at: new Date().toISOString(),
-            text: 'Breakdown reported on Baseline Road — dispatcher ticket opened.',
-          },
-        ],
-      },
     });
   }
 }

@@ -14,12 +14,18 @@ const colomboDay = (iso: string) =>
 
 /** Figma "Incidents": what went wrong today, how to recover, and what was done. */
 export function Incidents() {
-  const { data: list, error, refresh } = usePoll(() => api<List>('/incidents'), 15_000);
+  const { data: list, error, refresh } = usePoll(() => api<List>('/incidents'), 5_000);
   const [filter, setFilter] = useState<Filter>('active');
   const [picked, setPicked] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [toast, setToast] = useState<{ title: string; sub: string } | null>(null);
   const opened = useRef(new Set<string>());
+
+  // "Truck broke down" links here with ?id=<incident> so the new breakdown opens straight away.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('id');
+    if (id) setPicked(id);
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -57,7 +63,7 @@ export function Incidents() {
       return;
     }
     load(selectedId);
-    const t = setInterval(() => load(selectedId), 15_000);
+    const t = setInterval(() => load(selectedId), 5_000);
     return () => clearInterval(t);
   }, [selectedId, load]);
 

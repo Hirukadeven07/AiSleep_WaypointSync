@@ -73,10 +73,18 @@ export function toneOf(trip: Pick<LiveTrip, 'live' | 'lateMin'>): Tone {
   return t[trip.live];
 }
 
-/** "Kottawa · 10:42", "Last sync 9:58" or "Back at depot · 10:20". */
+/**
+ * "Kottawa · 10:42", "Last sync 9:58 · last stop Kottawa" or "Back at depot · 10:20".
+ * Not synced shows only real data: the last sync and the last stop reached, never a guessed position.
+ */
 export function lastUpdate(t: LiveTrip): string {
   if (t.live === 'completed') return t.backAt ? `Back at depot · ${timeOf(t.backAt)}` : 'Completed';
-  if (t.live === 'not_synced') return t.lastAt ? `Last sync ${timeOf(t.lastAt)}` : 'Not synced';
+  if (t.live === 'not_synced') {
+    const stop = t.lastPlace ? ` · last stop ${t.lastPlace}` : ' · no stop reached yet';
+    if (t.lastSyncAt) return `Last sync ${timeOf(t.lastSyncAt)}${stop}`;
+    if (t.departedAt) return `No sync since departure ${timeOf(t.departedAt)}${stop}`;
+    return 'Not synced';
+  }
   if (t.lastPlace && t.lastAt) return `${t.lastPlace} · ${timeOf(t.lastAt)}`;
   if (t.lastAt) return timeOf(t.lastAt);
   return '';

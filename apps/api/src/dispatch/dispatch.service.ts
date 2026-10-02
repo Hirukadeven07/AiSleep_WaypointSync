@@ -100,6 +100,32 @@ export class DispatchService {
     return { sent: stores.length };
   }
 
+  /** Dispatch has dealt with a driver's SOS. Clears the alert on the board and on the driver's phone. */
+  async resolveSos(me: Me, id: string, note?: string): Promise<{ ok: true }> {
+    if (!me.depotId) throw new ForbiddenException('This account has no depot');
+    const sos = await this.prisma.driverIncident.findFirst({
+      where: {
+        id,
+        incidentType: 'sos',
+        OR: [{ trip: { depotId: me.depotId } }, { vehicle: { depotId: me.depotId } }],
+      },
+    });
+    if (!sos) throw new NotFoundException('SOS not found');
+    if (!sos.resolvedAt) {
+      const now = this.clock.now();
+      await this.prisma.driverIncident.update({
+        where: { id },
+        data: {
+          resolvedAt: now,
+          acknowledgedAt: sos.acknowledgedAt ?? now,
+          acknowledgedBy: sos.acknowledgedBy ?? me.id,
+          resolution: note?.trim() || 'Handled by dispatch',
+        },
+      });
+    }
+    return { ok: true };
+  }
+
   async live(me: Me): Promise<LiveDay> {
     if (!me.depotId) throw new ForbiddenException('This account has no depot');
     const depotId = me.depotId;
@@ -109,7 +135,7 @@ export class DispatchService {
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const now = this.clock.now();
 
-    const [rows, events, pings, carry, tomorrowOrders] = await Promise.all([
+    const [rows, events, pings, carry, tomorrowOrders, sosRows] = await Promise.all([
       this.prisma.trip.findMany({
         where: { depotId, serviceDate: day, status: { not: 'planning' } },
         include: {
@@ -147,6 +173,16 @@ export class DispatchService {
           store: { depotId },
         },
       }),
+      // Driver SOS alerts that dispatch has not resolved yet.
+      this.prisma.driverIncident.findMany({
+        where: {
+          incidentType: 'sos',
+          resolvedAt: null,
+          OR: [{ trip: { depotId } }, { vehicle: { depotId } }],
+        },
+        include: { driver: { include: { user: true } }, vehicle: true },
+        orderBy: { raisedAt: 'asc' },
+      }),
     ]);
 
     const lastSeen = new Map<string, Date>();
@@ -166,6 +202,8 @@ export class DispatchService {
       const driver = t.assignedDriver ?? t.vehicle.driver;
       const phone = driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null;
       const plate = t.vehicle.plate ?? t.vehicleId;
+
+      const onRoad = t.status === 'on_road';
 
       const stops: LiveStop[] = t.stops.map((s) => {
         const lines = (Array.isArray(s.receipt?.lineResults)
@@ -194,8 +232,13 @@ export class DispatchService {
       const done = t.stops.filter((s) => DONE.has(s.status));
       const lateMin = Math.max(0, ...stops.map((s) => s.missBy ?? 0));
       const seen = lastSeen.get(t.id) ?? null;
-      const staleMin = seen ? Math.floor((now.getTime() - seen.getTime()) / 60000) : null;
-      const onRoad = t.status === 'on_road';
+      const departedAt = t.loadSession?.departedAt ?? t.startingTime ?? null;
+      // Quiet since the last sync, or since departure when the driver has not synced at all.
+      const quietSince = seen ?? departedAt;
+      const staleMin = quietSince
+        ? Math.floor((now.getTime() - quietSince.getTime()) / 60000)
+        : null;
+      const sos = sosRows.filter((d) => d.tripId === t.id);
       const broke =
         t.status === 'breakdown' ||
         t.incidents.some(
@@ -205,8 +248,11 @@ export class DispatchService {
       const missing = t.stops.flatMap((s) => s.flags).filter((f) => f.type === 'missing');
       const missingCount = missing.reduce((sum, f) => sum + (f.qty ?? 1), 0);
 
+      // Every stop finished (or moved to another day): the trip is done even before it is closed.
+      const allDone = t.stops.length > 0 && t.stops.every((s) => DONE.has(s.status));
+
       let live: LiveStatus;
-      if (t.status === 'completed') live = 'completed';
+      if (t.status === 'completed' || (onRoad && allDone && !broke)) live = 'completed';
       else if (broke) live = 'breakdown';
       else if (notSynced) live = 'not_synced';
       else if (onRoad) live = lateMin >= LATE_MIN ? 'late' : 'on_time';
@@ -256,6 +302,17 @@ export class DispatchService {
           phone: null,
         });
       }
+      for (const d of sos) {
+        attention.push({
+          id: `sos-${d.id}`,
+          kind: 'sos',
+          title: `SOS from ${person(d.driver.user.name)} on ${plate}`,
+          text: `${d.message ?? 'No message'} · raised ${clockText(d.raisedAt)}.`,
+          tripId: t.id,
+          phone,
+          incidentId: d.id,
+        });
+      }
       if (notSynced) {
         attention.push({
           id: `sync-${t.id}`,
@@ -289,12 +346,20 @@ export class DispatchService {
         lastPlace: last ? (last.order.store.displayName ?? last.order.store.id) : null,
         // A trip that stopped syncing shows when it last did; otherwise when it last served a store.
         lastAt: (notSynced ? seen : (last?.arrivedAt ?? seen))?.toISOString() ?? null,
+        lastSyncAt: seen?.toISOString() ?? null,
+        departedAt: departedAt?.toISOString() ?? null,
+        openSos: sos.length,
         backAt: t.status === 'completed' ? (t.endingTime?.toISOString() ?? null) : null,
         bay: t.loadingJob?.bay ?? null,
         missingCount,
         previousTrip: previous(rows, t),
         nextTrip: next(rows, t),
-        hasIssue: broke || notSynced || missingCount > 0 || stops.some((s) => s.issueNote !== null),
+        hasIssue:
+          broke ||
+          notSynced ||
+          sos.length > 0 ||
+          missingCount > 0 ||
+          stops.some((s) => s.issueNote !== null),
         stops,
       };
     });
@@ -310,7 +375,22 @@ export class DispatchService {
     const dispatched = trips.filter((t) =>
       ['on_road', 'breakdown', 'completed'].includes(t.status),
     ).length;
+    // An SOS without a trip today still needs dispatch, so it counts and shows too.
+    const tripIds = new Set(rows.map((t) => t.id));
+    for (const d of sosRows.filter((x) => !x.tripId || !tripIds.has(x.tripId))) {
+      attention.push({
+        id: `sos-${d.id}`,
+        kind: 'sos',
+        title: `SOS from ${person(d.driver.user.name)}${d.vehicle ? ` on ${d.vehicle.plate ?? d.vehicle.id}` : ''}`,
+        text: `${d.message ?? 'No message'} · raised ${clockText(d.raisedAt)}.`,
+        tripId: d.tripId ?? '',
+        phone: d.driver.user.phone ?? null,
+        incidentId: d.id,
+      });
+    }
+    const sosOpen = sosRows.length;
     const incidentParts = [
+      sosOpen > 0 ? `${sosOpen} SOS` : null,
       breakdowns > 0 ? `${breakdowns} ${breakdowns === 1 ? 'breakdown' : 'breakdowns'}` : null,
       missingTrips > 0 ? `${missingTrips} missing ${missingTrips === 1 ? 'item' : 'items'}` : null,
     ].filter(Boolean);
@@ -332,7 +412,7 @@ export class DispatchService {
         avgLateMin: late.length
           ? Math.round(late.reduce((sum, t) => sum + (t.lateMin ?? 0), 0) / late.length)
           : 0,
-        openIncidents: breakdowns + missingTrips,
+        openIncidents: sosOpen + breakdowns + missingTrips,
         incidentsText: incidentParts.join(' · '),
       },
       counts: {
