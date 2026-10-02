@@ -21,6 +21,8 @@ describe('loader dock and store (e2e)', () => {
   let sunilStoreId: string | null = null;
   const ids = { district: '', loadTrip: '', storeTrip: '', storeStop: '' };
   const previousDemoNow = process.env.DEMO_NOW;
+  // Dispatcher notices this run raises (new orders, store reports) are removed in afterAll.
+  const startedAt = new Date();
 
   async function login(body: object) {
     const agent = request.agent(app.getHttpServer());
@@ -173,6 +175,9 @@ describe('loader dock and store (e2e)', () => {
       await prisma.fieldFlag.deleteMany({ where: { storeId: e2eStores } });
       await prisma.deliveryNote.deleteMany({ where: { order: { storeId: e2eStores } } });
       await prisma.notification.deleteMany({ where: { title: 'E2E-HOME checked the goods' } });
+      await prisma.notification.deleteMany({
+        where: { title: { in: ['New order', 'Store report'] }, createdAt: { gte: startedAt } },
+      });
       await prisma.trip.deleteMany({ where: { id: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.order.deleteMany({ where: { storeId: { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] } } });
       await prisma.user.update({ where: { loginId: 'sunil' }, data: { storeId: sunilStoreId } });
@@ -303,11 +308,19 @@ describe('loader dock and store (e2e)', () => {
   describe('store', () => {
     it('takes orders before 16:00 and refuses them after', async () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+      const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+      const newOrders = () =>
+        prisma.notification.count({
+          where: { userId: nimal.id, title: 'New order', link: '/dispatch/plan' },
+        });
+      const before = await newOrders();
       const placed = await store
         .post('/api/store/orders')
         .send({ lines: [{ catalogueId: 'F-MILK', qty: 2 }] })
         .expect(201);
       expect(placed.body.deliveryDate).toBe('2026-10-02');
+      // The depot's dispatcher hears about it under Planning.
+      expect(await newOrders()).toBe(before + 1);
       expect(placed.body.status).toBe('waiting');
       const lines = await prisma.orderLine.findMany({ where: { orderId: placed.body.id } });
       expect(lines.map((l) => l.itemId)).toEqual(['F-MILK']);
@@ -378,6 +391,12 @@ describe('loader dock and store (e2e)', () => {
       const noticesBefore = await prisma.notification.count({
         where: { userId: kasun.id, title: 'E2E-HOME checked the goods' },
       });
+      const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+      const reports = () =>
+        prisma.notification.count({
+          where: { userId: nimal.id, title: 'Store report', body: { contains: 'missing' } },
+        });
+      const reportsBefore = await reports();
 
       const delivery = (await store.get(`/api/store/deliveries/${ids.storeStop}`).expect(200)).body;
       const [first, second] = delivery.lines;
@@ -417,6 +436,32 @@ describe('loader dock and store (e2e)', () => {
         }),
       ).toBe(noticesBefore + 1);
       expect(confirmed.body.driverName).toBe(kasun.name);
+
+      // A receipt with a problem is a store report for the dispatcher, under Stores.
+      expect(await reports()).toBe(reportsBefore + 1);
+      const dispatcher = await login({ role: 'dispatcher', loginId: 'nimal', secret: 'waypoint' });
+      const panel = (await dispatcher.get('/api/dispatch/notices').expect(200)).body;
+      const report = panel.notices.find(
+        (n: { title: string; body: string }) =>
+          n.title === 'Store report' && n.body.includes('missing'),
+      );
+      expect(report).toMatchObject({ category: 'stores', link: '/dispatch/board' });
+      expect(panel.notices.find((n: { title: string }) => n.title === 'New order')).toMatchObject({
+        category: 'planning',
+      });
+      expect(panel.counts.all).toBe(panel.notices.length);
+      expect(panel.counts.stores).toBe(
+        panel.notices.filter((n: { category: string }) => n.category === 'stores').length,
+      );
+      // Seen notices leave the panel; the store cannot mark the dispatcher's notices.
+      await store.post(`/api/store/notices/${report.id}/read`).expect(200);
+      expect((await prisma.notification.findUniqueOrThrow({ where: { id: report.id } })).read).toBe(
+        false,
+      );
+      await dispatcher.post(`/api/dispatch/notices/${report.id}/read`).expect(200);
+      const after = (await dispatcher.get('/api/dispatch/notices').expect(200)).body;
+      expect(after.notices.some((n: { id: string }) => n.id === report.id)).toBe(false);
+      expect(after.counts.all).toBe(panel.counts.all - 1);
 
       const again = await store
         .post(`/api/store/deliveries/${ids.storeStop}/receipt`)

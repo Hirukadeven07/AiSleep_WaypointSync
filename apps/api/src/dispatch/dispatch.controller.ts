@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import type {
+  DispatcherNotices,
   LiveDay,
   MoveOptions,
   MoveStopResult,
@@ -41,6 +42,19 @@ export class DispatchController {
   @Get('live')
   live(@CurrentUser() me: AuthUser): Promise<LiveDay> {
     return this.dispatch.live(me);
+  }
+
+  /** Unseen notifications for the bell: incidents, store reports and new orders for planning. */
+  @Get('notices')
+  notices(@CurrentUser() me: AuthUser): Promise<DispatcherNotices> {
+    return this.dispatch.notices(me);
+  }
+
+  /** Mark one notification as seen; it leaves the panel. */
+  @Post('notices/:id/read')
+  @HttpCode(200)
+  markNoticeRead(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<{ ok: true }> {
+    return this.dispatch.markNoticeRead(me, id);
   }
 
   /** Dispatch has dealt with a driver's SOS: it leaves the board and the driver's phone. */
