@@ -1,5 +1,5 @@
 import type { Brand, ItemType, OrderStatus, StopStatus } from './status';
-import type { OrderLine } from './order';
+import type { OrderLine, StockLevel } from './order';
 import type { FlagType } from './dock';
 
 /** Orders for tomorrow are refused from 16:00 Asia/Colombo. */
@@ -26,6 +26,9 @@ export interface StoreOrderView {
   deferReason: string | null;
   movedFromDate: string | null;
   repeatSkip: boolean;
+  urgent: boolean;
+  stockLevel: StockLevel | null;
+  urgentNote: string | null;
 }
 
 /** A line the store flagged at receipt (ERD FieldFlag). The driver accepts or disputes it. */
@@ -88,6 +91,11 @@ export interface StoreHome {
 
 export interface PlaceOrderRequest {
   lines: { catalogueId: string; qty: number }[];
+  /** Marks the order urgent; `stockLevel` is then required. */
+  urgent?: boolean;
+  stockLevel?: StockLevel;
+  /** Optional note for the dispatcher, up to 200 characters. Ignored unless urgent. */
+  urgentNote?: string;
 }
 
 export interface ReceiptLine {

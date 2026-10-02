@@ -63,6 +63,12 @@ enum OrderStatus {
   partial
 }
 
+/// How short the store is when it marks an order urgent.
+enum StockLevel {
+  out_of_stock
+  running_low
+}
+
 enum TripStatus {
   planning
   published
@@ -312,6 +318,9 @@ model Order {
   weightKg            Float
   volumeM3            Float
   urgentNote          String?
+  /// Set by the store at order time; urgent orders head the dispatcher's waiting list.
+  urgent              Boolean        @default(false)
+  stockLevel          StockLevel?
   movedFromDate       DateTime?      @db.Date
   deferReason         String?
   deferredById        String?

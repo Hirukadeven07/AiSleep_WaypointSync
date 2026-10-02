@@ -41,6 +41,11 @@ const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const byWindow = (a: PlanOrder, b: PlanOrder) =>
   a.windowOpenMin - b.windowOpenMin || a.storeName.localeCompare(b.storeName);
+/** Urgent orders move to the top; each group keeps its order (a stable partition). */
+const urgentFirst = (orders: PlanOrder[]) => [
+  ...orders.filter((o) => o.urgent),
+  ...orders.filter((o) => !o.urgent),
+];
 
 function addDays(iso: string, days: number): string {
   const d = dateOnly(iso);
@@ -87,7 +92,7 @@ export class PlanService {
 
     const lookup = toLookup(districts, allowances);
     const today = this.clock.today();
-    const orders = waitingRows.map((r) => this.planOrder(r, today)).sort(byWindow);
+    const orders = urgentFirst(waitingRows.map((r) => this.planOrder(r, today)).sort(byWindow));
     const movedToLater = deferredRows.map((r) => this.planOrder(r, today)).sort(byWindow);
     const trips = tripRows.map((t) => this.planTrip(t, lookup, depotId as Depot));
 
@@ -149,6 +154,9 @@ export class PlanService {
       status: deferred ? 'deferred' : 'waiting',
       deferredTo: deferred ? isoDate(row.deliveryDate) : null,
       deferReason: row.deferReason,
+      urgent: row.urgent,
+      stockLevel: row.stockLevel,
+      urgentNote: row.urgentNote,
     };
   }
 

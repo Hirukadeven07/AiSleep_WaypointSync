@@ -69,6 +69,9 @@ function orderView(o: Order): StoreOrderView {
     deferReason: o.deferReason,
     movedFromDate: o.movedFromDate ? isoDay(o.movedFromDate) : null,
     repeatSkip: o.repeatSkip,
+    urgent: o.urgent,
+    stockLevel: o.stockLevel,
+    urgentNote: o.urgentNote,
   };
 }
 
@@ -191,6 +194,8 @@ export class StoreService {
     } catch (e) {
       throw new BadRequestException((e as Error).message);
     }
+    // Stock level and note only mean something on an urgent order.
+    const urgent = dto.urgent === true;
     const order = await this.prisma.order.create({
       data: {
         storeId: store.id,
@@ -201,6 +206,9 @@ export class StoreService {
         units: built.units,
         weightKg: built.weightKg,
         volumeM3: built.volumeM3,
+        urgent,
+        stockLevel: urgent ? (dto.stockLevel ?? null) : null,
+        urgentNote: urgent ? dto.urgentNote || null : null,
         lines: { create: built.lines },
       },
     });
