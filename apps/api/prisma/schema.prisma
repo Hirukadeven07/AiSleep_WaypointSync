@@ -432,6 +432,10 @@ model LoadSession {
   ackedPlanVersion Int       @default(0)
   /// Order ids on the trip when the loader last acknowledged; diffed against the live trip for the plan-change lock.
   ackedStopIds     String[]  @default([])
+  /// Removed orders the loader has confirmed are off the truck; acknowledging needs all of them. Reset on acknowledge.
+  takenOffOrderIds String[]  @default([])
+  /// Orders added by the last acknowledged plan change, shown as NEW on the checklist. Cleared on depart.
+  newOrderIds      String[]  @default([])
 }
 
 model LoadFlag {

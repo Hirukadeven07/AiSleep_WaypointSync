@@ -250,6 +250,10 @@ describe('loader dock and store (e2e)', () => {
         .expect(409);
       expect(blocked.body.reason).toBe('PLAN_LOCKED');
 
+      await loader
+        .post(`/api/loads/${ids.loadTrip}/taken-off`)
+        .send({ orderId: stopRow.orderId })
+        .expect(200);
       const acked = await loader.post(`/api/loads/${ids.loadTrip}/ack`).expect(200);
       expect(acked.body.lock.locked).toBe(false);
       // E2E-A left the truck: its delivery note now has a current 'removed' version.
