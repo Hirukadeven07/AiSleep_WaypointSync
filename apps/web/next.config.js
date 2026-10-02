@@ -5,8 +5,11 @@ const nextConfig = {
   output: 'standalone',
   transpilePackages: ['@waypoint/contracts'],
   experimental: {
-    // Trace files from the monorepo root so the standalone build includes workspace packages.
-    outputFileTracingRoot: path.join(__dirname, '../../'),
+    // Only for `next build` / standalone. In `next dev` this walks the monorepo
+    // (and OneDrive locks) and can leave the UI stuck on "Starting...".
+    ...(process.env.NODE_ENV === 'production'
+      ? { outputFileTracingRoot: path.join(__dirname, '../../') }
+      : {}),
   },
   async rewrites() {
     const api = process.env.API_INTERNAL_URL || 'http://localhost:3001';

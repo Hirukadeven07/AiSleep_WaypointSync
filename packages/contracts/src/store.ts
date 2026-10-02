@@ -1,4 +1,4 @@
-import type { Brand, OrderStatus, StopStatus } from './status';
+import type { Brand, ItemType, OrderStatus, StopStatus } from './status';
 import type { OrderLine } from './order';
 import type { FlagType } from './dock';
 
@@ -9,6 +9,7 @@ export interface CatalogueItem {
   id: string;
   name: string;
   pack: string;
+  type: ItemType;
   chilled: boolean;
   unitWeightKg: number;
   unitVolumeM3: number;
