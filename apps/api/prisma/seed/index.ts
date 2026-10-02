@@ -85,6 +85,193 @@ async function seedOutletManagers() {
   console.log(`[seed] ${stores.length} outlet managers ready (login = outlet id, password waypoint)`);
 }
 
+const DRIVER_NAMES = [
+  'Amila', 'Bandara', 'Chaminda', 'Dinesh', 'Eranga', 'Fazil', 'Gayan', 'Hasitha',
+  'Isuru', 'Janaka', 'Kamal', 'Lahiru', 'Madushanka', 'Nadeesha', 'Osanda', 'Pradeep',
+  'Roshan', 'Saman', 'Tharindu', 'Udara', 'Vijitha', 'Wasana', 'Yasith', 'Ajith',
+  'Buddhika', 'Chathura', 'Dilshan',
+];
+
+const LOADER_NAMES = [
+  'Aruna', 'Bimal', 'Chamara', 'Duminda', 'Eshan', 'Feroze', 'Gihan', 'Harsha',
+  'Indika', 'Jagath', 'Kasun', 'Lasantha', 'Mahesh', 'Nuwan', 'Oshan', 'Pasindu',
+  'Ruwan', 'Sandun', 'Thusitha', 'Upul',
+];
+
+const FLEET_DRIVER_COUNT = 70;
+const FLEET_DRIVER_LEAVERS = 10;
+const LOADERS_PER_DEPOT = 100;
+const LOADER_LEAVERS_PER_DEPOT = 10;
+const LEFT_ON = new Date(Date.UTC(2026, 2, 15));
+
+function fleetDriverLogin(n: number) {
+  return `D${String(n).padStart(3, '0')}`;
+}
+
+function fleetLoaderLogin(n: number) {
+  return `L${String(n).padStart(3, '0')}`;
+}
+
+async function removeExtraFleetDrivers() {
+  for (let n = FLEET_DRIVER_COUNT + 1; n <= 200; n++) {
+    const loginId = fleetDriverLogin(n);
+    const user = await prisma.user.findUnique({
+      where: { loginId },
+      include: { driverProfile: true },
+    });
+    if (!user) continue;
+    await prisma.vehicle.updateMany({ where: { driverId: user.id }, data: { driverId: null } });
+    await prisma.trip.updateMany({ where: { assignedDriverId: user.id }, data: { assignedDriverId: null } });
+    await prisma.driverEvent.deleteMany({ where: { driverId: user.id } });
+    if (user.driverProfile) {
+      await prisma.locationPing.deleteMany({ where: { driverId: user.driverProfile.id } });
+      await prisma.driverIncident.deleteMany({ where: { driverId: user.driverProfile.id } });
+      await prisma.driver.delete({ where: { id: user.driverProfile.id } });
+    }
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+}
+
+/**
+ * 70 drivers D001–D070. PIN/password waypont.
+ * Active drivers (no leaving date) fill the trucks 1:1.
+ * The last 10 (D061–D070) have leavingDate set and get no truck.
+ */
+async function seedFleetDrivers() {
+  const vehicles = await prisma.vehicle.findMany({ orderBy: { id: 'asc' } });
+  if (vehicles.length === 0) {
+    console.warn('[seed] no vehicles - skipping fleet drivers');
+    return;
+  }
+  const secretHash = await argon2.hash('waypont');
+  const depots = await prisma.depot.findMany({ select: { id: true } });
+  const depotIds = depots.map((d) => d.id);
+  const fallbackDepot = vehicles[0]?.depotId ?? depotIds[0] ?? 'Peliyagoda';
+  const activeCount = FLEET_DRIVER_COUNT - FLEET_DRIVER_LEAVERS;
+
+  await prisma.vehicle.updateMany({ data: { driverId: null } });
+
+  for (let n = 1; n <= FLEET_DRIVER_COUNT; n++) {
+    const loginId = fleetDriverLogin(n);
+    const active = n <= activeCount;
+    const vehicle = active && n <= vehicles.length ? vehicles[n - 1] : undefined;
+    const depotId = vehicle?.depotId ?? depotIds[(n - 1) % Math.max(depotIds.length, 1)] ?? fallbackDepot;
+    const given = DRIVER_NAMES[(n - 1) % DRIVER_NAMES.length]!;
+    const name = `${given} ${loginId}`;
+    const phone = `077${String(2000000 + n).slice(-7)}`;
+    const user = await prisma.user.upsert({
+      where: { loginId },
+      update: {
+        role: 'driver',
+        name,
+        depotId,
+        phone,
+        passwordHash: secretHash,
+        pinHash: secretHash,
+      },
+      create: {
+        loginId,
+        role: 'driver',
+        name,
+        depotId,
+        phone,
+        passwordHash: secretHash,
+        pinHash: secretHash,
+      },
+    });
+    const joinDate = new Date(Date.UTC(2019, 0, 1 + ((n * 11) % 1400)));
+    const leavingDate = active ? null : LEFT_ON;
+    await prisma.driver.upsert({
+      where: { userId: user.id },
+      update: {
+        licenseNo: `B${String(2000000 + n)}`,
+        idNo: `${199000000 + n}V`,
+        joinDate,
+        leavingDate,
+        lastLoginAt: active ? new Date() : new Date(Date.UTC(2026, 2, 10)),
+        isActive: active,
+      },
+      create: {
+        userId: user.id,
+        licenseNo: `B${String(2000000 + n)}`,
+        idNo: `${199000000 + n}V`,
+        joinDate,
+        leavingDate,
+        lastLoginAt: active ? new Date() : new Date(Date.UTC(2026, 2, 10)),
+        isActive: active,
+      },
+    });
+    const driver = await prisma.driver.findUniqueOrThrow({ where: { userId: user.id } });
+    await prisma.driverPhone.upsert({
+      where: { phoneNumber: phone },
+      update: { driverId: driver.id },
+      create: { phoneNumber: phone, driverId: driver.id },
+    });
+    if (vehicle) {
+      await prisma.vehicle.update({ where: { id: vehicle.id }, data: { driverId: user.id } });
+    }
+  }
+  await removeExtraFleetDrivers();
+  const assigned = Math.min(activeCount, vehicles.length);
+  console.log(
+    `[seed] ${FLEET_DRIVER_COUNT} fleet drivers ready (D001–D${String(activeCount).padStart(3, '0')} active, D${String(activeCount + 1).padStart(3, '0')}–D${String(FLEET_DRIVER_COUNT).padStart(3, '0')} left; ${assigned} trucks assigned; PIN/password waypont)`,
+  );
+}
+
+/**
+ * 100 loaders per depot (L001… Peliyagoda, then Kandy). Last 10 at each depot have left.
+ * Login is loader id + depot; dock keypad is not checked. sampath stays as the demo login.
+ */
+async function seedFleetLoaders() {
+  const depots = await prisma.depot.findMany({ select: { id: true }, orderBy: { id: 'desc' } });
+  if (depots.length === 0) {
+    console.warn('[seed] no depots - skipping fleet loaders');
+    return;
+  }
+  let n = 0;
+  for (const depot of depots) {
+    for (let i = 1; i <= LOADERS_PER_DEPOT; i++) {
+      n += 1;
+      const loginId = fleetLoaderLogin(n);
+      const active = i <= LOADERS_PER_DEPOT - LOADER_LEAVERS_PER_DEPOT;
+      const given = LOADER_NAMES[(n - 1) % LOADER_NAMES.length]!;
+      const name = `${given} ${loginId}`;
+      const phone = `076${String(3000000 + n).slice(-7)}`;
+      const user = await prisma.user.upsert({
+        where: { loginId },
+        update: { role: 'loader', name, depotId: depot.id, phone },
+        create: { loginId, role: 'loader', name, depotId: depot.id, phone },
+      });
+      const joinDate = new Date(Date.UTC(2020, 0, 1 + ((n * 7) % 1200)));
+      await prisma.loader.upsert({
+        where: { userId: user.id },
+        update: {
+          employeeNo: `LDR-${loginId}`,
+          idNo: `${198000000 + n}V`,
+          shift: i % 2 === 1 ? 'morning' : 'night',
+          joinDate,
+          leavingDate: active ? null : LEFT_ON,
+          lastLoginAt: active ? new Date() : new Date(Date.UTC(2026, 2, 10)),
+          isActive: active,
+        },
+        create: {
+          userId: user.id,
+          employeeNo: `LDR-${loginId}`,
+          idNo: `${198000000 + n}V`,
+          shift: i % 2 === 1 ? 'morning' : 'night',
+          joinDate,
+          leavingDate: active ? null : LEFT_ON,
+          lastLoginAt: active ? new Date() : new Date(Date.UTC(2026, 2, 10)),
+          isActive: active,
+        },
+      });
+    }
+  }
+  console.log(
+    `[seed] ${depots.length * LOADERS_PER_DEPOT} fleet loaders ready (${LOADERS_PER_DEPOT} per depot; last ${LOADER_LEAVERS_PER_DEPOT} at each depot left)`,
+  );
+}
+
 function dataDir() {
   return resolve(process.env.DATA_DIR ?? resolve(__dirname, '../../../../data'));
 }
@@ -108,6 +295,8 @@ async function main() {
     console.log('[seed] database already seeded - skipping CSV (use pnpm seed:reset to reseed)');
     await loadServiceAllowance(prisma, dir);
     await seedOutletManagers();
+    await seedFleetDrivers();
+    await seedFleetLoaders();
     await seedTeamErd(prisma);
     return;
   }
@@ -125,6 +314,8 @@ async function main() {
 
   await seedUsers();
   await seedOutletManagers();
+  await seedFleetDrivers();
+  await seedFleetLoaders();
   await seedDockStoreDemo(prisma);
   await seedTeamErd(prisma);
   console.log('[seed] done');

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type {
   CatalogueItem,
+  ItemType,
   PlaceOrderRequest,
   StoreHome,
   StoreOrderView,
@@ -14,6 +15,13 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Toast } from '@/components/ui/Toast';
 import { PageTitle, formatDate, formatDuration, useServerMinutes } from '@/components/store/parts';
+
+const ITEM_TYPE_LABEL: Record<ItemType, string> = {
+  chilled_food: 'Chilled food',
+  fresh: 'Fresh',
+  style: 'Style',
+  tech: 'Tech',
+};
 
 /** S2: order for tomorrow from the catalogue. Refused from 16:00. */
 export default function OrderPage() {
@@ -104,7 +112,7 @@ export default function OrderPage() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-body font-semibold text-ink">{c.name}</p>
               <p className="text-caption text-muted">
-                {c.pack}
+                {ITEM_TYPE_LABEL[c.type]} · {c.pack}
                 {c.chilled ? ' · chilled' : ''}
               </p>
             </div>

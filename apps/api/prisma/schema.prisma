@@ -20,6 +20,14 @@ enum Brand {
   Tech
 }
 
+/// Booklet product class on the catalogue row (Fresh stores mix chilled food and ambient fresh).
+enum ItemType {
+  chilled_food
+  fresh
+  style
+  tech
+}
+
 enum Temp {
   chilled
   ambient
@@ -496,6 +504,8 @@ model OutletPhone {
 model Item {
   id           String           @id
   itemName     String
+  brand        Brand            @default(Fresh)
+  type         ItemType         @default(fresh)
   isChilled    Boolean          @default(false)
   packLabel    String?
   packWeightKg Float?
@@ -504,6 +514,8 @@ model Item {
   dnLines      DeliveryNoteLine[]
   fieldFlags   FieldFlag[]
   loaderFlags  LoaderFlag[]
+
+  @@index([brand, type])
 }
 
 model InventoryBatch {

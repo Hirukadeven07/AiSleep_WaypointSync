@@ -17,36 +17,42 @@ export async function seedTeamErd(prisma: PrismaClient) {
 
 /** Item and InventoryBatch rows for the catalogue. Idempotent; order lines reference these ids. */
 export async function seedCatalogue(prisma: PrismaClient) {
-  const all = [...CATALOGUE.Fresh, ...CATALOGUE.Style, ...CATALOGUE.Tech];
-  for (const item of all) {
-    await prisma.item.upsert({
-      where: { id: item.id },
-      update: {
-        itemName: item.name,
-        isChilled: item.chilled,
-        packLabel: item.pack,
-        packWeightKg: item.unitWeightKg,
-      },
-      create: {
-        id: item.id,
-        itemName: item.name,
-        isChilled: item.chilled,
-        packLabel: item.pack,
-        packWeightKg: item.unitWeightKg,
-      },
-    });
-    await prisma.inventoryBatch.upsert({
-      where: { id: `BATCH-${item.id}` },
-      update: { qty: 80 },
-      create: {
-        id: `BATCH-${item.id}`,
-        itemId: item.id,
-        batchName: `${item.id}-2026-W40`,
-        manufacturingDate: new Date('2026-09-20T00:00:00Z'),
-        expiryDate: item.chilled ? new Date('2026-10-20T00:00:00Z') : new Date('2027-09-20T00:00:00Z'),
-        qty: 80,
-      },
-    });
+  const brands = ['Fresh', 'Style', 'Tech'] as const;
+  for (const brand of brands) {
+    for (const item of CATALOGUE[brand]) {
+      await prisma.item.upsert({
+        where: { id: item.id },
+        update: {
+          itemName: item.name,
+          brand,
+          type: item.type,
+          isChilled: item.chilled,
+          packLabel: item.pack,
+          packWeightKg: item.unitWeightKg,
+        },
+        create: {
+          id: item.id,
+          itemName: item.name,
+          brand,
+          type: item.type,
+          isChilled: item.chilled,
+          packLabel: item.pack,
+          packWeightKg: item.unitWeightKg,
+        },
+      });
+      await prisma.inventoryBatch.upsert({
+        where: { id: `BATCH-${item.id}` },
+        update: { qty: 80 },
+        create: {
+          id: `BATCH-${item.id}`,
+          itemId: item.id,
+          batchName: `${item.id}-2026-W40`,
+          manufacturingDate: new Date('2026-09-20T00:00:00Z'),
+          expiryDate: item.chilled ? new Date('2026-10-20T00:00:00Z') : new Date('2027-09-20T00:00:00Z'),
+          qty: 80,
+        },
+      });
+    }
   }
 }
 
