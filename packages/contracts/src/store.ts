@@ -37,6 +37,13 @@ export interface StoreIssue {
   driverDecision: 'pending' | 'accepted' | 'rejected';
 }
 
+/** One stop on the trip for the store's progress strip; `isYou` marks this store's stop. */
+export interface StoreTrackStop {
+  sequence: number;
+  status: StopStatus;
+  isYou: boolean;
+}
+
 /** One delivery to this store: a trip stop with its handoff timestamps. */
 export interface StoreDelivery {
   stopId: string;
@@ -52,6 +59,13 @@ export interface StoreDelivery {
   driverAckAt: string | null;
   signaturePhotoKey: string | null;
   signedAt: string | null;
+  /**
+   * Stops still to be served before this one on the same trip (0 = this store is next).
+   * Null unless the trip is on the road and this stop is upcoming or at risk.
+   */
+  stopsAway: number | null;
+  /** Every stop on the trip in delivery order. Other stores are not named. */
+  track: StoreTrackStop[];
   lines: OrderLine[];
   issues: StoreIssue[];
 }
