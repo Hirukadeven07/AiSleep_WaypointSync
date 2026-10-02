@@ -155,7 +155,12 @@ async function seedOps(prisma: PrismaClient) {
   });
   const published = await prisma.trip.findFirst({
     where: { status: 'published', depotId: 'Peliyagoda' },
-    include: { stops: true },
+    include: {
+      stops: {
+        orderBy: { sequence: 'asc' },
+        include: { order: { include: { lines: true, store: true } } },
+      },
+    },
     orderBy: { publishedAt: 'desc' },
   });
 
@@ -334,6 +339,104 @@ async function seedOps(prisma: PrismaClient) {
         message: 'Breakdown on Baseline Road — requesting assistance.',
         lat: 6.941,
         lng: 79.863,
+      },
+    });
+  }
+
+  // Dummy rows for tables the rest of seed never writes. Use a published-trip
+  // stop — never sunil's live arrived receive stop.
+  const doneStop = published?.stops[0];
+  if (doneStop && (await prisma.storeReceipt.count({ where: { stopId: doneStop.id } })) === 0) {
+    const confirmedAt = new Date();
+    await prisma.tripStop.update({
+      where: { id: doneStop.id },
+      data: {
+        status: 'delivered',
+        arrivedAt: doneStop.arrivedAt ?? confirmedAt,
+        storeConfirmedAt: confirmedAt,
+      },
+    });
+    await prisma.order.update({
+      where: { id: doneStop.orderId },
+      data: { status: 'delivered' },
+    });
+
+    if ((await prisma.loadFlag.count({ where: { stopId: doneStop.id } })) === 0) {
+      const flaggedLine = doneStop.order.lines[0];
+      await prisma.loadFlag.create({
+        data: {
+          stopId: doneStop.id,
+          orderLineId: flaggedLine?.id,
+          type: 'missing',
+          qty: 1,
+          note: 'Demo: one pack short at dock.',
+          photoKey: 'load-flags/demo.png',
+        },
+      });
+    }
+
+    const manager =
+      (await prisma.user.findUnique({ where: { loginId: doneStop.order.storeId } })) ??
+      (await prisma.user.findFirst({
+        where: { storeId: doneStop.order.storeId, role: 'store' },
+      }));
+    await prisma.storeReceipt.create({
+      data: {
+        stopId: doneStop.id,
+        lineResults: doneStop.order.lines.map((line) => ({
+          name: line.name,
+          orderedQty: line.qty,
+          receivedQty: line.qty,
+          issue: null,
+        })),
+        chilledWasCold: true,
+        photoKey: 'receipts/demo.png',
+        signaturePhotoKey: 'signatures/demo.png',
+        signedByUserId: manager?.id ?? null,
+        signedAt: confirmedAt,
+      },
+    });
+  }
+
+  if (kasun && published && (await prisma.driverEvent.count({ where: { driverId: kasun.id } })) === 0) {
+    const stopId = doneStop?.id;
+    const t0 = new Date();
+    await prisma.driverEvent.createMany({
+      data: [
+        {
+          clientId: `seed-arrived-${published.id}`,
+          driverId: kasun.id,
+          tripId: published.id,
+          type: 'ARRIVED',
+          payload: { stopId },
+          createdOnPhoneAt: new Date(t0.getTime() - 20 * 60_000),
+          seenPlanVersion: published.planVersion,
+        },
+        {
+          clientId: `seed-ack-${published.id}`,
+          driverId: kasun.id,
+          tripId: published.id,
+          type: 'ACKNOWLEDGEMENT',
+          payload: { stopId },
+          createdOnPhoneAt: new Date(t0.getTime() - 5 * 60_000),
+          seenPlanVersion: published.planVersion,
+        },
+      ],
+    });
+  }
+
+  if (onRoad && (await prisma.incident.count({ where: { tripId: onRoad.id } })) === 0) {
+    await prisma.incident.create({
+      data: {
+        type: 'breakdown',
+        tripId: onRoad.id,
+        status: 'open',
+        timeline: [
+          {
+            at: new Date().toISOString(),
+            text: 'Breakdown reported on Baseline Road — dispatcher ticket opened.',
+          },
+        ],
       },
     });
   }
