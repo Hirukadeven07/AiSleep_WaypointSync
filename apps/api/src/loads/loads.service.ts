@@ -62,6 +62,9 @@ function jobView(j: SheetTrip['loadingJob']): LoadJob | null {
 
 /** Delivery-note id for an order. Each change adds a version; the current one has validTo = null. */
 const dnId = (orderId: string) => `DN-${orderId}`;
+const REMOVED = 'removed';
+/** DEMO_NOW freezes the clock, so a new version must still land strictly after the current one. */
+const after = (current: Date, at: Date) => (current >= at ? new Date(current.getTime() + 1) : at);
 
 /** Quantity actually loaded for a line, after the loader's missing and wrong-quantity flags. */
 function confirmedQty(
@@ -233,6 +236,16 @@ export class LoadsService {
   /** The loader accepts the dispatcher's new plan; loading resumes on the new stop list. */
   async acknowledge(me: AuthUser, tripId: string): Promise<LoadSheet> {
     const trip = await this.findTrip(me, tripId);
+    const lock = await this.lockFor(trip);
+    if (lock.locked) {
+      // The delivery notes follow the accepted plan: removed orders leave the truck, added ones start picking.
+      await this.removedDeliveryNotes(
+        me,
+        lock.removed.map((r) => r.orderId),
+        trip.planVersion,
+      );
+      await this.openDeliveryNotes(me, trip);
+    }
     await this.prisma.loadSession.upsert({
       where: { tripId: trip.id },
       update: {
@@ -387,11 +400,19 @@ export class LoadsService {
         where: { orderId: order.id, validTo: null },
         orderBy: { versionAt: 'desc' },
       });
-      if (!note) {
+      // An order that was taken off another truck starts a fresh picking version.
+      if (!note || note.status === REMOVED) {
+        const versionAt = note ? after(note.versionAt, now) : now;
+        if (note) {
+          await this.prisma.deliveryNote.update({
+            where: { dnId_versionAt: { dnId: note.dnId, versionAt: note.versionAt } },
+            data: { validTo: versionAt },
+          });
+        }
         note = await this.prisma.deliveryNote.create({
           data: {
-            dnId: dnId(order.id),
-            versionAt: now,
+            dnId: note?.dnId ?? dnId(order.id),
+            versionAt,
             orderId: order.id,
             status: 'picking',
             changedById: loader?.id ?? null,
@@ -426,6 +447,37 @@ export class LoadsService {
     }
   }
 
+  /** Orders the dispatcher took off the trip mid-load: their open delivery note gets a 'removed' version. */
+  private async removedDeliveryNotes(me: AuthUser, orderIds: string[], planVersion: number) {
+    if (orderIds.length === 0) return;
+    const loader = await this.loaderProfile(me);
+    const now = this.clock.now();
+    for (const orderId of orderIds) {
+      const current = await this.prisma.deliveryNote.findFirst({
+        where: { orderId, validTo: null },
+        orderBy: { versionAt: 'desc' },
+      });
+      if (!current || current.status === REMOVED) continue;
+      const versionAt = after(current.versionAt, now);
+      await this.prisma.$transaction([
+        this.prisma.deliveryNote.update({
+          where: { dnId_versionAt: { dnId: current.dnId, versionAt: current.versionAt } },
+          data: { validTo: versionAt },
+        }),
+        this.prisma.deliveryNote.create({
+          data: {
+            dnId: current.dnId,
+            versionAt,
+            orderId,
+            status: REMOVED,
+            changedById: loader?.id ?? null,
+            changeReason: `taken off the trip by dispatch (plan v${planVersion})`,
+          },
+        }),
+      ]);
+    }
+  }
+
   /**
    * At departure each order's delivery note gets a 'loaded' version with the quantities actually
    * loaded, and every dock flag becomes a LoaderFlag for the dispatcher to review.
@@ -439,9 +491,7 @@ export class LoadsService {
         where: { orderId: order.id, validTo: null },
         orderBy: { versionAt: 'desc' },
       });
-      // DEMO_NOW freezes the clock, so keep the new version strictly after the current one.
-      const versionAt =
-        current && current.versionAt >= at ? new Date(current.versionAt.getTime() + 1) : at;
+      const versionAt = current ? after(current.versionAt, at) : at;
       if (current) {
         ops.push(
           this.prisma.deliveryNote.update({
