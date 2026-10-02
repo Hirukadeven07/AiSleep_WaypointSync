@@ -1,5 +1,5 @@
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import { TripOverview } from '@/components/drive/TripOverview';
 
 export default function Page() {
-  return <PlaceholderPage title="Stops" />;
+  return <TripOverview />;
 }

@@ -5,6 +5,7 @@ import {
   firstName,
   greeting,
   isStopDone,
+  mapsUrl,
   telHref,
   vehicleLabel,
   windowText,
@@ -45,5 +46,13 @@ describe('driver-format', () => {
 
   it('builds tel links without spaces', () => {
     expect(telHref('011 234 5601')).toBe('tel:0112345601');
+  });
+
+  it('sends Navigate to Google Maps: the pin when there is one, else a search', () => {
+    const pin = 'https://www.google.com/maps/dir/?api=1&destination=6.9,79.8';
+    expect(mapsUrl({ navigateUrl: pin, outletName: 'Kottawa Fresh' })).toBe(pin);
+    expect(mapsUrl({ navigateUrl: null, outletName: 'Kottawa Fresh', address: 'Colombo' })).toBe(
+      'https://www.google.com/maps/search/?api=1&query=Kottawa%20Fresh%2C%20Colombo%2C%20Sri%20Lanka',
+    );
   });
 });

@@ -10,7 +10,7 @@ export type EntityId = string | number;
 
 /** GET /api/me */
 export type { Me } from '@waypoint/contracts';
-import type { Me } from '@waypoint/contracts';
+import type { DriverDayResponse, Me } from '@waypoint/contracts';
 
 export interface StopSummary {
   id: EntityId;
@@ -80,6 +80,12 @@ export function clearCachedShell(): void {
     /* ignore */
   }
 }
+
+/**
+ * The shell saves the whole GET /api/driver/day body (phones, loader flags, notes and all);
+ * `DriverDay` above only names the fields the shell itself reads. This reads it with its real type.
+ */
+export const fullDay = (day: DriverDay | null) => day as unknown as DriverDayResponse | null;
 
 /** The trip the driver is working on: first one that is published and not finished. */
 export function pickActiveTrip(day: DriverDay | null): TripSummary | null {
