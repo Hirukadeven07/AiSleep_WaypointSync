@@ -4,7 +4,7 @@ import { useState } from 'react';
 import type { Brand, LiveTrip } from '@waypoint/contracts';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { dayLabel, kgText } from '@/components/plan/format';
-import { BRAND_TAG, timeOf, toneOf } from './live-format';
+import { BRAND_TAG, lastUpdate, timeOf, toneOf } from './live-format';
 import { useLiveDay } from './useLiveDay';
 import { useTripPanels } from './useTripPanels';
 
@@ -131,7 +131,10 @@ function Card({
           {trip.live === 'not_synced' ? `Not synced ${trip.notSyncedMin} min` : tone.label}
         </span>
       )}
-      {column === 'dispatched' && (trip.live === 'late' || trip.live === 'not_synced') && (
+      {column === 'dispatched' && trip.live === 'not_synced' && (
+        <p className="text-[12px] leading-[17px] text-muted">{lastUpdate(trip)}</p>
+      )}
+      {column === 'dispatched' && ['on_time', 'late', 'not_synced'].includes(trip.live) && (
         <button
           type="button"
           aria-label="Vehicle actions"

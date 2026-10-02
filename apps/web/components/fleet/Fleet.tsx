@@ -53,7 +53,7 @@ const FILTERS: {
 
 /** Figma "Fleet / Vehicle detail": every vehicle, what it is doing today, and its detail drawer. */
 export function Fleet() {
-  const { data: day, error, refresh } = usePoll(() => api<FleetDay>('/fleet'), 30_000);
+  const { data: day, error, refresh } = usePoll(() => api<FleetDay>('/fleet'), 5_000);
   const [filter, setFilter] = useState<Filter>('all');
   const [openId, setOpenId] = useState<string | null>(null);
   const [marking, setMarking] = useState<string | null>(null);

@@ -4,6 +4,7 @@ import * as argon2 from 'argon2';
 import { loadAllCsv, loadServiceAllowance } from './load-csv';
 import { seedDockStoreDemo } from './dock-store-demo';
 import { seedTeamErd } from './team-erd';
+import { seedDispatchDemo } from './dispatch-demo';
 
 const prisma = new PrismaClient();
 
@@ -82,7 +83,9 @@ async function seedOutletManagers() {
       },
     });
   }
-  console.log(`[seed] ${stores.length} outlet managers ready (login = outlet id, password waypoint)`);
+  console.log(
+    `[seed] ${stores.length} outlet managers ready (login = outlet id, password waypoint)`,
+  );
 }
 
 function dataDir() {
@@ -109,6 +112,7 @@ async function main() {
     await loadServiceAllowance(prisma, dir);
     await seedOutletManagers();
     await seedTeamErd(prisma);
+    await seedDispatchDemo(prisma);
     return;
   }
 
@@ -127,6 +131,7 @@ async function main() {
   await seedOutletManagers();
   await seedDockStoreDemo(prisma);
   await seedTeamErd(prisma);
+  await seedDispatchDemo(prisma);
   console.log('[seed] done');
 }
 
