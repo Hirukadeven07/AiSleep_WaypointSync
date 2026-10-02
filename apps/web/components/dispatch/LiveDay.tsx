@@ -140,6 +140,7 @@ export function LiveDay() {
   const { day, error } = useLiveDay();
   const panels = useTripPanels(day);
   const [filter, setFilter] = useState<Filter>('all');
+  const [when, setWhen] = useState<'today' | 'tomorrow'>('today');
 
   if (!day) {
     return (
@@ -150,7 +151,8 @@ export function LiveDay() {
   }
 
   const active = FILTERS.find((f) => f.id === filter) ?? FILTERS[0];
-  const rows = day.trips.filter(active.test);
+  // Tomorrow lists what Planning has made so far; the live filters only apply to today.
+  const rows = when === 'today' ? day.trips.filter(active.test) : day.tomorrowTrips;
   const k = day.kpis;
 
   return (
@@ -205,22 +207,45 @@ export function LiveDay() {
 
         <section className="flex min-h-[280px] flex-1 flex-col gap-1 overflow-y-auto rounded-card bg-surface p-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex shrink-0 items-center gap-2">
-            <h2 className="min-w-px flex-1 text-[18px] font-semibold leading-[25px] text-ink">
-              Trips today
+            <h2 className="text-[18px] font-semibold leading-[25px] text-ink">
+              {when === 'today' ? 'Trips today' : 'Trips tomorrow'}
             </h2>
-            {FILTERS.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setFilter(f.id)}
-                aria-pressed={filter === f.id}
-                className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${
-                  filter === f.id ? 'bg-primary text-bg' : 'bg-bg text-ink'
-                }`}
-              >
-                {f.label} {f.count(day)}
-              </button>
-            ))}
+            <div className="flex gap-1 rounded-pill bg-bg p-1" role="tablist" aria-label="Day">
+              {(
+                [
+                  ['today', `Today · ${day.trips.length}`],
+                  ['tomorrow', `Tomorrow · ${day.tomorrowTrips.length}`],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={when === id}
+                  onClick={() => setWhen(id)}
+                  className={`whitespace-nowrap rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${
+                    when === id ? 'bg-surface text-ink' : 'text-muted'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="min-w-px flex-1" />
+            {when === 'today' &&
+              FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFilter(f.id)}
+                  aria-pressed={filter === f.id}
+                  className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${
+                    filter === f.id ? 'bg-primary text-bg' : 'bg-bg text-ink'
+                  }`}
+                >
+                  {f.label} {f.count(day)}
+                </button>
+              ))}
           </div>
           <div className="h-2 shrink-0" />
           <div className="flex shrink-0 gap-2 px-3 py-2 text-[12px] font-bold leading-[15px] tracking-[0.6px] text-muted">
@@ -232,7 +257,11 @@ export function LiveDay() {
             <p className="w-[44px] shrink-0" />
           </div>
           {rows.length === 0 && (
-            <p className="px-3 py-6 text-[13px] text-muted">No trips in this view.</p>
+            <p className="px-3 py-6 text-[13px] text-muted">
+              {when === 'today'
+                ? 'No trips in this view.'
+                : 'No trips planned for tomorrow yet. Create them in Planning.'}
+            </p>
           )}
           {rows.map((t, i) => (
             <TripRow

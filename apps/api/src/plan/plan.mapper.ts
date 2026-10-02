@@ -3,7 +3,7 @@
  * the rules themselves stay in the domain package.
  */
 import type { Prisma, Vehicle as VehicleRow } from '@prisma/client';
-import type { Depot, Lookup, Order, Outlet, StopView, Vehicle } from '@waypoint/domain';
+import type { Depot, Lookup, Order, Outlet, RuleIssue, StopView, Vehicle } from '@waypoint/domain';
 
 export const orderInclude = {
   store: { include: { district: true } },
@@ -13,9 +13,41 @@ export type OrderRow = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 export const tripInclude = {
   vehicle: true,
   district: true,
+  extraDistricts: { orderBy: { name: 'asc' } },
   stops: { orderBy: { sequence: 'asc' }, include: { order: { include: orderInclude } } },
 } satisfies Prisma.TripInclude;
 export type TripRow = Prisma.TripGetPayload<{ include: typeof tripInclude }>;
+
+/** Planned load against capacity as a whole percent: weight or volume, whichever is fuller. */
+export function usedPct(kg: number, capKg: number, m3: number, capM3: number): number {
+  const ratio = Math.max(capKg > 0 ? kg / capKg : 0, capM3 > 0 ? m3 / capM3 : 0);
+  return Math.round(ratio * 100);
+}
+
+type TripAreas = { district: { name: string }; extraDistricts: { name: string }[] };
+
+/** The trip's districts: the main one first, then the others it was set up for. */
+export const tripDistricts = (t: TripAreas) => [
+  t.district.name,
+  ...t.extraDistricts.map((d) => d.name),
+];
+
+/** "Colombo" or "Colombo + Gampaha". */
+export const tripAreaLabel = (t: TripAreas) => tripDistricts(t).join(' + ');
+
+/**
+ * A trip set up for several districts is meant to mix them, so "another district" warnings
+ * are dropped while every stop sits inside the trip's districts.
+ */
+export function withoutCoveredDistricts(
+  issues: RuleIssue[],
+  trip: TripAreas,
+  stops: StopView[],
+): RuleIssue[] {
+  const covered = new Set(tripDistricts(trip));
+  if (covered.size < 2 || !stops.every((s) => covered.has(s.outlet.district))) return issues;
+  return issues.filter((i) => i.code !== 'DISTRICT_MISMATCH');
+}
 
 /** A sent trip can still change until it leaves the depot; the dock then has to accept the new plan. */
 const AT_DEPOT: readonly string[] = ['planning', 'published', 'loading', 'ready'];
