@@ -4,7 +4,14 @@ import type { Brand, StopStatus, TripStatus } from './status';
 
 /** What the dispatcher sees for a trip that is out or about to go. */
 export type LiveStatus =
-  'assigned' | 'loading' | 'on_time' | 'late' | 'breakdown' | 'not_synced' | 'completed';
+  | 'planned'
+  | 'assigned'
+  | 'loading'
+  | 'on_time'
+  | 'late'
+  | 'breakdown'
+  | 'not_synced'
+  | 'completed';
 
 export interface LiveStop {
   id: string;
@@ -103,7 +110,10 @@ export interface LiveDay {
     incidentsText: string;
   };
   counts: { all: number; onTime: number; late: number; issue: number; done: number };
+  /** Today's trips, including ones still being planned (live "planned"). */
   trips: LiveTrip[];
+  /** Tomorrow's trips as planned so far: "planned" until sent, then "assigned". */
+  tomorrowTrips: LiveTrip[];
   attention: AttentionItem[];
   /** Orders that were moved from an earlier day and are due today. */
   carryovers: { total: number; onTrips: number; delivered: number };

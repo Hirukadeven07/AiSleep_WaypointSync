@@ -55,6 +55,17 @@ export interface FleetDay {
   counts: { all: number; onRoad: number; atDepot: number; outOfService: number };
 }
 
+/** Fleet "Add vehicle": a new vehicle at the dispatcher's depot. The plate becomes its id. */
+export interface AddVehicleRequest {
+  plate: string; // "WP-1234" or "WP LB-1234"
+  type: 'truck' | 'van';
+  temp: 'reefer' | 'ambient';
+  weightCapKg: number;
+  volumeCapM3: number;
+  kmPerL?: number;
+  weeklyFuelQuotaL?: number;
+}
+
 export interface OutOfServiceRequest {
   reason: string;
   returnDate: string; // YYYY-MM-DD
