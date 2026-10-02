@@ -265,6 +265,8 @@ model User {
   passwordHash       String?
   pinHash            String?
   phone              String?
+  /// NotificationPreferences JSON; null means every preference is on. Saved only, not enforced yet.
+  notificationPrefs  Json?
   sessions           Session[]
   vehicle            Vehicle?
   notifications      Notification[]
