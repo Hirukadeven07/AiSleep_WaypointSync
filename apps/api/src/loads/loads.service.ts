@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import type {
   DepartSummary,
@@ -15,6 +15,7 @@ import { DomainError, loadOrder } from '@waypoint/domain';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import type { FlagDto } from './dto/loads.dto';
 
 const QUEUE_STATUSES = ['published', 'loading', 'ready'] as const;
@@ -112,6 +113,7 @@ export class LoadsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
+    @Inject(NOTIFIER) private readonly notifier: Notifier,
   ) {}
 
   /**
@@ -358,6 +360,7 @@ export class LoadsService {
         : []),
       ...(await this.loadedDeliveryNotes(me, trip, departedAt)),
     ]);
+    await this.tellDriver(trip);
 
     const lineName = new Map(
       trip.stops.flatMap((s) => s.order.lines.map((l) => [l.id, l.name] as const)),
@@ -376,6 +379,19 @@ export class LoadsService {
         })),
       ),
     };
+  }
+
+  /** The assigned driver is told the truck is loaded and can leave. No driver means no notice. */
+  private async tellDriver(trip: SheetTrip): Promise<void> {
+    const driverId = trip.vehicle.driverId;
+    if (!driverId) return;
+    const plate = trip.vehicle.numberPlate ?? 'Your truck';
+    await this.notifier.notify({
+      userId: driverId,
+      title: 'Truck loaded',
+      body: `${plate} is loaded. Trip ${trip.tripNumber} can leave the depot.`,
+      link: '/drive/next',
+    });
   }
 
   private async findTrip(me: AuthUser, tripId: string): Promise<SheetTrip> {
