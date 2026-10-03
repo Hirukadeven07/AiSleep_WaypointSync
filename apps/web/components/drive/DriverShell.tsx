@@ -13,6 +13,7 @@ import {
   type Me,
   type TripSummary,
 } from '@/lib/driver-cache';
+import { signOutDriver } from '@/lib/driver-sign-out';
 import { DriverSidebar } from '@/components/shell/DriverSidebar';
 import { PhoneColumn } from '@/components/shell/PhoneColumn';
 import { PhoneTabBar } from '@/components/shell/PhoneTabBar';
@@ -194,7 +195,7 @@ function ShellInner({ children }: { children: ReactNode }) {
         <PhoneColumn className="lg:relative lg:mx-0 lg:min-w-0 lg:max-w-none lg:flex-1">
           {me && (
             <div className="pt-[env(safe-area-inset-top)] lg:hidden">
-              <PhoneTopRow me={me} />
+              <PhoneTopRow me={me} onSignOut={signOutDriver} />
             </div>
           )}
           <main className="flex-1 px-5 pb-[130px] pt-2 lg:px-10 lg:py-8">{children}</main>

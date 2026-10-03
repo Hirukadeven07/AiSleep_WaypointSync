@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import type { Me } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { initials } from '@/lib/initials';
+import { signOutDriver } from '@/lib/driver-sign-out';
 import { AccountMenu } from './AccountMenu';
 import { DRIVER_TABS } from './driverTabs';
 
@@ -18,7 +19,9 @@ export function DriverSidebar({ me }: { me: Me }) {
   const menu = DRIVER_TABS.filter((t) => !t.fab);
 
   return (
-    <aside className="sticky top-0 hidden h-dvh w-[248px] shrink-0 flex-col gap-[6px] border-r border-info-tint bg-surface px-5 pb-6 pt-7 lg:flex">
+    // z-30: the sticky sidebar is its own stacking layer, so without it the account card and its
+    // click-away backdrop render under the page and cannot be clicked.
+    <aside className="sticky top-0 z-30 hidden h-dvh w-[248px] shrink-0 flex-col gap-[6px] border-r border-info-tint bg-surface px-5 pb-6 pt-7 lg:flex">
       <div className="flex items-center gap-3 pb-[22px] pl-1">
         <span className="flex size-10 items-center justify-center rounded-[12px] bg-primary">
           <img alt="" src="/landing/logo-mark.svg" className="size-[26.8px]" />
@@ -62,8 +65,9 @@ export function DriverSidebar({ me }: { me: Me }) {
 
       <AccountMenu
         me={me}
-        placement="right"
+        placement="above"
         label="Account"
+        onSignOut={signOutDriver}
         className="flex w-full items-center gap-3 rounded-[16px] bg-bg p-3 text-left"
       >
         <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-[14px] font-bold text-bg">
