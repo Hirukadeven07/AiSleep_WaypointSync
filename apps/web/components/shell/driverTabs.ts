@@ -6,5 +6,6 @@ export const DRIVER_TABS: PhoneTab[] = [
   { href: '/drive/stops', label: 'Stops', icon: 'route' },
   { href: '/drive/report', label: 'Report', icon: 'plus', fab: true },
   { href: '/drive/break', label: 'Break', icon: 'coffee' },
-  { href: '/drive/vehicle', label: 'Vehicle', icon: 'truck' },
+  // Licence, vehicle and recent trips (R4 profile); the path stays /drive/vehicle.
+  { href: '/drive/vehicle', label: 'Profile', icon: 'user' },
 ];

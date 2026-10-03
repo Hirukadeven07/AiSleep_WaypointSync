@@ -150,6 +150,12 @@ function Card({
       {column === 'dispatched' && trip.live === 'not_synced' && (
         <p className="text-[12px] leading-[17px] text-muted">{lastUpdate(trip)}</p>
       )}
+      {column === 'dispatched' && trip.onBreakSince && (
+        <span className="flex items-center gap-[6px] rounded-pill bg-tech-tint px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] text-tech">
+          <span aria-hidden className="size-[7px] rounded-full bg-current" />
+          On break since {timeOf(trip.onBreakSince)}
+        </span>
+      )}
       {column === 'dispatched' && ['on_time', 'late', 'not_synced'].includes(trip.live) && (
         <button
           type="button"
