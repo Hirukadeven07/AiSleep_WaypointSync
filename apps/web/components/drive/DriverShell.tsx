@@ -156,6 +156,16 @@ function ShellInner({ children }: { children: ReactNode }) {
   }, []);
 
   const trip = useMemo(() => pickActiveTrip(day), [day]);
+
+  // While the truck is still at the depot, keep asking for the day. Confirming the load
+  // moves the trip to on_road, and that is what lets the driver mark arrival.
+  useEffect(() => {
+    if (isLogin || phase !== 'ready') return;
+    if (!trip || !['published', 'loading', 'ready'].includes(trip.status)) return;
+    const timer = setInterval(() => void refresh(), 15_000);
+    return () => clearInterval(timer);
+  }, [isLogin, phase, trip, refresh]);
+
   const value = useMemo<DriverContextValue>(
     () => ({ me, day, trip, online, stale, cachedAt, refresh }),
     [me, day, trip, online, stale, cachedAt, refresh],
