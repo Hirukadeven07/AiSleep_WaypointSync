@@ -116,7 +116,7 @@ export class PlanService {
     return toLookup(districts, allowances);
   }
 
-  /** The plan counts as published once every trip with stops has been sent. */
+  /** Set once every trip that currently has stops has been sent. Empty new trips do not clear it. */
   private published(tripRows: TripRow[]): PlanDay['published'] {
     const withStops = tripRows.filter((t) => t.stops.length > 0);
     if (withStops.length === 0 || withStops.some((t) => t.status === 'planning')) return null;

@@ -95,7 +95,7 @@ export interface PlanDay {
   trips: PlanTrip[];
   districts: string[];
   summary: PlanSummary;
-  /** Set once every trip with stops has been sent to loaders and drivers. */
+  /** Last send, once every trip that currently has stops has been sent. Planning can continue after this. */
   published: { at: string; tripCount: number; storeCount: number } | null;
 }
 
