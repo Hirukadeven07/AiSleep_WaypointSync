@@ -36,6 +36,8 @@ export type Lookup = {
 
 export type Vehicle = {
   id: string;
+  /** What people call it (the number plate); messages fall back to the id. */
+  name?: string;
   type: VehicleType;
   temp: TempClass;
   weightCapKg: number;
@@ -47,6 +49,8 @@ export type Vehicle = {
 
 export type Outlet = {
   id: string;
+  /** The store's display name; messages fall back to the id. */
+  name?: string;
   brand: Brand;
   district: string;
   depot: Depot;

@@ -96,7 +96,7 @@ export class PlanEditService {
     if (!isAtDepot(trip.status)) {
       throw new DomainError(
         'PLAN_LOCKED',
-        `Trip ${trip.id} has left the depot and can no longer be changed.`,
+        `${trip.vehicle.numberPlate ?? trip.vehicleId} · Trip ${trip.tripNumber} has left the depot and can no longer be changed.`,
       );
     }
   }
@@ -119,7 +119,7 @@ export class PlanEditService {
       issues.push({
         code: 'BRAND_MISMATCH' as ReasonCode,
         severity: 'block',
-        message: `Trip ${trip.id} is a ${trip.brand} trip; this order is ${order.brand}.`,
+        message: `${trip.vehicle.numberPlate ?? trip.vehicleId} · Trip ${trip.tripNumber} carries ${trip.brand}; ${order.store.displayName ?? order.store.id} is a ${order.brand} store.`,
       });
     }
 
