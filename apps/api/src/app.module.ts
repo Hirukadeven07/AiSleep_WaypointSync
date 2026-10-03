@@ -5,14 +5,10 @@ import { SessionGuard } from './common/guards/session.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { ClockService } from './common/clock/clock.service';
 import { AuthModule } from './auth/auth.module';
-import { OrdersModule } from './orders/orders.module';
 import { PlanModule } from './plan/plan.module';
-import { TripsModule } from './trips/trips.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { FleetModule } from './fleet/fleet.module';
-import { VehiclesModule } from './vehicles/vehicles.module';
 import { LoadsModule } from './loads/loads.module';
-import { StopsModule } from './stops/stops.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { SyncModule } from './sync/sync.module';
 import { DriverModule } from './driver/driver.module';
@@ -34,14 +30,10 @@ class ClockModule {}
     PrismaModule,
     ClockModule,
     AuthModule,
-    OrdersModule,
     PlanModule,
-    TripsModule,
     DispatchModule,
     FleetModule,
-    VehiclesModule,
     LoadsModule,
-    StopsModule,
     IncidentsModule,
     SyncModule,
     DriverModule,
