@@ -159,6 +159,7 @@ export class PlanPublishService {
       where: { id: { in: trips.map((t) => t.id) } },
       data: { status: 'published', publishedAt: now },
     });
+    await this.handToDock(me, trips);
 
     const stores = new Map<string, { storeId: string; open: number; close: number; date: Date }>();
     for (const t of trips) {
@@ -191,5 +192,30 @@ export class PlanPublishService {
       tripCount: trips.length,
       storeCount: stores.size,
     };
+  }
+
+  /** A published trip becomes a loading job the dock queue can pick up. */
+  private async handToDock(me: Me, trips: TripRow[]) {
+    const dispatcher = await this.prisma.dispatcher.upsert({
+      where: { userId: me.id },
+      update: {},
+      create: { userId: me.id },
+    });
+    for (const trip of trips) {
+      const totalWeightKg = trip.stops.reduce((sum, stop) => sum + stop.order.weightKg, 0);
+      const totalVolumeM3 = trip.stops.reduce((sum, stop) => sum + stop.order.volumeM3, 0);
+      await this.prisma.loadingJob.upsert({
+        where: { tripId: trip.id },
+        update: {},
+        create: {
+          tripId: trip.id,
+          depot: trip.depotId,
+          assignedById: dispatcher.id,
+          status: 'assigned',
+          totalWeightKg,
+          totalVolumeM3,
+        },
+      });
+    }
   }
 }
