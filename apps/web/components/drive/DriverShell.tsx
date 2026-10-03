@@ -2,6 +2,8 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AuthError, fetchDriverDay, fetchMe } from '@/lib/driver-api';
+import { subscribeOutbox } from '@/lib/outbox';
+import { flushOutbox } from '@/lib/sync-runner';
 import {
   clearCachedShell,
   pickActiveTrip,
@@ -124,6 +126,26 @@ function ShellInner({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (phase === 'no-access') router.replace('/no-access');
   }, [phase, router]);
+
+  // Send queued actions (I've arrived, SOS, ...) whenever there is something to send and a signal:
+  // on load, as soon as one is queued, when the phone comes back online, and every 30 s.
+  // A successful send reloads the day so stop statuses catch up with the server.
+  useEffect(() => {
+    if (isLogin || phase !== 'ready') return;
+    const sync = () =>
+      void flushOutbox().then((sent) => {
+        if (sent > 0) void refresh();
+      });
+    sync();
+    const unsubscribe = subscribeOutbox(sync);
+    window.addEventListener('online', sync);
+    const timer = setInterval(sync, 30_000);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', sync);
+      clearInterval(timer);
+    };
+  }, [isLogin, phase, refresh]);
 
   // Installable PWA. Production only, so dev hot-reload is never served from cache.
   useEffect(() => {

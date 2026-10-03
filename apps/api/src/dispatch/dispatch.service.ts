@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import {
   ORDER_CUTOFF_MIN,
+  ROAD_ISSUE_LABEL,
+  WAIT_ALERT_MIN,
   type AttentionItem,
   type LiveDay,
   type LiveStatus,
@@ -14,7 +16,10 @@ import {
   type LiveTrip,
   type Me,
   type NotifyPreview,
+  type DispatcherNotices,
+  type NoticeCategory,
   type NotifyResult,
+  type RoadIssuePayload,
 } from '@waypoint/contracts';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -127,6 +132,41 @@ export class DispatchService {
     return { ok: true };
   }
 
+  /** The dispatcher's unseen notifications, newest first, grouped by where they lead. */
+  async notices(me: Me): Promise<DispatcherNotices> {
+    const rows = await this.prisma.notification.findMany({
+      where: { userId: me.id, read: false },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const notices = rows.map((n) => ({
+      id: n.id,
+      category: noticeCategory(n.link),
+      title: n.title,
+      body: n.body,
+      link: n.link,
+      createdAt: n.createdAt.toISOString(),
+    }));
+    const count = (c: NoticeCategory) => notices.filter((n) => n.category === c).length;
+    return {
+      notices,
+      counts: {
+        all: notices.length,
+        incidents: count('incidents'),
+        stores: count('stores'),
+        planning: count('planning'),
+      },
+    };
+  }
+
+  async markNoticeRead(me: Me, id: string): Promise<{ ok: true }> {
+    await this.prisma.notification.updateMany({
+      where: { id, userId: me.id },
+      data: { read: true },
+    });
+    return { ok: true };
+  }
+
   async live(me: Me): Promise<LiveDay> {
     if (!me.depotId) throw new ForbiddenException('This account has no depot');
     const depotId = me.depotId;
@@ -187,6 +227,21 @@ export class DispatchService {
         orderBy: { raisedAt: 'asc' },
       }),
     ]);
+
+    // The latest road issue per trip; a "reported" one that was not resolved pauses the trip.
+    const roadEvents = await this.prisma.driverEvent.findMany({
+      where: { type: 'ROAD_ISSUE', tripId: { in: rows.map((t) => t.id) } },
+      orderBy: { appliedAt: 'asc' },
+      select: { tripId: true, payload: true, createdOnPhoneAt: true },
+    });
+    const openIssue = new Map<string, { payload: RoadIssuePayload; at: Date }>();
+    for (const e of roadEvents) {
+      const payload = e.payload as unknown as RoadIssuePayload;
+      if (!e.tripId) continue;
+      if (payload.status === 'reported')
+        openIssue.set(e.tripId, { payload, at: e.createdOnPhoneAt });
+      else openIssue.delete(e.tripId);
+    }
 
     const lastSeen = new Map<string, Date>();
     for (const e of events)
@@ -317,6 +372,38 @@ export class DispatchService {
           incidentId: d.id,
         });
       }
+      // A driver at a store that has not checked the goods for WAIT_ALERT_MIN minutes: one alert per stop.
+      for (const s of t.stops) {
+        if (!['arrived', 'waiting'].includes(s.status) || !s.arrivedAt || s.storeConfirmedAt)
+          continue;
+        const waited = Math.floor((now.getTime() - s.arrivedAt.getTime()) / 60000);
+        if (waited < WAIT_ALERT_MIN) continue;
+        const store = s.order.store.displayName ?? s.order.store.id;
+        attention.push({
+          id: `waiting-${s.id}`,
+          kind: 'waiting',
+          title: `${plate} waiting ${waited} min at ${store}`,
+          text: `Arrived ${clockText(s.arrivedAt)}. The store has not checked the goods yet; the driver was asked to call them${s.order.store.phone ? ` on ${s.order.store.phone}` : ''}.`,
+          tripId: t.id,
+          phone,
+        });
+      }
+      const issue = openIssue.get(t.id);
+      if (issue) {
+        const { payload } = issue;
+        attention.push({
+          id: `road-${t.id}`,
+          kind: 'road_issue',
+          title: `${ROAD_ISSUE_LABEL[payload.kind] ?? 'Road issue'} · ${plate} paused`,
+          text: `${payload.note ? `${payload.note} · ` : ''}Reported ${clockText(issue.at)}. The next stop waits until the driver resumes.`,
+          tripId: t.id,
+          phone,
+          photo: payload.photo ?? null,
+          mapUrl: payload.location
+            ? `https://www.google.com/maps/search/?api=1&query=${payload.location.lat},${payload.location.lng}`
+            : null,
+        });
+      }
       if (notSynced) {
         attention.push({
           id: `sync-${t.id}`,
@@ -361,6 +448,7 @@ export class DispatchService {
         hasIssue:
           broke ||
           notSynced ||
+          openIssue.has(t.id) ||
           sos.length > 0 ||
           missingCount > 0 ||
           stops.some((s) => s.issueNote !== null),
@@ -512,6 +600,13 @@ export class DispatchService {
       };
     });
   }
+}
+
+/** Store reports lead to the board, new orders to planning; everything else is an incident. */
+function noticeCategory(link: string | null): NoticeCategory {
+  if (link?.startsWith('/dispatch/plan')) return 'planning';
+  if (link?.startsWith('/dispatch/board')) return 'stores';
+  return 'incidents';
 }
 
 /** "10:12" in Colombo time. */

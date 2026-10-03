@@ -28,6 +28,9 @@ function stopRow(overrides: Partial<DriverDayStopRow> = {}): DriverDayStopRow {
         lat: 6.9271,
         lng: 79.8612,
         phone: '0112000000',
+        dockType: 'rear_dock',
+        parkingConstraint: 'normal',
+        mallWindow: null,
         district: { name: 'Colombo 07' },
         phones: [],
       },
@@ -101,6 +104,7 @@ describe('buildDriverDay', () => {
       navigateUrl:
         'https://www.google.com/maps/dir/?api=1&destination=6.9271,79.8612&travelmode=driving',
       urgentNote: 'Use the back gate',
+      handover: { dockType: 'rear_dock', parking: 'normal', mallWindow: null },
       arrivedAt: null,
       storeConfirmedAt: null,
       driverAckAt: null,
