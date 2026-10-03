@@ -94,6 +94,45 @@ export interface DriverDayResponse {
   unreadNotices: number;
   /** The road issue reported on the active trip and not resolved yet: the next stop is paused. */
   roadIssue: DriverDayRoadIssue | null;
+  /** Today's breaks, from the driver's BREAK_START / BREAK_END events. */
+  break: DriverDayBreak;
+}
+
+export interface DriverDayBreak {
+  /** Set while the driver is on a break. */
+  onBreakSince: string | null;
+  /** Minutes of finished breaks today (the running one is not counted). */
+  usedMin: number;
+  allowanceMin: number;
+}
+
+/** GET /api/driver/profile. */
+export interface DriverProfile {
+  name: string;
+  loginId: string;
+  phone: string | null;
+  depotId: string | null;
+  licenseNo: string | null;
+  /** YYYY-MM-DD, when the driving licence expires; null if not recorded. */
+  licenseExpiry: string | null;
+  vehicle: {
+    id: string;
+    plate: string;
+    type: 'truck' | 'van';
+    temp: 'reefer' | 'ambient';
+    weightCapKg: number;
+    volumeCapM3: number;
+  } | null;
+  /** The driver's latest trips up to today, newest first. */
+  recentTrips: {
+    id: string;
+    serviceDate: string;
+    tripNumber: number;
+    status: TripStatus;
+    plate: string;
+    stopsDone: number;
+    stopsTotal: number;
+  }[];
 }
 
 export interface DriverDayRoadIssue {

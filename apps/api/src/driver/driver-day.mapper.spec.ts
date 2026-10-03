@@ -77,6 +77,7 @@ describe('buildDriverDay', () => {
       upcoming: [],
       unreadNotices: 0,
       roadIssue: null,
+      break: { onBreakSince: null, usedMin: 0, allowanceMin: 45 },
     });
   });
 

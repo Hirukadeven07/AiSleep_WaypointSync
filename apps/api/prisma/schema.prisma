@@ -572,6 +572,7 @@ model Driver {
   userId        String           @unique
   user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   licenseNo     String?          @unique
+  licenseExpiry DateTime?        @db.Date
   idNo          String?          @unique
   joinDate      DateTime?        @db.Date
   leavingDate   DateTime?        @db.Date

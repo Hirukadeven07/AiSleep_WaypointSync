@@ -22,6 +22,7 @@ import {
 } from '@/lib/driver-format';
 import { enqueueAction, getPendingActions, subscribeOutbox } from '@/lib/outbox';
 import { useRoadIssue, writeRoadIssue } from '@/lib/road-issue';
+import { useBreak } from '@/lib/use-break';
 
 const DOCK: Record<DriverDayHandover['dockType'], string> = {
   rear_dock: 'Rear loading dock',
@@ -193,6 +194,7 @@ export function NextStop() {
       ? full.roadIssue
       : null;
   const issue = localIssue ?? serverIssue;
+  const onBreak = useBreak();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -276,6 +278,47 @@ export function NextStop() {
       );
       writeRoadIssue(trip.id, null);
     });
+
+  // A break pauses the next stop until the driver ends it.
+  if (onBreak.onBreakSince !== null && phase === 'travel') {
+    return (
+      <div className="flex flex-col gap-4 lg:max-w-[640px]">
+        <header className="flex flex-col gap-1 pr-[111px]">
+          <p className="text-[13px] font-semibold leading-[17px] text-muted">
+            Next stop · {index} of {stops.length} · Trip {trip.tripNumber}
+          </p>
+          <h1 className="text-[26px] font-semibold leading-8 text-ink">On break</h1>
+        </header>
+        {!online && <OfflineBanner />}
+        <section
+          className="flex flex-col gap-2 rounded-card bg-tech-tint p-4"
+          aria-label="On break"
+          role="status"
+        >
+          <p className="flex items-center gap-2 text-[17px] font-semibold leading-[22px] text-ink">
+            <Icon name="coffee" size={18} className="text-tech" />
+            Since {timeOf(new Date(onBreak.onBreakSince).toISOString())}
+          </p>
+          <p className="text-[14px] leading-5 text-muted">
+            {stop.outletName} waits until you end the break. Dispatch can see you are on a break.
+          </p>
+        </section>
+        <button
+          type="button"
+          onClick={() => void send(onBreak.end)}
+          disabled={busy}
+          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg disabled:opacity-60"
+        >
+          End break and resume
+        </button>
+        {message && (
+          <p role="alert" className="text-[14px] font-medium leading-5 text-danger">
+            {message}
+          </p>
+        )}
+      </div>
+    );
+  }
 
   // A reported road issue pauses the next stop until the driver resumes.
   if (issue && phase === 'travel') {

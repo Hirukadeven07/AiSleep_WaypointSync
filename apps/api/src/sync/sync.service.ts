@@ -385,6 +385,64 @@ export class SyncService {
         return { stale, notifications: [] };
       }
 
+      case 'BREAK_START':
+      case 'BREAK_END': {
+        // A break belongs to the driver; the trip is noted so the board shows it on that trip.
+        const trip =
+          (await this.lookupTripForDriver(tx, me.id, event.tripId ?? null)) ??
+          (await this.activeTripForDriver(me.id, tx));
+        const tripId = trip?.id ?? null;
+        const stale = await this.shouldMarkStale(tx, event, tripId);
+        await this.recordEvent(tx, me, event, tripId);
+        return { stale, notifications: [] };
+      }
+
+      case 'LOCATION_PING': {
+        const { lat, lng, accuracyM, speedKmh, sos } = payload;
+        const optional = (n: unknown) => n == null || (typeof n === 'number' && Number.isFinite(n));
+        if (
+          !isCoord(lat, 90) ||
+          !isCoord(lng, 180) ||
+          !optional(accuracyM) ||
+          !optional(speedKmh)
+        ) {
+          throw new RejectedEvent('INVALID_PAYLOAD');
+        }
+        const trip =
+          (await this.lookupTripForDriver(tx, me.id, event.tripId ?? null)) ??
+          (await this.activeTripForDriver(me.id, tx));
+        // While the SOS screen is open, the open alert follows the driver.
+        if (sos === true) {
+          await tx.driverIncident.updateMany({
+            where: { driver: { userId: me.id }, incidentType: 'sos', resolvedAt: null },
+            data: { lat: lat as number, lng: lng as number },
+          });
+        }
+        if (!trip) {
+          if (sos === true) return { stale: false, notifications: [] };
+          throw new RejectedEvent('NO_ACTIVE_TRIP');
+        }
+        const driver = await tx.driver.upsert({
+          where: { userId: me.id },
+          create: { userId: me.id },
+          update: {},
+        });
+        // LocationPing.clientUuid is unique: a resent ping is reported as a duplicate.
+        await tx.locationPing.create({
+          data: {
+            clientUuid: event.clientId,
+            tripId: trip.id,
+            driverId: driver.id,
+            lat: lat as number,
+            lng: lng as number,
+            accuracyM: (accuracyM as number | null | undefined) ?? null,
+            speedKmh: (speedKmh as number | null | undefined) ?? null,
+            recordedAt: happenedAt,
+          },
+        });
+        return { stale: false, notifications: [] };
+      }
+
       default:
         throw new RejectedEvent('INVALID_EVENT');
     }

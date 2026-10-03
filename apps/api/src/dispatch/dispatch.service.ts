@@ -23,6 +23,7 @@ import {
 } from '@waypoint/contracts';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { BREAK_EVENT_TYPES, foldBreaks } from '../driver/driver-breaks';
 import { alertLongWaits } from '../driver/driver-notices';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { tripAreaLabel } from '../plan/plan.mapper';
@@ -240,6 +241,21 @@ export class DispatchService {
       rows.map((t) => t.id),
     );
 
+    // A driver on a break shows on their trip's card.
+    const breakEvents = await this.prisma.driverEvent.findMany({
+      where: { type: { in: BREAK_EVENT_TYPES }, tripId: { in: rows.map((t) => t.id) } },
+      select: { tripId: true, type: true, createdOnPhoneAt: true },
+    });
+    const onBreak = new Map<string, Date>();
+    for (const id of new Set(breakEvents.map((e) => e.tripId))) {
+      const since = foldBreaks(
+        breakEvents
+          .filter((e) => e.tripId === id)
+          .map((e) => ({ type: e.type, at: e.createdOnPhoneAt })),
+      ).onBreakSince;
+      if (id && since) onBreak.set(id, since);
+    }
+
     // The latest road issue per trip; a "reported" one that was not resolved pauses the trip.
     const roadEvents = await this.prisma.driverEvent.findMany({
       where: { type: 'ROAD_ISSUE', tripId: { in: rows.map((t) => t.id) } },
@@ -454,6 +470,7 @@ export class DispatchService {
         lastSyncAt: seen?.toISOString() ?? null,
         departedAt: departedAt?.toISOString() ?? null,
         openSos: sos.length,
+        onBreakSince: onBreak.get(t.id)?.toISOString() ?? null,
         backAt: t.status === 'completed' ? (t.endingTime?.toISOString() ?? null) : null,
         bay: t.loadingJob?.bay ?? null,
         missingCount,
@@ -592,6 +609,7 @@ export class DispatchService {
         lastSyncAt: null,
         departedAt: null,
         openSos: 0,
+        onBreakSince: null,
         backAt: null,
         bay: null,
         missingCount: 0,

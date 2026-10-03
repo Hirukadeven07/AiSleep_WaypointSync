@@ -1,14 +1,16 @@
-import type {
-  DriverDayRoadIssue,
-  DriverDayFlag,
-  DriverDayPhone,
-  DriverDayResponse,
-  DriverDayStop,
-  DriverDayTrip,
-  DriverDayVehicle,
-  FlagType,
-  StopStatus,
-  TripStatus,
+import {
+  BREAK_ALLOWANCE_MIN,
+  type DriverDayBreak,
+  type DriverDayRoadIssue,
+  type DriverDayFlag,
+  type DriverDayPhone,
+  type DriverDayResponse,
+  type DriverDayStop,
+  type DriverDayTrip,
+  type DriverDayVehicle,
+  type FlagType,
+  type StopStatus,
+  type TripStatus,
 } from '@waypoint/contracts';
 
 /** Trips the driver can work today; the same statuses `SyncService.activeTripForDriver` uses. */
@@ -149,6 +151,7 @@ export interface DriverDayExtras {
   upcoming?: DriverDayTripRow[];
   unreadNotices?: number;
   roadIssue?: DriverDayRoadIssue | null;
+  break?: DriverDayBreak;
 }
 
 export function buildDriverDay(
@@ -162,6 +165,7 @@ export function buildDriverDay(
     upcoming: (extras.upcoming ?? []).map((trip) => mapTrip(trip, serviceDate)),
     unreadNotices: extras.unreadNotices ?? 0,
     roadIssue: extras.roadIssue ?? null,
+    break: extras.break ?? { onBreakSince: null, usedMin: 0, allowanceMin: BREAK_ALLOWANCE_MIN },
   };
   if (!vehicle) return { ...common, vehicle: null, trips: [], activeTripId: null };
 
