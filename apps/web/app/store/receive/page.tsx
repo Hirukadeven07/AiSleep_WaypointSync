@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Toast } from '@/components/ui/Toast';
 import { HandoffTimeline, IssueList, PageTitle } from '@/components/store/parts';
+import { QtyStepper } from '@/components/store/QtyStepper';
 
 type LineState = { receivedQty: number; issue: FlagType | null };
 
@@ -161,41 +162,24 @@ function ReceiptForm({
                     {line.chilled ? ' · chilled' : ''}
                   </p>
                 </div>
-                <div
-                  className="flex shrink-0 items-center gap-xs"
-                  aria-label={`Received ${line.name}`}
-                >
-                  <button
-                    type="button"
-                    aria-label="One fewer"
-                    className="size-11 rounded-full border border-mist text-title text-ink"
-                    onClick={() => {
-                      const q = Math.max(0, st.receivedQty - 1);
-                      set(line.id, {
-                        receivedQty: q,
-                        issue: q < line.qty ? (st.issue ?? 'missing') : st.issue,
-                      });
-                    }}
-                  >
-                    −
-                  </button>
-                  <span className="w-8 text-center text-title text-ink">{st.receivedQty}</span>
-                  <button
-                    type="button"
-                    aria-label="One more"
-                    disabled={st.receivedQty >= line.qty}
-                    className="size-11 rounded-full border border-mist text-title text-ink disabled:opacity-40"
-                    onClick={() => {
-                      const q = Math.min(line.qty, st.receivedQty + 1);
-                      set(line.id, {
-                        receivedQty: q,
-                        issue: q === line.qty && st.issue === 'missing' ? null : st.issue,
-                      });
-                    }}
-                  >
-                    +
-                  </button>
-                </div>
+                <QtyStepper
+                  name={line.name}
+                  value={st.receivedQty}
+                  max={line.qty}
+                  plusTone="outline"
+                  onChange={(q) =>
+                    set(line.id, {
+                      receivedQty: q,
+                      // A short count is "missing" unless the manager picked another issue.
+                      issue:
+                        q < line.qty
+                          ? (st.issue ?? 'missing')
+                          : st.issue === 'missing'
+                            ? null
+                            : st.issue,
+                    })
+                  }
+                />
               </div>
               <div className="flex flex-wrap gap-xs">
                 {ISSUES.map((i) => (
