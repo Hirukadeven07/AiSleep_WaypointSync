@@ -15,6 +15,22 @@ export interface MapDepot {
   lng: number;
 }
 
+/**
+ * Every store at the depot that has coordinates.
+ * `hasOrder` is true when that store has an order on the map's date.
+ */
+export interface MapStore {
+  storeId: string;
+  storeName: string;
+  brand: Brand;
+  district: string;
+  lat: number;
+  lng: number;
+  hasOrder: boolean;
+  /** The order on this date, when the store has one. */
+  orderId: string | null;
+}
+
 /** A store the planner can see. `plate` is set once the order is already on a trip. */
 export interface PlanMapPin {
   orderId: string;
@@ -47,6 +63,8 @@ export interface PlanMap {
   depot: MapDepot | null;
   districts: MapDistrict[];
   pins: PlanMapPin[];
+  /** All depot stores with a location. Ordered ones are drawn darker. */
+  stores: MapStore[];
   /** Orders for the day whose store has no coordinates, so they cannot be pinned. */
   unplaced: number;
   unplacedStores: UnplacedStore[];
@@ -103,6 +121,8 @@ export interface LocateMap {
   depotId: string;
   depots: MapDepot[];
   districts: MapDistrict[];
+  /** All depot stores with a location. Ordered ones are drawn darker. */
+  stores: MapStore[];
   /** Trips that have left the depot, or already finished, so a driver can be placed. */
   trips: LocateTrip[];
   /** Booklet departure of the next run still at the depot, when nothing is on the road. */
