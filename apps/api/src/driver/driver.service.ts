@@ -21,7 +21,7 @@ export class DriverService {
       where: { driverId: me.id },
       select: {
         id: true,
-        plate: true,
+        numberPlate: true,
         type: true,
         trips: {
           where: { serviceDate: asDate(serviceDate), status: { in: DRIVER_TRIP_STATUSES } },
@@ -53,7 +53,6 @@ export class DriverService {
                         windowCloseMin: true,
                         lat: true,
                         lng: true,
-                        phone: true,
                         dockType: true,
                         parkingConstraint: true,
                         mallWindow: true,

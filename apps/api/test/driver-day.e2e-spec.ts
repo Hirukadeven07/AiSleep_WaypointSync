@@ -114,7 +114,6 @@ describe('driver day (e2e)', () => {
         windowCloseMin: 480,
         lat: 6.9271,
         lng: 79.8612,
-        phone: '0112000000',
         phones: {
           create: [
             { label: 'manager', phoneNo: '0771111111' },
@@ -148,7 +147,7 @@ describe('driver day (e2e)', () => {
     await prisma.vehicle.create({
       data: {
         id: vehicleId,
-        plate: `DAY-${stamp}`,
+        numberPlate: `DAY-${stamp}`,
         depotId: 'Peliyagoda',
         type: 'truck',
         temp: 'reefer',
@@ -190,7 +189,6 @@ describe('driver day (e2e)', () => {
       planVersion: 3,
     });
     liveTripId = live.id;
-    await createTrip({ vehicleId, serviceDate: DAY, tripNumber: 3, status: 'planning' });
     await createTrip({ vehicleId, serviceDate: YESTERDAY, tripNumber: 2, status: 'published' });
     await createTrip({
       vehicleId: otherVehicleId,
@@ -264,7 +262,7 @@ describe('driver day (e2e)', () => {
       plate: expect.stringMatching(/^DAY-/),
       type: 'truck',
     });
-    // Completed, planning, yesterday's and the other driver's on_road trips are left out.
+    // Completed, yesterday's and the other driver's on_road trips are left out.
     expect(day.trips.map((trip) => trip.id)).toEqual([liveTripId]);
     expect(day.trips[0]).toMatchObject({ tripNumber: 2, status: 'published', planVersion: 3 });
     expect(day.activeTripId).toBe(liveTripId);

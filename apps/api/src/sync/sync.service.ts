@@ -321,7 +321,7 @@ export class SyncService {
         // A new report pauses the trip, so the depot's dispatchers hear about it once.
         const vehicle = await tx.vehicle.findUnique({
           where: { driverId: me.id },
-          select: { plate: true, id: true, depotId: true },
+          select: { numberPlate: true, id: true, depotId: true },
         });
         const depotId = vehicle?.depotId ?? me.depotId;
         const dispatchers = await tx.user.findMany({
@@ -329,7 +329,7 @@ export class SyncService {
           select: { id: true },
         });
         const label = ROAD_ISSUE_LABEL[payload.kind];
-        const body = `${me.name}${vehicle ? ` (${vehicle.plate ?? vehicle.id})` : ''} reported: ${label}${payload.note ? ` — ${payload.note}` : ''}. Next stop paused.`;
+        const body = `${me.name}${vehicle ? ` (${vehicle.numberPlate ?? vehicle.id})` : ''} reported: ${label}${payload.note ? ` — ${payload.note}` : ''}. Next stop paused.`;
         return {
           stale,
           notifications: dispatchers.map((user) => ({
@@ -373,17 +373,11 @@ export class SyncService {
           !latest || latest.createdOnPhoneAt.getTime() <= Date.parse(event.createdOnPhoneAt);
         await this.recordEvent(tx, me, event, tripId);
 
-        if (isNewest) {
-          await tx.vehicle.update({
-            where: { id: vehicle.id },
-            data: { lastConfirmedLitres: remainingLitres },
+        if (isNewest && tripId) {
+          await tx.trip.update({
+            where: { id: tripId },
+            data: { fuelLitresAtEnd: remainingLitres },
           });
-          if (tripId) {
-            await tx.trip.update({
-              where: { id: tripId },
-              data: { fuelLitresAtEnd: remainingLitres },
-            });
-          }
         }
         return { stale, notifications: [] };
       }

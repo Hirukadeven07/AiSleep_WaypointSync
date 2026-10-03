@@ -1,10 +1,18 @@
 import { resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { loadAllCsv, loadServiceAllowance } from './load-csv';
+import {
+  fillNumberPlates,
+  fillPlannerMinutes,
+  fillStoreLocations,
+  loadAllCsv,
+  loadServiceAllowance,
+} from './load-csv';
 import { seedDockStoreDemo } from './dock-store-demo';
 import { seedTeamErd } from './team-erd';
 import { seedDispatchDemo } from './dispatch-demo';
+import { seedDepotOrders } from './depot-orders';
+import { seedDepotTrips } from './depot-trips';
 
 const prisma = new PrismaClient();
 
@@ -101,6 +109,20 @@ const LOADER_NAMES = [
   'Ruwan', 'Sandun', 'Thusitha', 'Upul',
 ];
 
+/** Family names for the User.name column. Login ids stay on loginId, not the surname. */
+const FAMILY_NAMES = [
+  'Perera', 'Silva', 'Fernando', 'Jayawardena', 'Wijesinghe', 'Rathnayake',
+  'Gunasekara', 'Herath', 'Dissanayake', 'Senanayake', 'Weerasinghe', 'Abeysekera',
+  'Pathirana', 'Liyanage', 'Karunaratne', 'Ekanayake', 'Jayasuriya', 'Mendis',
+  'Peiris', 'Wickramasinghe', 'Fonseka', 'Amarasinghe', 'Balasuriya', 'Dias',
+  'Alwis', 'Nazeer', 'Iqbal', 'Rajah', 'Selvan', 'Krishnan',
+];
+
+function personName(given: string, n: number) {
+  const family = FAMILY_NAMES[(n * 11) % FAMILY_NAMES.length]!;
+  return `${given} ${family}`;
+}
+
 const FLEET_DRIVER_COUNT = 70;
 const FLEET_DRIVER_LEAVERS = 10;
 const LOADERS_PER_DEPOT = 100;
@@ -160,7 +182,7 @@ async function seedFleetDrivers() {
     const vehicle = active && n <= vehicles.length ? vehicles[n - 1] : undefined;
     const depotId = vehicle?.depotId ?? depotIds[(n - 1) % Math.max(depotIds.length, 1)] ?? fallbackDepot;
     const given = DRIVER_NAMES[(n - 1) % DRIVER_NAMES.length]!;
-    const name = `${given} ${loginId}`;
+    const name = personName(given, n);
     const phone = `077${String(2000000 + n).slice(-7)}`;
     const user = await prisma.user.upsert({
       where: { loginId },
@@ -238,7 +260,7 @@ async function seedFleetLoaders() {
       const loginId = fleetLoaderLogin(n);
       const active = i <= LOADERS_PER_DEPOT - LOADER_LEAVERS_PER_DEPOT;
       const given = LOADER_NAMES[(n - 1) % LOADER_NAMES.length]!;
-      const name = `${given} ${loginId}`;
+      const name = personName(given, n);
       const phone = `076${String(3000000 + n).slice(-7)}`;
       const user = await prisma.user.upsert({
         where: { loginId },
@@ -275,6 +297,54 @@ async function seedFleetLoaders() {
   );
 }
 
+/** One Peliyagoda truck out of service, with a reason and a return time tomorrow at 14:30 Colombo. */
+async function seedOutOfServiceDemo() {
+  const colomboDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Colombo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const back = new Date(`${colomboDate}T14:30:00+05:30`);
+  back.setUTCDate(back.getUTCDate() + 1);
+
+  const busy = await prisma.trip.findMany({
+    where: { status: { in: ['loading', 'ready', 'on_road', 'breakdown'] } },
+    select: { vehicleId: true },
+  });
+  const busyIds = new Set(busy.map((t) => t.vehicleId));
+  const marked = await prisma.vehicle.findFirst({
+    where: { outOfServiceReason: 'Brake service — rear pads' },
+    orderBy: { id: 'asc' },
+  });
+  const vehicle =
+    marked && !busyIds.has(marked.id)
+      ? marked
+      : await prisma.vehicle.findFirst({
+          where: {
+            depotId: 'Peliyagoda',
+            id: { notIn: [...busyIds] },
+            status: { not: 'on_road' },
+          },
+          orderBy: { id: 'desc' },
+        });
+  if (!vehicle) {
+    console.warn('[seed] out-of-service demo skipped: no free Peliyagoda vehicle');
+    return;
+  }
+  await prisma.vehicle.update({
+    where: { id: vehicle.id },
+    data: {
+      status: 'out_of_service',
+      outOfServiceReason: 'Brake service — rear pads',
+      returnDate: back,
+    },
+  });
+  console.log(
+    `[seed] ${vehicle.id} (${vehicle.numberPlate ?? 'no plate'}) out of service: Brake service — rear pads, back ${back.toISOString()}`,
+  );
+}
+
 function dataDir() {
   return resolve(process.env.DATA_DIR ?? resolve(__dirname, '../../../../data'));
 }
@@ -297,11 +367,17 @@ async function main() {
   } else if ((await prisma.depot.count()) > 0) {
     console.log('[seed] database already seeded - skipping CSV (use pnpm seed:reset to reseed)');
     await loadServiceAllowance(prisma, dir);
+    await fillPlannerMinutes(prisma);
+    await fillStoreLocations(prisma);
+    await fillNumberPlates(prisma);
     await seedOutletManagers();
     await seedFleetDrivers();
     await seedFleetLoaders();
     await seedTeamErd(prisma);
     await seedDispatchDemo(prisma);
+    await seedOutOfServiceDemo();
+    await seedDepotOrders(prisma);
+    await seedDepotTrips(prisma);
     return;
   }
 
@@ -314,6 +390,9 @@ async function main() {
 
   console.log(`[seed] reading CSVs from ${dir}`);
   await loadAllCsv(prisma, dir);
+  await fillPlannerMinutes(prisma);
+  await fillStoreLocations(prisma);
+  await fillNumberPlates(prisma);
   await warnIfCsvEmpty();
 
   await seedUsers();
@@ -323,6 +402,9 @@ async function main() {
   await seedDockStoreDemo(prisma);
   await seedTeamErd(prisma);
   await seedDispatchDemo(prisma);
+  await seedOutOfServiceDemo();
+  await seedDepotOrders(prisma);
+  await seedDepotTrips(prisma);
   console.log('[seed] done');
 }
 

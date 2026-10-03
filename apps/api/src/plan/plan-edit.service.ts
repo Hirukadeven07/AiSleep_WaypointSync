@@ -330,7 +330,7 @@ export class PlanEditService {
             : KIND.truck;
       suggestion = {
         tripId: row.id,
-        label: `${row.vehicle.plate ?? row.vehicleId} · Trip ${row.tripNumber}`,
+        label: `${row.vehicle.numberPlate ?? row.vehicleId} · Trip ${row.tripNumber}`,
         detail: `${kind} · ${row.brand} · ${tripAreaLabel(row)} · has room`,
         fit: `fits as stop ${result.placedSequence}, ${late ? 'window at risk' : 'window met'}`,
       };
