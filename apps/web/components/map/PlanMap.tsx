@@ -14,7 +14,7 @@ const DOT: Record<PlanMapPin['brand'], string> = {
   Tech: 'bg-tech',
 };
 
-/** Tomorrow's stores on the island. Grey pins are already on a trip. */
+/** Every depot store. Brand colour means that store has an order this day; light gray means it does not. */
 export function PlanMap({
   date,
   refreshKey,
@@ -65,6 +65,10 @@ export function PlanMap({
   );
 
   const selected = data?.pins.find((pin) => pin.orderId === selectedId) ?? null;
+  const selectedStore =
+    selectedId?.startsWith('store:')
+      ? (data?.stores.find((store) => `store:${store.storeId}` === selectedId) ?? null)
+      : null;
 
   const view = useMemo<MapView>(() => {
     if (selected) return { mode: 'point', lng: selected.lng, lat: selected.lat };
@@ -73,16 +77,23 @@ export function PlanMap({
 
   const markers = useMemo<IslandMarker[]>(() => {
     if (!data) return [];
-    const pins: IslandMarker[] = data.pins.map((pin) => ({
-      id: pin.orderId,
-      lat: pin.lat,
-      lng: pin.lng,
-      dotClass: pin.plate ? 'bg-faint' : DOT[pin.brand],
-      title: pin.storeName,
-      badges: [...(pin.chilled ? ['C'] : []), ...(pin.vanOnly ? ['V'] : [])],
-      selected: pin.orderId === selectedId,
-      size: 'pin',
-    }));
+    const pinByStore = new Map<string, PlanMapPin>();
+    for (const pin of data.pins) {
+      if (!pinByStore.has(pin.storeId)) pinByStore.set(pin.storeId, pin);
+    }
+    const pins: IslandMarker[] = (data.stores ?? []).map((store) => {
+      const pin = pinByStore.get(store.storeId);
+      return {
+        id: pin?.orderId ?? `store:${store.storeId}`,
+        lat: store.lat,
+        lng: store.lng,
+        dotClass: store.hasOrder ? DOT[store.brand] : 'bg-faint',
+        title: store.storeName,
+        badges: pin ? [...(pin.chilled ? ['C'] : []), ...(pin.vanOnly ? ['V'] : [])] : [],
+        selected: (pin?.orderId ?? `store:${store.storeId}`) === selectedId,
+        size: 'pin',
+      };
+    });
     if (data.depot) {
       pins.push({
         id: `depot:${data.depot.id}`,
@@ -204,6 +215,17 @@ export function PlanMap({
           </button>
         </article>
       )}
+      {selectedStore && (
+        <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
+          <p className="text-[15px] font-semibold leading-5 text-ink">{selectedStore.storeName}</p>
+          <p className="mt-1 text-[13px] leading-[18px] text-muted">
+            {selectedStore.brand} · {selectedStore.district}
+          </p>
+          <p className="mt-2 text-[13px] font-semibold leading-[18px] text-ink">
+            {selectedStore.hasOrder ? 'This store has an order on this day.' : 'No order on this day.'}
+          </p>
+        </article>
+      )}
       {placing && (
         <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
           <p className="text-[15px] font-semibold leading-5 text-ink">Place {placing.storeName}</p>
@@ -279,7 +301,7 @@ function Legend() {
           <span className="size-2.5 rounded-full bg-tech" /> Tech
         </li>
         <li className={row}>
-          <span className="size-2.5 rounded-full bg-faint" /> Already on a trip
+          <span className="size-2.5 rounded-full bg-faint" /> No order
         </li>
         <li className={row}>
           <span className="flex size-3.5 items-center justify-center rounded-full bg-chilled text-[8px] font-bold text-surface">

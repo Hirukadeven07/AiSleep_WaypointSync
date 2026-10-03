@@ -1,5 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import type { LocateMap, LocateTrip, Me, PlanMap, PlanMapPin, UnplacedStore } from '@waypoint/contracts';
+import type {
+  LocateMap,
+  LocateTrip,
+  MapStore,
+  Me,
+  PlanMap,
+  PlanMapPin,
+  UnplacedStore,
+} from '@waypoint/contracts';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { DEPART_MIN } from '../plan/plan.service';
@@ -38,7 +46,7 @@ export class MapService {
     }
     const depotId = this.depotOf(me);
     const date = dateParam ?? addDays(this.clock.today(), 1);
-    const [depot, districts, orders] = await Promise.all([
+    const [depot, districts, orders, stores] = await Promise.all([
       this.prisma.depot.findUnique({ where: { id: depotId } }),
       this.districts(),
       this.prisma.order.findMany({
@@ -52,6 +60,7 @@ export class MapService {
           stop: { include: { trip: { include: { vehicle: true } } } },
         },
       }),
+      this.storeMarkers(depotId, date),
     ]);
 
     let unplaced = 0;
@@ -110,6 +119,7 @@ export class MapService {
       depot: depot ? depotPoint(depot.id, depot.name) : null,
       districts,
       pins,
+      stores,
       unplaced,
       unplacedStores,
     };
@@ -141,9 +151,10 @@ export class MapService {
     const day = dateOnly(date);
     const now = this.clock.now();
 
-    const [districts, depots, rows, events, pings] = await Promise.all([
+    const [districts, depots, stores, rows, events, pings] = await Promise.all([
       this.districts(),
       this.prisma.depot.findMany({ orderBy: { name: 'asc' } }),
+      this.storeMarkers(depotId, date),
       this.prisma.trip.findMany({
         where: { depotId, serviceDate: day, status: { not: 'planning' } },
         include: {
@@ -263,6 +274,7 @@ export class MapService {
         return point ? [point] : [];
       }),
       districts,
+      stores,
       trips,
       firstDepartMin,
       firstDepartBrand,
@@ -272,6 +284,57 @@ export class MapService {
   private depotOf(me: Me): string {
     if (!me.depotId) throw new ForbiddenException('This account has no depot');
     return me.depotId;
+  }
+
+  /** Every located store at the depot. Darker on the map when it has an order that day. */
+  private async storeMarkers(depotId: string, date: string): Promise<MapStore[]> {
+    const day = dateOnly(date);
+    const [stores, orders] = await Promise.all([
+      this.prisma.store.findMany({
+        where: { depotId },
+        select: {
+          id: true,
+          displayName: true,
+          brand: true,
+          lat: true,
+          lng: true,
+          district: { select: { name: true } },
+        },
+        orderBy: { id: 'asc' },
+      }),
+      this.prisma.order.findMany({
+        where: { deliveryDate: day, store: { depotId } },
+        select: { id: true, storeId: true, status: true },
+      }),
+    ]);
+    const rank: Record<string, number> = {
+      waiting: 0,
+      planned: 1,
+      partial: 2,
+      delivered: 3,
+      deferred: 4,
+    };
+    const best = new Map<string, { id: string; status: string }>();
+    for (const order of orders) {
+      const prev = best.get(order.storeId);
+      if (!prev || (rank[order.status] ?? 9) < (rank[prev.status] ?? 9)) best.set(order.storeId, order);
+    }
+    const markers: MapStore[] = [];
+    for (const store of stores) {
+      if (store.lat == null || store.lng == null) continue;
+      const order = best.get(store.id);
+      markers.push({
+        storeId: store.id,
+        storeName: store.displayName ?? store.id,
+        brand: store.brand,
+        district: store.district.name,
+        lat: store.lat,
+        lng: store.lng,
+        hasOrder: order != null,
+        orderId: order?.id ?? null,
+      });
+    }
+    return markers;
   }
 
   private async districts() {

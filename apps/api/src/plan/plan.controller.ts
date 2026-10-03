@@ -153,18 +153,18 @@ export class PlanController {
     return this.trips.suggestions(me, id);
   }
 
-  /** What would stop or warn on publish. Saves nothing. */
+  /** What would stop or warn on publish. `tripId` checks that trip only. Saves nothing. */
   @Post('publish/check')
   @HttpCode(200)
   publishCheck(@CurrentUser() me: AuthUser, @Body() dto: PublishDto): Promise<PublishCheck> {
-    return this.publishing.check(me, dto.date);
+    return this.publishing.check(me, dto.date, dto.tripId);
   }
 
-  /** Send the plan. Capacity problems refuse with 409; other warnings need `anyway`. */
+  /** Send the plan, or one trip when `tripId` is set. Capacity problems refuse with 409; other warnings need `anyway`. */
   @Post('publish')
   @HttpCode(200)
   publish(@CurrentUser() me: AuthUser, @Body() dto: PublishDto): Promise<PlanPublishResult> {
-    return this.publishing.publish(me, dto.anyway === true, dto.date);
+    return this.publishing.publish(me, dto.anyway === true, dto.date, dto.tripId);
   }
 
   /** What Auto-assign would do. Saves nothing. */

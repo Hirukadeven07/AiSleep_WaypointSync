@@ -17,6 +17,12 @@ const BRANDS: { id: 'all' | Brand; label: string; className: string }[] = [
   { id: 'Tech', label: 'Tech', className: 'bg-tech-tint text-tech' },
 ];
 
+const ORDER_DOT: Record<Brand, string> = {
+  Fresh: 'bg-fresh',
+  Style: 'bg-style',
+  Tech: 'bg-tech',
+};
+
 const STOP_DOT: Record<LocateStop['kind'], string> = {
   delivered: 'bg-success',
   next: 'bg-ink',
@@ -81,7 +87,26 @@ export function LocateMap() {
 
   const markers = useMemo<IslandMarker[]>(() => {
     if (!data) return [];
+    const covered = new Set<string>();
+    if (selected) {
+      for (const stop of selected.stops) {
+        if (stop.lat == null || stop.lng == null) continue;
+        covered.add(`${stop.lat},${stop.lng}`);
+      }
+    }
     const pins: IslandMarker[] = [];
+    for (const store of data.stores ?? []) {
+      if (brand !== 'all' && store.brand !== brand) continue;
+      if (covered.has(`${store.lat},${store.lng}`)) continue;
+      pins.push({
+        id: `store:${store.storeId}`,
+        lat: store.lat,
+        lng: store.lng,
+        dotClass: store.hasOrder ? ORDER_DOT[store.brand] : 'bg-faint',
+        title: store.hasOrder ? `${store.storeName} · has an order` : `${store.storeName} · no order`,
+        size: 'pin',
+      });
+    }
     for (const depot of data.depots) {
       pins.push({
         id: `depot:${depot.id}`,
@@ -119,7 +144,7 @@ export function LocateMap() {
       });
     }
     return pins;
-  }, [data, selected]);
+  }, [data, selected, brand]);
 
   function chooseDepot(id: string) {
     setSelectedId(null);
@@ -317,6 +342,12 @@ function LocateLegend() {
     <div className="absolute bottom-4 left-4 w-[230px] rounded-card bg-surface p-3 shadow">
       <p className="mb-2 text-[12px] font-semibold text-muted">Legend</p>
       <ul className="flex flex-col gap-1.5">
+        <li className={row}>
+          <span className="size-2.5 rounded-full bg-fresh" /> Store with an order
+        </li>
+        <li className={row}>
+          <span className="size-2.5 rounded-full bg-faint" /> Store with no order
+        </li>
         <li className={row}>
           <span className="size-3 rounded-[4px] bg-ink" /> Depot
         </li>
