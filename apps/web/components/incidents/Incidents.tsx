@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { usePoll } from '@/lib/poll';
 import { IncidentDetail } from './IncidentDetail';
 import { IncidentList } from './IncidentList';
+import { LogIncidentModal } from './LogIncidentModal';
 
 type Filter = 'active' | 'resolved' | 'all';
 
@@ -19,6 +20,7 @@ export function Incidents() {
   const [picked, setPicked] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [toast, setToast] = useState<{ title: string; sub: string } | null>(null);
+  const [logging, setLogging] = useState(false);
   const opened = useRef(new Set<string>());
 
   // "Truck broke down" links here with ?id=<incident> so the new breakdown opens straight away.
@@ -105,8 +107,7 @@ export function Incidents() {
           </div>
           <button
             type="button"
-            disabled
-            title="Logging an incident by hand is not built yet"
+            onClick={() => setLogging(true)}
             className="shrink-0 whitespace-pre rounded-pill border border-border bg-surface px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-ink"
           >
             {'+  Log incident'}
@@ -168,6 +169,19 @@ export function Incidents() {
           )}
         </div>
       </div>
+      {logging && (
+        <LogIncidentModal
+          onClose={() => setLogging(false)}
+          onLogged={async (incident) => {
+            setLogging(false);
+            setFilter('active');
+            setPicked(incident.id);
+            setDetail(incident);
+            await refresh();
+            setToast({ title: 'Incident logged', sub: incident.title });
+          }}
+        />
+      )}
       {toast && (
         <div
           role="status"

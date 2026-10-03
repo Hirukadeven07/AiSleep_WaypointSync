@@ -383,4 +383,62 @@ describe('incidents (e2e)', () => {
     }
     expect(await prisma.tripStop.count({ where: { tripId: ids.bd2 } })).toBe(0);
   });
+
+  it('logs an incident by hand, once per open kind, and only on a sent trip', async () => {
+    const agent = await dispatcher();
+    const make = (vehicleId: string, status: 'planning' | 'published' | 'on_road') =>
+      prisma.trip.create({
+        data: {
+          vehicleId,
+          depotId: 'Peliyagoda',
+          brand: 'Fresh',
+          districtId,
+          serviceDate: date(DAY),
+          tripNumber: 2,
+          status,
+        },
+      });
+    const sent = await make('IC-V5', 'published');
+    const draft = await make('IC-V4', 'planning');
+    const out = await make('IC-V6', 'on_road');
+
+    const late = await agent
+      .post('/api/incidents')
+      .send({ tripId: sent.id, type: 'delay', note: 'Stuck behind a lorry' })
+      .expect(200);
+    expect(late.body).toMatchObject({
+      kind: 'delay',
+      state: 'open',
+      title: 'IC-V5 is running late',
+    });
+    const row = await prisma.incident.findUniqueOrThrow({ where: { id: late.body.id } });
+    expect(row.timeline).toEqual([
+      expect.objectContaining({ text: 'Dispatch logged the incident: Stuck behind a lorry' }),
+    ]);
+    // Logging the same open kind again returns the one already open.
+    const again = await agent
+      .post('/api/incidents')
+      .send({ tripId: sent.id, type: 'delay' })
+      .expect(200);
+    expect(again.body.id).toBe(late.body.id);
+    const list = (await agent.get('/api/incidents').expect(200)).body;
+    expect(list.active.some((i: { id: string }) => i.id === late.body.id)).toBe(true);
+
+    // A trip still being planned cannot have one, a breakdown needs the trip loading or out.
+    await agent.post('/api/incidents').send({ tripId: draft.id, type: 'quiet_driver' }).expect(400);
+    await agent.post('/api/incidents').send({ tripId: sent.id, type: 'breakdown' }).expect(400);
+    await agent.post('/api/incidents').send({ tripId: 'nope', type: 'delay' }).expect(404);
+    await agent.post('/api/incidents').send({ tripId: sent.id, type: 'aliens' }).expect(400);
+    await agent.post('/api/incidents').send({ type: 'delay' }).expect(400);
+
+    // A breakdown goes through the breakdown flow and stops the trip.
+    const broke = await agent
+      .post('/api/incidents')
+      .send({ tripId: out.id, type: 'breakdown', note: 'Clutch gone' })
+      .expect(200);
+    expect(broke.body.kind).toBe('breakdown');
+    expect((await prisma.trip.findUniqueOrThrow({ where: { id: out.id } })).status).toBe(
+      'breakdown',
+    );
+  });
 });
