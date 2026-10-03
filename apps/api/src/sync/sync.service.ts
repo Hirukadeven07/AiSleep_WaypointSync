@@ -274,6 +274,16 @@ export class SyncService {
 
       case 'ARRIVED': {
         const stop = await this.ownedStop(tx, me, payload);
+        // The store's result at an earlier stop must be acknowledged before the next arrival.
+        const unacked = await tx.tripStop.count({
+          where: {
+            tripId: stop.tripId,
+            sequence: { lt: stop.sequence },
+            storeConfirmedAt: { not: null },
+            driverAckAt: null,
+          },
+        });
+        if (unacked > 0) throw new RejectedEvent('ACK_PENDING');
         const stale = await this.shouldMarkStale(tx, event, stop.tripId);
         await this.recordEvent(tx, me, event, stop.tripId);
         if (!ARRIVABLE.includes(stop.status)) {

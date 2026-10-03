@@ -1,4 +1,5 @@
 import type {
+  DriverDayRoadIssue,
   DriverDayFlag,
   DriverDayPhone,
   DriverDayResponse,
@@ -147,6 +148,7 @@ function mapTrip(trip: DriverDayTripRow, serviceDate: string): DriverDayTrip {
 export interface DriverDayExtras {
   upcoming?: DriverDayTripRow[];
   unreadNotices?: number;
+  roadIssue?: DriverDayRoadIssue | null;
 }
 
 export function buildDriverDay(
@@ -159,6 +161,7 @@ export function buildDriverDay(
     // Published trips on later days still show when the driver has no truck today.
     upcoming: (extras.upcoming ?? []).map((trip) => mapTrip(trip, serviceDate)),
     unreadNotices: extras.unreadNotices ?? 0,
+    roadIssue: extras.roadIssue ?? null,
   };
   if (!vehicle) return { ...common, vehicle: null, trips: [], activeTripId: null };
 

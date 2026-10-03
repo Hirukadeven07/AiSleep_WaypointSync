@@ -76,6 +76,7 @@ describe('buildDriverDay', () => {
       activeTripId: null,
       upcoming: [],
       unreadNotices: 0,
+      roadIssue: null,
     });
   });
 

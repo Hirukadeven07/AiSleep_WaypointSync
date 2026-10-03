@@ -752,4 +752,122 @@ describe('driver sync (e2e)', () => {
     expect(resolved.body.applied).toEqual(['b2bbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']);
     expect(await alerts()).toBe(before + 1);
   });
+
+  it('alerts dispatch once when the driver has waited 10 minutes at a store', async () => {
+    // The sequence-2 stop from the arrival test: waiting since 08:40, it is now 09:00.
+    const waiting = await prisma.tripStop.findFirstOrThrow({ where: { tripId, sequence: 2 } });
+    expect(waiting.status).toBe('waiting');
+    const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+    const alerts = () =>
+      prisma.notification.findMany({
+        where: {
+          userId: nimal.id,
+          title: { startsWith: 'Waiting ' },
+          createdAt: { gte: startedAt },
+        },
+      });
+
+    await driverAgent.get('/api/driver/day').expect(200);
+    await driverAgent.get('/api/driver/day').expect(200);
+    const sent = await alerts();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.title).toBe('Waiting 20 min at Sync Store');
+    expect(
+      (await prisma.tripStop.findUniqueOrThrow({ where: { id: waiting.id } })).waitAlertedAt,
+    ).toBeTruthy();
+    await prisma.notification.deleteMany({ where: { id: { in: sent.map((n) => n.id) } } });
+  });
+
+  it('blocks the next arrival until the store result before it is acknowledged', async () => {
+    const order = (n: number) =>
+      prisma.order.create({
+        data: {
+          storeId,
+          brand: 'Fresh',
+          deliveryDate: date(DAY),
+          temp: 'ambient',
+          status: 'planned',
+          units: 1,
+          weightKg: 5,
+          volumeM3: 0.05,
+          urgentNote: `E2E order ${n}`,
+        },
+      });
+    const checked = await prisma.tripStop.create({
+      data: {
+        tripId,
+        orderId: (await order(3)).id,
+        sequence: 3,
+        status: 'confirmed',
+        arrivedAt: new Date('2026-10-01T03:00:00Z'),
+        storeConfirmedAt: new Date('2026-10-01T03:10:00Z'),
+      },
+    });
+    const next = await prisma.tripStop.create({
+      data: { tripId, orderId: (await order(4)).id, sequence: 4, status: 'upcoming' },
+    });
+    const event = (clientId: string, type: string, stop: string) => ({
+      clientId,
+      driverId,
+      tripId,
+      type,
+      payload: { stopId: stop },
+      createdOnPhoneAt: '2026-10-01T08:55:00+05:30',
+      seenPlanVersion: 1,
+    });
+
+    const early = await driverAgent
+      .post('/api/sync')
+      .send({ events: [event('c1cccccc-cccc-4ccc-8ccc-cccccccccccc', 'ARRIVED', next.id)] })
+      .expect(200);
+    expect(early.body.rejectedReasons['c1cccccc-cccc-4ccc-8ccc-cccccccccccc']).toBe('ACK_PENDING');
+
+    // Acknowledge first, then arrive: both in one push, in order.
+    const ok = await driverAgent
+      .post('/api/sync')
+      .send({
+        events: [
+          event('c2cccccc-cccc-4ccc-8ccc-cccccccccccc', 'ACKNOWLEDGEMENT', checked.id),
+          event('c3cccccc-cccc-4ccc-8ccc-cccccccccccc', 'ARRIVED', next.id),
+        ],
+      })
+      .expect(200);
+    expect(ok.body.applied).toEqual([
+      'c2cccccc-cccc-4ccc-8ccc-cccccccccccc',
+      'c3cccccc-cccc-4ccc-8ccc-cccccccccccc',
+    ]);
+    expect((await prisma.tripStop.findUniqueOrThrow({ where: { id: next.id } })).status).toBe(
+      'waiting',
+    );
+  });
+
+  it('returns an open road issue in the driver day until it is resolved', async () => {
+    const issue = (clientId: string, status: 'reported' | 'resolved') => ({
+      events: [
+        {
+          clientId,
+          driverId,
+          tripId,
+          type: 'ROAD_ISSUE',
+          payload: { status, kind: 'traffic', note: 'E2E jam' },
+          createdOnPhoneAt:
+            // After the 10:05 road issue of the earlier test, so these are the newest.
+            status === 'reported' ? '2026-10-01T10:10:00+05:30' : '2026-10-01T10:12:00+05:30',
+          seenPlanVersion: 1,
+        },
+      ],
+    });
+    await driverAgent
+      .post('/api/sync')
+      .send(issue('d1dddddd-dddd-4ddd-8ddd-dddddddddddd', 'reported'))
+      .expect(200);
+    const paused = (await driverAgent.get('/api/driver/day').expect(200)).body;
+    expect(paused.roadIssue).toMatchObject({ tripId, kind: 'traffic', note: 'E2E jam' });
+
+    await driverAgent
+      .post('/api/sync')
+      .send(issue('d2dddddd-dddd-4ddd-8ddd-dddddddddddd', 'resolved'))
+      .expect(200);
+    expect((await driverAgent.get('/api/driver/day').expect(200)).body.roadIssue).toBeNull();
+  });
 });

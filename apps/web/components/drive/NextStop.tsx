@@ -50,11 +50,16 @@ function handoverLines(h: DriverDayHandover | undefined): string[] {
   ].filter((x): x is string => Boolean(x));
 }
 
-/** Arrivals and acknowledgements still waiting on this phone to be sent, by stop id. */
+/** Arrivals, acknowledgements and road-issue reports still waiting on this phone to be sent. */
 function useQueued() {
-  const [queued, setQueued] = useState<{ arrived: Map<string, string>; acked: Set<string> }>({
+  const [queued, setQueued] = useState<{
+    arrived: Map<string, string>;
+    acked: Set<string>;
+    roadIssueTrips: Set<string>;
+  }>({
     arrived: new Map(),
     acked: new Set(),
+    roadIssueTrips: new Set(),
   });
   useEffect(() => {
     let alive = true;
@@ -64,12 +69,14 @@ function useQueued() {
           if (!alive) return;
           const arrived = new Map<string, string>();
           const acked = new Set<string>();
+          const roadIssueTrips = new Set<string>();
           for (const a of list) {
             const stopId = String(a.payload.stopId ?? '');
             if (a.type === 'ARRIVED') arrived.set(stopId, a.createdOnPhoneAt);
             if (a.type === 'ACKNOWLEDGEMENT') acked.add(stopId);
+            if (a.type === 'ROAD_ISSUE' && a.tripId != null) roadIssueTrips.add(String(a.tripId));
           }
-          setQueued({ arrived, acked });
+          setQueued({ arrived, acked, roadIssueTrips });
         })
         .catch(() => {});
     check();
@@ -178,7 +185,14 @@ export function NextStop() {
   const trip = full?.trips.find((t) => t.id === active?.id) ?? full?.trips[0] ?? null;
   const stops = trip ? [...trip.stops].sort((a, b) => a.sequence - b.sequence) : [];
   const queued = useQueued();
-  const issue = useRoadIssue(trip?.id);
+  const localIssue = useRoadIssue(trip?.id);
+  // The server's open issue covers a reinstalled or other phone. While this phone still has a
+  // report or a "resume" to send, its own copy is the newer one.
+  const serverIssue =
+    trip && full?.roadIssue?.tripId === trip.id && !queued.roadIssueTrips.has(trip.id)
+      ? full.roadIssue
+      : null;
+  const issue = localIssue ?? serverIssue;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 

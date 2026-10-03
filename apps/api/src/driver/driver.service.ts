@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import type { DriverDayResponse, DriverNotice } from '@waypoint/contracts';
+import type {
+  DriverDayResponse,
+  DriverDayRoadIssue,
+  DriverNotice,
+  RoadIssuePayload,
+} from '@waypoint/contracts';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { buildDriverDay, DRIVER_TRIP_STATUSES, pickActiveTripId } from './driver-day.mapper';
+import { alertLongWaits } from './driver-notices';
 import { ownTripWhere } from './driver-trips';
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
@@ -101,13 +107,38 @@ export class DriverService {
       this.prisma.notification.count({ where: { userId: me.id, read: false } }),
     ]);
 
+    // The phone polls while the driver waits at a store, so this is where a long wait is noticed.
+    await alertLongWaits(
+      this.prisma,
+      this.clock.now(),
+      trips.map((t) => t.id),
+    );
+
     // The truck the driver is on today; their own vehicle when they have no trip.
     const activeId = pickActiveTripId(trips);
     const vehicle = trips.find((t) => t.id === activeId)?.vehicle ?? registered;
     return buildDriverDay(serviceDate, vehicle ? { ...vehicle, trips } : null, {
       upcoming,
       unreadNotices,
+      roadIssue: activeId ? await this.openRoadIssue(activeId) : null,
     });
+  }
+
+  /** The latest road issue on the trip, if it was reported and not resolved since. */
+  private async openRoadIssue(tripId: string): Promise<DriverDayRoadIssue | null> {
+    const last = await this.prisma.driverEvent.findFirst({
+      where: { tripId, type: 'ROAD_ISSUE' },
+      orderBy: [{ createdOnPhoneAt: 'desc' }, { appliedAt: 'desc' }, { id: 'desc' }],
+      select: { payload: true, createdOnPhoneAt: true },
+    });
+    const payload = last?.payload as unknown as RoadIssuePayload | undefined;
+    if (!last || payload?.status !== 'reported') return null;
+    return {
+      tripId,
+      kind: payload.kind,
+      note: payload.note ?? null,
+      reportedAt: last.createdOnPhoneAt.toISOString(),
+    };
   }
 
   async notices(me: AuthUser): Promise<DriverNotice[]> {

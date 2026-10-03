@@ -23,6 +23,7 @@ import {
 } from '@waypoint/contracts';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { alertLongWaits } from '../driver/driver-notices';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { tripAreaLabel } from '../plan/plan.mapper';
 
@@ -231,6 +232,13 @@ export class DispatchService {
         orderBy: { raisedAt: 'asc' },
       }),
     ]);
+
+    // Dispatch is alerted once per long wait, whether the board or the driver's phone notices first.
+    await alertLongWaits(
+      this.prisma,
+      now,
+      rows.map((t) => t.id),
+    );
 
     // The latest road issue per trip; a "reported" one that was not resolved pauses the trip.
     const roadEvents = await this.prisma.driverEvent.findMany({

@@ -1,4 +1,5 @@
 import type { FlagType } from './dock';
+import type { RoadIssueKind } from './driver-event';
 import type { StopStatus, TripStatus } from './status';
 
 /** The vehicle of the driver's active trip, else the vehicle registered to them (`Vehicle.driverId`). */
@@ -91,6 +92,15 @@ export interface DriverDayResponse {
   upcoming: DriverDayTrip[];
   /** Unread notices from dispatch and stores (GET /api/driver/notices). */
   unreadNotices: number;
+  /** The road issue reported on the active trip and not resolved yet: the next stop is paused. */
+  roadIssue: DriverDayRoadIssue | null;
+}
+
+export interface DriverDayRoadIssue {
+  tripId: string;
+  kind: RoadIssueKind;
+  note: string | null;
+  reportedAt: string;
 }
 
 /** GET /api/driver/notices: what dispatch and stores sent this driver, newest first. */

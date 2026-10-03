@@ -50,6 +50,8 @@ export type SyncRejectReason =
   | 'FORBIDDEN_STOP'
   | 'FORBIDDEN_TRIP'
   | 'ACK_BEFORE_RECEIPT'
+  /** An earlier stop's store result is not acknowledged yet, so the driver cannot arrive here. */
+  | 'ACK_PENDING'
   | 'NO_ACTIVE_TRIP'
   | 'NO_VEHICLE'
   | 'INVALID_PAYLOAD';
