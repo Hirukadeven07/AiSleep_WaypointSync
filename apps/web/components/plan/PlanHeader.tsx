@@ -125,6 +125,29 @@ const timeText = (iso: string) =>
     timeZone: 'Asia/Colombo',
   });
 
+/** What runs out first on an overbooked day, in the dispatcher's words. */
+const LIMIT: Record<
+  Exclude<PlanSummary['limitingResource'], 'none'>,
+  { short: string; why: string }
+> = {
+  weight: {
+    short: 'weight',
+    why: 'The orders weigh more than the free trucks can carry.',
+  },
+  volume: {
+    short: 'space',
+    why: 'The orders need more space than the free trucks have.',
+  },
+  chilled: {
+    short: 'refrigerated trucks',
+    why: 'There are more chilled orders than refrigerated trucks to carry them.',
+  },
+  vans: {
+    short: 'vans',
+    why: 'There are more van-only stores than vans.',
+  },
+};
+
 /** The strip under the header: vehicles free, capacity used and the open-problems button. */
 export function SummaryStrip({
   summary,
@@ -157,6 +180,17 @@ export function SummaryStrip({
         </span>
       </p>
       <Stat value={String(summary.movedToLaterCount)} label="moved to later" warn />
+      {summary.overbooked && summary.limitingResource !== 'none' && (
+        <span
+          role="status"
+          title={`${LIMIT[summary.limitingResource].why} Not every order fits: move the ones that cannot to a later day, with a reason.`}
+          className="flex items-center gap-2 whitespace-nowrap rounded-pill bg-warning-tint px-[14px] py-2 text-[13px] leading-[18px] text-ink"
+        >
+          <Icon name="alert" size={15} className="text-warning" />
+          <span className="font-bold">Overbooked</span>
+          <span className="font-semibold">limited by {LIMIT[summary.limitingResource].short}</span>
+        </span>
+      )}
       <span className="min-w-px flex-1" />
       {published ? (
         <span className="flex items-center gap-2 whitespace-nowrap rounded-pill bg-success-tint px-[14px] py-2 text-[13px] leading-[18px] text-success">

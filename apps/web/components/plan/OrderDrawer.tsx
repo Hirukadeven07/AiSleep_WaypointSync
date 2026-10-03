@@ -114,7 +114,18 @@ export function OrderDrawer({
                 <Tag className={BRAND_INK[o.brand]}>{o.brand}</Tag>
                 {o.chilled && <Tag className="text-chilled">Chilled</Tag>}
                 {o.movedCount > 0 && <Tag className="text-warning">{`Moved ${o.movedCount}x`}</Tag>}
+                {o.urgent && <Tag className="text-danger">Urgent</Tag>}
               </div>
+              {o.urgent && (
+                <p className="text-[13px] font-medium leading-[18px] text-ink">
+                  {o.stockLevel === 'out_of_stock'
+                    ? 'The store is out of stock.'
+                    : o.stockLevel === 'running_low'
+                      ? 'The store is running low.'
+                      : 'The store marked this urgent.'}
+                  {o.urgentNote ? ` “${o.urgentNote}”` : ''}
+                </p>
+              )}
             </div>
 
             <div className="flex shrink-0 flex-col gap-2 rounded-[20px] bg-bg p-4 text-[13px] leading-[18px]">
