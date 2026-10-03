@@ -177,7 +177,10 @@ describe('loader dock and store (e2e)', () => {
       await prisma.deliveryNote.deleteMany({ where: { order: { storeId: e2eStores } } });
       await prisma.notification.deleteMany({ where: { title: 'E2E-HOME checked the goods' } });
       await prisma.notification.deleteMany({
-        where: { title: { in: ['New order', 'Store report'] }, createdAt: { gte: startedAt } },
+        where: {
+          title: { in: ['New order', 'Store report', 'Order cancelled'] },
+          createdAt: { gte: startedAt },
+        },
       });
       await prisma.trip.deleteMany({ where: { id: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.order.deleteMany({ where: { storeId: { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] } } });
@@ -596,12 +599,56 @@ describe('loader dock and store (e2e)', () => {
         })
         .expect(201);
       const recent = (await store.get('/api/store/orders/recent').expect(200)).body;
-      expect(recent.length).toBeLessThanOrEqual(5);
       expect(recent[0]).toMatchObject({ id: placed.body.id, status: 'waiting', units: 15 });
       expect(recent[0].lines).toEqual([
         { catalogueId: 'F-MILK', name: 'Fresh milk 1 L', qty: 3, pack: 'crate of 12' },
         { catalogueId: 'F-BREAD', name: 'Sandwich bread', qty: 12, pack: 'crate of 20' },
       ]);
+    });
+
+    it('cancels a waiting order and tells dispatch; a planned one stays', async () => {
+      const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+      const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+      const cancelNotices = () =>
+        prisma.notification.count({ where: { userId: nimal.id, title: 'Order cancelled' } });
+
+      const placed = await store
+        .post('/api/store/orders')
+        .send({ lines: [{ catalogueId: 'F-MILK', qty: 4 }] })
+        .expect(201);
+      const before = await cancelNotices();
+      await store.delete(`/api/store/orders/${placed.body.id}`).expect(200);
+      expect(await prisma.order.findUnique({ where: { id: placed.body.id } })).toBeNull();
+      expect(await prisma.orderLine.count({ where: { orderId: placed.body.id } })).toBe(0);
+      expect(await cancelNotices()).toBe(before + 1);
+      const recent = (await store.get('/api/store/orders/recent').expect(200)).body;
+      expect(recent.map((o: { id: string }) => o.id)).not.toContain(placed.body.id);
+      // Cancelling it again finds nothing.
+      await store.delete(`/api/store/orders/${placed.body.id}`).expect(404);
+
+      // An order that is already planned is the dispatcher's to change.
+      const planned = await order('E2E-HOME', [{ name: 'Milk', qty: 1, itemId: 'F-MILK' }]);
+      const refused = await store.delete(`/api/store/orders/${planned.id}`).expect(409);
+      expect(refused.body.message).toContain('Ask dispatch');
+      expect(await prisma.order.findUnique({ where: { id: planned.id } })).not.toBeNull();
+
+      // Another store's order is not found.
+      const other = await order('E2E-A', [{ name: 'Milk', qty: 1, itemId: 'F-MILK' }]);
+      await prisma.order.update({ where: { id: other.id }, data: { status: 'waiting' } });
+      await store.delete(`/api/store/orders/${other.id}`).expect(404);
+      expect(await prisma.order.findUnique({ where: { id: other.id } })).not.toBeNull();
+    });
+
+    it('does not cancel a waiting order that is on a trip', async () => {
+      const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+      // A stop on a trip with the status not yet moved on: the order must stay.
+      const onTrip = await order('E2E-HOME', [{ name: 'Milk', qty: 1, itemId: 'F-MILK' }]);
+      await prisma.order.update({ where: { id: onTrip.id }, data: { status: 'waiting' } });
+      await prisma.tripStop.create({
+        data: { tripId: ids.storeTrip, orderId: onTrip.id, sequence: 9 },
+      });
+      await store.delete(`/api/store/orders/${onTrip.id}`).expect(409);
+      expect(await prisma.order.findUnique({ where: { id: onTrip.id } })).not.toBeNull();
     });
   });
 });

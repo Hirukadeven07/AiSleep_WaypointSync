@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -190,15 +191,34 @@ export class StoreService {
     return orders.map(orderView);
   }
 
-  /** The store's latest orders with their lines, newest first: what is already placed, and "order again". */
+  /**
+   * The store's orders with their lines, newest first: every order still to come (what is
+   * already placed, and what can be cancelled) and the latest five of any day ("order again").
+   */
   async recentOrders(me: AuthUser): Promise<StoreOrderDetail[]> {
     const store = await this.store(me);
-    const orders = await this.prisma.order.findMany({
-      where: { storeId: store.id },
-      include: { lines: { orderBy: { name: 'asc' } } },
-      orderBy: [{ createdAt: 'desc' }, { deliveryDate: 'desc' }],
-      take: 5,
-    });
+    const include = { lines: { orderBy: { name: 'asc' } } } satisfies Prisma.OrderInclude;
+    const [latest, coming] = await Promise.all([
+      this.prisma.order.findMany({
+        where: { storeId: store.id },
+        include,
+        orderBy: [{ createdAt: 'desc' }, { deliveryDate: 'desc' }],
+        take: 5,
+      }),
+      this.prisma.order.findMany({
+        where: {
+          storeId: store.id,
+          deliveryDate: { gt: asDate(this.clock.today()) },
+          status: { in: ['waiting', 'planned'] },
+        },
+        include,
+      }),
+    ]);
+    const orders = [...new Map([...latest, ...coming].map((o) => [o.id, o])).values()].sort(
+      (a, b) =>
+        b.createdAt.getTime() - a.createdAt.getTime() ||
+        b.deliveryDate.getTime() - a.deliveryDate.getTime(),
+    );
     return orders.map((o) => ({
       ...orderView(o),
       lines: o.lines.map((l) => ({
@@ -294,6 +314,50 @@ export class StoreService {
       link: '/dispatch/plan',
     });
     return orderView(order);
+  }
+
+  /**
+   * The store takes back an order that is still in the waiting queue: its own, waiting, on no
+   * trip, and with no dock or delivery paperwork from an earlier trip. The order and its lines
+   * are deleted. Anything further along is the dispatcher's to change.
+   */
+  async cancelOrder(me: AuthUser, orderId: string): Promise<{ ok: true }> {
+    const store = await this.store(me);
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, storeId: store.id },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    const tooLate = () =>
+      new ConflictException(
+        'This order is already being planned or delivered. Ask dispatch to change it.',
+      );
+    if (order.status !== 'waiting') throw tooLate();
+    // One statement, so an order the dispatcher has just put on a trip is not deleted.
+    let deleted = 0;
+    try {
+      const result = await this.prisma.order.deleteMany({
+        where: {
+          id: order.id,
+          storeId: store.id,
+          status: 'waiting',
+          stop: null,
+          deliveryNotes: { none: {} },
+          fieldFlags: { none: {} },
+          lines: { every: { flags: { none: {} } } },
+        },
+      });
+      deleted = result.count;
+    } catch (e) {
+      // P2003: a trip stop or delivery note was attached while this ran.
+      if ((e as { code?: string }).code !== 'P2003') throw e;
+    }
+    if (deleted === 0) throw tooLate();
+    await this.notifyDispatchers(store.depotId, {
+      title: 'Order cancelled',
+      body: `${store.displayName ?? store.id} cancelled its order of ${order.units} ${order.units === 1 ? 'item' : 'items'} (${Math.round(order.weightKg)} kg) for ${dayText(order.deliveryDate)}.`,
+      link: '/dispatch/plan',
+    });
+    return { ok: true };
   }
 
   /** Today's stops for this store, in ETA order. */
