@@ -92,7 +92,7 @@ export class MapService {
           ? {
               tripId: trip.id,
               tripNumber: trip.tripNumber,
-              vehiclePlate: trip.vehicle.plate,
+              vehiclePlate: trip.vehicle.numberPlate,
             }
           : null,
       });
@@ -215,7 +215,7 @@ export class MapService {
       trips.push({
         id: trip.id,
         vehicleId: trip.vehicleId,
-        plate: trip.vehicle.plate,
+        plate: trip.vehicle.numberPlate,
         tripNumber: trip.tripNumber,
         brand: trip.brand,
         district: trip.district.name,
