@@ -18,6 +18,9 @@ export const REASON_CODES = [
   'VEHICLE_UNAVAILABLE',
   'MISSING_TRAVEL_LEG',
   'MISSING_SERVICE_ALLOWANCE',
+  'REMOVED_GOODS_NOT_TAKEN_OFF',
+  'ORDER_NOT_REMOVED',
+  'PLAN_NOT_CHANGED',
 ] as const;
 
 export type ReasonCode = (typeof REASON_CODES)[number];
