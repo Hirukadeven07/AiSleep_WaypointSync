@@ -1,7 +1,8 @@
 /**
  * Tomorrow's demo day at depo1 (Peliyagoda) for spine steps 1 to 5. The plan board shows tomorrow,
  * so every row here is dated tomorrow (Asia/Colombo, DEMO_NOW aware):
- * - more chilled orders than refrigerated trucks, so the day is overbooked on chilled;
+ * - chilled orders past the refrigerated trucks' space, so the day is overbooked on chilled and
+ *   auto-assign moves some to a later day;
  * - a draft trip over volume on a reefer, with a free reefer to move a stop to;
  * - ambient Style / Tech orders an ambient truck can take, and a van-only store's order;
  * - a store already moved once, so deferring it again is a repeat skip.
@@ -148,10 +149,19 @@ export async function seedSpineDemo(prisma: PrismaClient) {
     }
   }
 
-  // 2. More chilled orders than refrigerated trucks: the day is overbooked, limited by chilled.
+  // 2. Chilled demand past the refrigerated space (about 115% with the draft trip): the day is
+  //    overbooked, limited by chilled. Each order still fits one truck, so auto-assign places some.
   const chilledStores = fresh.filter((s) => !used.has(s.id));
   const chilledCount = Math.min(Math.max(reefers.length + 2, 4), chilledStores.length, 16);
-  for (const store of chilledStores.slice(0, chilledCount)) await order(store, CHILLED_PICKS);
+  const reeferM3 = vehicles
+    .filter((v) => v.temp === 'reefer')
+    .reduce((sum, v) => sum + v.volumeCapM3, 0);
+  const draftM3 = truck ? truck.volumeCapM3 * 1.25 : 0;
+  const perOrderM3 = chilledCount > 0 ? Math.max(0, reeferM3 * 1.15 - draftM3) / chilledCount : 0;
+  const breadQty = Math.floor(perOrderM3 / 0.06);
+  const chilledPicks =
+    breadQty > 0 ? [...CHILLED_PICKS, { catalogueId: 'F-BREAD', qty: breadQty }] : CHILLED_PICKS;
+  for (const store of chilledStores.slice(0, chilledCount)) await order(store, chilledPicks);
 
   // 3. Ambient orders for Style and Tech stores.
   const ambient = stores.filter(
@@ -180,7 +190,7 @@ export async function seedSpineDemo(prisma: PrismaClient) {
   }
 
   console.log(
-    `[seed] spine demo for ${tomorrow.toISOString().slice(0, 10)}: ${n} orders, draft trip ${truck ? 'on ' + (truck.numberPlate ?? truck.id) : 'skipped'}, ${chilledCount} chilled vs ${reefers.length} reefers${vanOnly ? ', van-only store' : ''}${repeat ? ', repeat-skip store' : ''}`,
+    `[seed] spine demo for ${tomorrow.toISOString().slice(0, 10)}: ${n} orders, draft trip ${truck ? 'on ' + (truck.numberPlate ?? truck.id) : 'skipped'}, ${chilledCount} chilled orders over ${Math.round(reeferM3)} m³ of refrigerated space${vanOnly ? ', van-only store' : ''}${repeat ? ', repeat-skip store' : ''}`,
   );
 }
 

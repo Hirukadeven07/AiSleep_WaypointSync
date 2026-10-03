@@ -36,18 +36,31 @@ export function capacitySummary(orders: Order[], outlets: Outlet[], vehicles: Ve
   const demandVolumeM3 = orders.reduce((sum, order) => sum + order.volumeM3, 0);
   const fleetWeightKg = vehicles.reduce((sum, vehicle) => sum + vehicle.weightCapKg, 0);
   const fleetVolumeM3 = vehicles.reduce((sum, vehicle) => sum + vehicle.volumeCapM3, 0);
-  const chilledOrderCount = orders.filter((order) => order.chilled).length;
-  const reeferVehicleCount = vehicles.filter((vehicle) => vehicle.temp === 'reefer').length;
-  const vanOnlyOrderCount = orders.filter(
+  const chilledOrders = orders.filter((order) => order.chilled);
+  const reefers = vehicles.filter((vehicle) => vehicle.temp === 'reefer');
+  const vanOnlyOrders = orders.filter(
     (order) => outletById.get(order.outletId)?.parkingConstraint === 'van_only',
-  ).length;
-  const vanCount = vehicles.filter((vehicle) => vehicle.type === 'van').length;
+  );
+  const vans = vehicles.filter((vehicle) => vehicle.type === 'van');
+  const chilledOrderCount = chilledOrders.length;
+  const reeferVehicleCount = reefers.length;
+  const vanOnlyOrderCount = vanOnlyOrders.length;
+  const vanCount = vans.length;
+
+  // A refrigerated truck carries many chilled stores, so chilled and van-only demand is weighed
+  // against those vehicles' capacity (weight or volume, whichever is tighter), not counted 1:1.
+  const sum = <T>(rows: T[], f: (row: T) => number) => rows.reduce((s, r) => s + f(r), 0);
+  const tighter = (rows: Order[], fleet: Vehicle[]) =>
+    Math.max(
+      ratio(sum(rows, (o) => o.weightKg), sum(fleet, (v) => v.weightCapKg)),
+      ratio(sum(rows, (o) => o.volumeM3), sum(fleet, (v) => v.volumeCapM3)),
+    );
 
   const ratios: Record<ResourceName, number> = {
     weight: ratio(demandWeightKg, fleetWeightKg),
     volume: ratio(demandVolumeM3, fleetVolumeM3),
-    chilled: ratio(chilledOrderCount, reeferVehicleCount),
-    vans: ratio(vanOnlyOrderCount, vanCount),
+    chilled: tighter(chilledOrders, reefers),
+    vans: tighter(vanOnlyOrders, vans),
   };
 
   const ranked = (Object.entries(ratios) as Array<[ResourceName, number]>).sort((a, b) => b[1] - a[1]);
