@@ -1,4 +1,4 @@
-import { IsBoolean, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 import type {
   ChangeDepotRequest,
   ChangePasswordRequest,
@@ -13,9 +13,10 @@ export class ChangeDepotDto implements ChangeDepotRequest {
 
 /** Length and digit rules depend on the role, so the service checks `newSecret`. */
 export class ChangePasswordDto implements ChangePasswordRequest {
+  /** Required whenever a password or PIN is set; a PIN role with none yet may leave it out. */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  currentSecret: string;
+  currentSecret?: string;
 
   @IsString()
   @IsNotEmpty()

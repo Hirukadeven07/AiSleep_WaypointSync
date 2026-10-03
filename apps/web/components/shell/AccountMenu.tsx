@@ -5,6 +5,7 @@ import type { Me, Profile } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
 import { logout } from '@/lib/session';
+import { AccountSettings } from './AccountSettings';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
   dispatcher: 'Dispatcher',
@@ -59,6 +60,7 @@ export function AccountMenu({
   const [open, setOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [settings, setSettings] = useState(false);
 
   // The details load when the card opens; the name and role show straight away.
   useEffect(() => {
@@ -129,6 +131,18 @@ export function AccountMenu({
             <button
               type="button"
               role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                setSettings(true);
+              }}
+              className="mb-2 flex w-full items-center gap-2 rounded-pill border border-mist px-4 py-2 text-label text-ink hover:bg-bg"
+            >
+              <Icon name="settings" size={16} />
+              Account settings
+            </button>
+            <button
+              type="button"
+              role="menuitem"
               onClick={signOut}
               disabled={leaving}
               className="flex w-full items-center gap-2 rounded-pill border border-mist px-4 py-2 text-label text-ink hover:bg-bg disabled:opacity-60"
@@ -139,6 +153,7 @@ export function AccountMenu({
           </div>
         </>
       )}
+      {settings && <AccountSettings me={me} onClose={() => setSettings(false)} />}
     </div>
   );
 }

@@ -58,7 +58,12 @@ export class ProfileService {
     const pin = usesPin(me.role);
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: me.id } });
     const hash = pin ? user.pinHash : user.passwordHash;
-    if (!hash || !(await argon2.verify(hash, dto.currentSecret))) {
+    // A PIN role that never had a PIN (loader sign-in needs none) sets its first one without it.
+    const firstPin = pin && !hash;
+    if (
+      !firstPin &&
+      (!hash || !dto.currentSecret || !(await argon2.verify(hash, dto.currentSecret)))
+    ) {
       throw new BadRequestException({
         reason: 'WRONG_CURRENT_SECRET',
         message: pin ? 'The current PIN is not right.' : 'The current password is not right.',
