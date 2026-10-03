@@ -1,7 +1,7 @@
 'use client';
 
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import { LocateMap } from '@/components/map/LocateMap';
 
 export default function Page() {
-  return <PlaceholderPage title="Live map" />;
+  return <LocateMap />;
 }

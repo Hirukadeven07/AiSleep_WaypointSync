@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import type {
   LiveDay,
+  LocateMap,
   MoveOptions,
   MoveStopResult,
   NotifyPreview,
@@ -8,6 +9,7 @@ import type {
 } from '@waypoint/contracts';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { MapService } from '../map/map.service';
 import { DispatchService } from './dispatch.service';
 import { MoveStopDto, NotifyDto, ResolveSosDto } from './dto';
 import { MoveStopService } from './move-stop.service';
@@ -18,7 +20,14 @@ export class DispatchController {
   constructor(
     private readonly dispatch: DispatchService,
     private readonly moves: MoveStopService,
+    private readonly maps: MapService,
   ) {}
+
+  /** Drivers placed on the last store they reached. `depot` switches which yard is highlighted. */
+  @Get('map')
+  map(@CurrentUser() me: AuthUser, @Query('depot') depot?: string): Promise<LocateMap> {
+    return this.maps.locate(me, depot);
+  }
 
   /** Where each stop the driver has not reached could move (another of today's trips at the depot). */
   @Get('trips/:id/move-options')
