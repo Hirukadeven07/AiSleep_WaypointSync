@@ -73,12 +73,18 @@ const KIND_TITLE: Record<IncidentKind, string> = {
   wait_timeout: 'has waited too long at a store',
   missing_items: 'is short of items',
 };
-const KIND_REASON: Record<IncidentKind, string> = {
-  breakdown: 'a breakdown',
-  delay: 'a delay',
-  quiet_driver: 'a driver who has gone quiet',
-  wait_timeout: 'a long wait at a store',
-  missing_items: 'missing items',
+/** What a store is told about each kind of incident, given the truck's plate. */
+const STORE_DELAY: Record<IncidentKind, (plate: string) => string> = {
+  breakdown: (p) =>
+    `The truck bringing your delivery (${p}) has broken down. We are arranging another way to get your goods to you and will send the new time.`,
+  delay: (p) =>
+    `Your delivery on ${p} is running late. We will send the new arrival time as soon as we have it.`,
+  quiet_driver: (p) =>
+    `We have lost contact with the truck bringing your delivery (${p}), so it may be late. We will update you as soon as we hear from it.`,
+  wait_timeout: (p) =>
+    `The truck bringing your delivery (${p}) was held up at an earlier store and may be late. We will send the new time.`,
+  missing_items: (p) =>
+    `Some items for your delivery on ${p} are short. We will tell you what is coming and when.`,
 };
 const KIND_HEAD: Record<IncidentKind, string> = {
   breakdown: 'Breakdown',
@@ -664,7 +670,7 @@ export class IncidentsService {
       await this.tellStore(
         storeId,
         'Delivery delayed',
-        `Your delivery on ${t.vehicle.numberPlate ?? t.vehicleId} is delayed by ${KIND_REASON[row.type as IncidentKind]}. We will send the new time as soon as it is sorted.`,
+        (STORE_DELAY[row.type as IncidentKind] ?? STORE_DELAY.delay)(t.vehicle.numberPlate ?? t.vehicleId),
       );
     }
     await this.save(id, row.timeline, [

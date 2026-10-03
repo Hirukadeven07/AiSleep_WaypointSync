@@ -90,6 +90,15 @@ async function createOrder(
   });
 }
 
+/** "Sun 4 Oct" for a YYYY-MM-DD day, as the store's other notices read. */
+const dayName = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+
 export async function seedDockStoreDemo(prisma: PrismaClient) {
   // Order lines carry itemId, so the Item rows must exist before any demo order.
   await seedCatalogue(prisma);
@@ -259,7 +268,7 @@ export async function seedDockStoreDemo(prisma: PrismaClient) {
       data: {
         userId: sunil.id,
         title: 'Delivery moved to tomorrow',
-        body: `One order was moved from ${today} to ${tomorrow}. Reason: ${reason}.`,
+        body: `One order was moved from ${dayName(today)} to ${dayName(tomorrow)}. Reason: ${reason}.`,
         link: '/store/updates',
       },
     });
