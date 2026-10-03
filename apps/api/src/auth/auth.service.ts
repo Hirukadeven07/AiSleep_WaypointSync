@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import * as argon2 from 'argon2';
-import type { LoginResponse, Role } from '@waypoint/contracts';
+import type { LoginResponse, Profile, Role } from '@waypoint/contracts';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 
@@ -49,6 +49,31 @@ export class AuthService {
     await this.prisma.session.create({ data: { id: token, userId: user.id, expiresAt } });
 
     return { token, expiresAt, body: { role: user.role, home: HOMES[user.role] } };
+  }
+
+  /** The signed-in user's details for the account card. */
+  async profile(userId: string, sessionId: string | undefined): Promise<Profile> {
+    const [user, session] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        include: { depot: true, store: true, dispatcherProfile: true },
+      }),
+      sessionId ? this.prisma.session.findUnique({ where: { id: sessionId } }) : null,
+    ]);
+    return {
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      loginId: user.loginId,
+      phone: user.phone,
+      depot: user.depot ? { id: user.depot.id, name: user.depot.name } : null,
+      store: user.store
+        ? { id: user.store.id, name: user.store.displayName ?? user.store.id }
+        : null,
+      employeeNo: user.dispatcherProfile?.employeeNo ?? null,
+      signedInAt: session?.createdAt.toISOString() ?? null,
+      sessionExpiresAt: session?.expiresAt.toISOString() ?? null,
+    };
   }
 
   async logout(sessionId: string | undefined) {

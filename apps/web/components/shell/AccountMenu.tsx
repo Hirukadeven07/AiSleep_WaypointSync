@@ -1,9 +1,40 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
-import type { Me } from '@waypoint/contracts';
+import { useEffect, useState, type ReactNode } from 'react';
+import type { Me, Profile } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
+import { api } from '@/lib/api';
 import { logout } from '@/lib/session';
+
+const ROLE_LABEL: Record<Me['role'], string> = {
+  dispatcher: 'Dispatcher',
+  driver: 'Driver',
+  loader: 'Loader',
+  store: 'Store manager',
+};
+
+/** "Sat 3 Oct, 09:14" in Colombo time. */
+const whenText = (iso: string | null) =>
+  iso
+    ? new Date(iso).toLocaleString('en-GB', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Colombo',
+      })
+    : null;
+
+function Row({ label, value }: { label: string; value: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="shrink-0 text-caption text-muted">{label}</dt>
+      <dd className="truncate text-right text-caption font-semibold text-ink">{value}</dd>
+    </div>
+  );
+}
 
 /**
  * Click target (children) that opens a small raised card with the signed-in user and a
@@ -27,15 +58,28 @@ export function AccountMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  // The details load when the card opens; the name and role show straight away.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    api<Profile>('/me/profile')
+      .then((p) => live && setProfile(p))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [open]);
 
   const position =
     placement === 'above'
       ? 'inset-x-0 bottom-full mb-2'
       : placement === 'right'
-        ? 'bottom-0 left-full ml-3 w-56'
+        ? 'bottom-0 left-full ml-3 w-72'
         : placement === 'below-end'
-          ? 'right-0 top-full mt-2 w-56'
-          : 'left-0 top-full mt-2 w-56';
+          ? 'right-0 top-full mt-2 w-72'
+          : 'left-0 top-full mt-2 w-72';
 
   async function signOut() {
     setLeaving(true);
@@ -66,7 +110,22 @@ export function AccountMenu({
             className={`absolute z-50 rounded-note bg-surface p-3 text-left shadow-raised ${position}`}
           >
             <p className="truncate text-body font-semibold text-ink">{me.name}</p>
-            <p className="mb-3 text-caption capitalize text-muted">{me.role}</p>
+            <p className="mb-3 text-caption text-muted">{ROLE_LABEL[me.role] ?? me.role}</p>
+            <dl className="mb-3 flex flex-col gap-[6px] rounded-input bg-bg p-3" aria-label="Profile">
+              {profile ? (
+                <>
+                  <Row label="Login ID" value={profile.loginId} />
+                  <Row label="Depot" value={profile.depot?.name ?? null} />
+                  <Row label="Store" value={profile.store?.name ?? null} />
+                  <Row label="Employee no." value={profile.employeeNo} />
+                  <Row label="Phone" value={profile.phone} />
+                  <Row label="Signed in" value={whenText(profile.signedInAt)} />
+                  <Row label="Session until" value={whenText(profile.sessionExpiresAt)} />
+                </>
+              ) : (
+                <p className="text-caption text-muted">Loading your details…</p>
+              )}
+            </dl>
             <button
               type="button"
               role="menuitem"
