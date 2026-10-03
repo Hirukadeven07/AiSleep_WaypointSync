@@ -8,7 +8,7 @@ export const lookup: Lookup = {
   travel: [
     {
       district: 'Gampaha',
-      depot: 'Peliyagoda',
+      depot: 'depo1',
       depotToDistrictKm: 28,
       depotToDistrictFreeflowMin: 37,
       interStopKm: 7,
@@ -16,7 +16,7 @@ export const lookup: Lookup = {
     },
     {
       district: 'Colombo',
-      depot: 'Peliyagoda',
+      depot: 'depo1',
       depotToDistrictKm: 12,
       depotToDistrictFreeflowMin: 24,
       interStopKm: 4,
@@ -24,7 +24,7 @@ export const lookup: Lookup = {
     },
     {
       district: 'Kandy',
-      depot: 'Kandy',
+      depot: 'depo2',
       depotToDistrictKm: 8,
       depotToDistrictFreeflowMin: 16,
       interStopKm: 3,
@@ -53,7 +53,7 @@ export function vehicle(overrides: Partial<Vehicle> = {}): Vehicle {
     volumeCapM3: 26.4,
     kmPerLitre: 4.7,
     weeklyFuelQuotaL: 340,
-    depot: 'Peliyagoda',
+    depot: 'depo1',
     ...overrides,
   };
 }
@@ -63,7 +63,7 @@ export function outlet(overrides: Partial<Outlet> = {}): Outlet {
     id: 'OUT001',
     brand: 'Fresh',
     district: 'Colombo',
-    depot: 'Peliyagoda',
+    depot: 'depo1',
     dockType: 'street',
     parkingConstraint: 'normal',
     windowOpenMin: parseHhMm('05:00'),

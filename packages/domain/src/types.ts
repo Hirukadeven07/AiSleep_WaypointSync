@@ -5,7 +5,8 @@
 import type { ReasonCode } from '@waypoint/contracts';
 
 export type Brand = 'Fresh' | 'Style' | 'Tech';
-export type Depot = 'Peliyagoda' | 'Kandy';
+/** Depot ids as stored: depo1 = Peliyagoda, depo2 = Kandy. */
+export type Depot = 'depo1' | 'depo2';
 export type VehicleType = 'truck' | 'van';
 export type TempClass = 'reefer' | 'ambient';
 export type DockType = 'rear_dock' | 'street' | 'mall_bay';
