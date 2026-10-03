@@ -46,6 +46,17 @@ export function vehicleLabel(type?: string | null): string {
   return word.charAt(0).toUpperCase() + word.slice(1);
 }
 
+/** Google Maps: directions to the store's pin, or a search for it when it has no coordinates. */
+export function mapsUrl(stop: {
+  navigateUrl?: string | null;
+  outletName: string;
+  address?: string | null;
+}): string {
+  if (stop.navigateUrl) return stop.navigateUrl;
+  const place = [stop.outletName, stop.address, 'Sri Lanka'].filter(Boolean).join(', ');
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`;
+}
+
 /** Stops that no longer need the driver (delivered, confirmed, partial, or moved to another day). */
 const DONE = new Set(['delivered', 'confirmed', 'partial', 'deferred']);
 export const isStopDone = (status: string) => DONE.has(status.toLowerCase());

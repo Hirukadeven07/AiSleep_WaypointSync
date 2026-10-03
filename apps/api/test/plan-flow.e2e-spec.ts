@@ -26,6 +26,8 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
   const o: Record<string, string> = {};
   const t: Record<string, string> = {};
   const previousDemoNow = process.env.DEMO_NOW;
+  // The multi-district trip names Colombo; if that adds the district, afterAll takes it out again.
+  let colomboExisted = true;
 
   beforeAll(async () => {
     process.env.DEMO_NOW = `${date('2031-05-14').toISOString().slice(0, 10)}T09:00:00+05:30`;
@@ -165,6 +167,16 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
       await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
       await prisma.district.deleteMany({ where: { id: districtId } });
+      if (!colomboExisted) {
+        await prisma.district.deleteMany({
+          where: {
+            name: 'Colombo',
+            stores: { none: {} },
+            trips: { none: {} },
+            coveredBy: { none: {} },
+          },
+        });
+      }
     }
     await app?.close();
   });
@@ -310,6 +322,10 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
         date: DAY,
       })
       .expect(400);
+    colomboExisted =
+      (await prisma.district.count({
+        where: { name: { equals: 'Colombo', mode: 'insensitive' } },
+      })) > 0;
     const multi = await agent
       .post('/api/plan/trips')
       .send({

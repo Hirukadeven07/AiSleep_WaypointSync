@@ -9,6 +9,41 @@ export const DRIVER_EVENT_TYPES = [
 
 export type DriverEventType = (typeof DRIVER_EVENT_TYPES)[number];
 
+/** Minutes a driver may wait at a store before dispatch is alerted and the driver calls the store. */
+export const WAIT_ALERT_MIN = 10;
+
+/** What a ROAD_ISSUE reports. */
+export const ROAD_ISSUE_KINDS = [
+  'road_blocked',
+  'traffic',
+  'accident',
+  'vehicle',
+  'weather',
+  'other',
+] as const;
+export type RoadIssueKind = (typeof ROAD_ISSUE_KINDS)[number];
+
+export const ROAD_ISSUE_LABEL: Record<RoadIssueKind, string> = {
+  road_blocked: 'Road blocked',
+  traffic: 'Heavy traffic',
+  accident: 'Accident',
+  vehicle: 'Vehicle problem',
+  weather: 'Flooding or bad weather',
+  other: 'Something else',
+};
+
+/**
+ * ROAD_ISSUE payload. "reported" pauses the trip's next stop until the driver sends "resolved".
+ * `photo` is a small JPEG data URL taken on the phone; `location` is the phone's GPS fix, if any.
+ */
+export interface RoadIssuePayload {
+  status: 'reported' | 'resolved';
+  kind: RoadIssueKind;
+  note: string | null;
+  photo: string | null;
+  location: { lat: number; lng: number; accuracyM: number | null } | null;
+}
+
 export type SyncRejectReason =
   | 'INVALID_EVENT'
   | 'DRIVER_MISMATCH'
