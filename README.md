@@ -125,7 +125,7 @@ The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, th
 
 ### Plan board (dispatcher)
 
-- **One district per trip is a warning, not a block.** The build plan lists "one brand, one district" as a hard rule. Brand still blocks, but a trip may take stores from more than one district (the dispatcher picks them when creating the trip, and a store from another district shows a warning), because the Peliyagoda depot's neighbouring districts are often served on one run.
+- **One district per trip is a warning, not a block.** The build plan lists "one brand, one district" as a hard rule. Brand still blocks, but a trip may take stores from more than one district (the dispatcher picks them when creating the trip, and a store from another district shows a warning). This came in with multi-district trips (PR #43).
 - **Map view** is not built; the List / Map switch shows Map disabled.
 - **Ready vs Draft** is derived: Draft means a trip has no stops yet or a domain warning other than fuel (fuel is judged per week, which the board does not total yet); Ready means clean. "Capacity used" is planned weight against the vehicles that have a trip. "Moved 2x" means a repeat-skip, because the data has no move counter. The Fresh run is assumed to leave at 03:30 and the other brands at 08:00 for the window-risk check.
 - **Publishing:** the Figma shows "Publish anyway" for an over-volume trip, but capacity problems block publishing (build plan and domain rules): the button is disabled and a line says why. Other warnings, such as a window at risk, can be published through. A trip with no stops is skipped.
