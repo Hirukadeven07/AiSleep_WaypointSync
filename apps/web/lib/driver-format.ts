@@ -3,6 +3,21 @@
 /** Dispatch number shown on the Figma SOS screen. Replace when the depot contact comes from the API. */
 export const DISPATCH_PHONE = '011 234 5601';
 
+/** "Today", "Tomorrow", else "Mon 5 Oct", for a YYYY-MM-DD day seen from `today`. */
+export function dayText(iso: string, today?: string): string {
+  if (today) {
+    const diff = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Tomorrow';
+  }
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+}
+
 export const telHref = (number: string) => `tel:${number.replace(/\s+/g, '')}`;
 
 /** Seeded names carry the role in brackets ("Kasun (Driver)"); drop it. */

@@ -74,7 +74,18 @@ describe('buildDriverDay', () => {
       vehicle: null,
       trips: [],
       activeTripId: null,
+      upcoming: [],
+      unreadNotices: 0,
     });
+  });
+
+  it('shows upcoming trips and the unread count even without a vehicle today', () => {
+    const day = buildDriverDay(DAY, null, {
+      upcoming: [tripRow({ id: 'tomorrow', serviceDate: new Date('2026-10-02T00:00:00Z') })],
+      unreadNotices: 2,
+    });
+    expect(day.upcoming.map((t) => [t.id, t.serviceDate])).toEqual([['tomorrow', '2026-10-02']]);
+    expect(day.unreadNotices).toBe(2);
   });
 
   it('falls back to the vehicle id when the plate is missing', () => {

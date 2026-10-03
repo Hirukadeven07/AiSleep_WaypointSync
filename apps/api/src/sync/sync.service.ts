@@ -14,6 +14,7 @@ import {
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { ownTripWhere, tripDriverId } from '../driver/driver-trips';
 import {
   NOTIFIER,
   type NotificationInput,
@@ -239,10 +240,7 @@ export class SyncService {
           create: { userId: me.id },
           update: {},
         });
-        const vehicle = await tx.vehicle.findUnique({
-          where: { driverId: me.id },
-          select: { id: true, depotId: true },
-        });
+        const vehicle = await this.driverVehicle(tx, me.id, tripId);
         await tx.driverIncident.create({
           data: {
             driverId: driver.id,
@@ -319,10 +317,7 @@ export class SyncService {
         await this.recordEvent(tx, me, event, tripId);
         if (payload.status !== 'reported') return { stale, notifications: [] };
         // A new report pauses the trip, so the depot's dispatchers hear about it once.
-        const vehicle = await tx.vehicle.findUnique({
-          where: { driverId: me.id },
-          select: { numberPlate: true, id: true, depotId: true },
-        });
+        const vehicle = await this.driverVehicle(tx, me.id, tripId);
         const depotId = vehicle?.depotId ?? me.depotId;
         const dispatchers = await tx.user.findMany({
           where: { role: 'dispatcher', ...(depotId ? { depotId } : {}) },
@@ -350,9 +345,6 @@ export class SyncService {
         ) {
           throw new RejectedEvent('INVALID_PAYLOAD');
         }
-        const vehicle = await tx.vehicle.findUnique({ where: { driverId: me.id } });
-        if (!vehicle) throw new RejectedEvent('NO_VEHICLE');
-
         let tripId = event.tripId ?? null;
         if (tripId) {
           if (!(await this.lookupTripForDriver(tx, me.id, tripId))) {
@@ -361,6 +353,7 @@ export class SyncService {
         } else {
           tripId = (await this.activeTripForDriver(me.id, tx))?.id ?? null;
         }
+        if (!(await this.driverVehicle(tx, me.id, tripId))) throw new RejectedEvent('NO_VEHICLE');
 
         const stale = await this.shouldMarkStale(tx, event, tripId);
         // Readings can sync out of order: an older one is stored for history but never overwrites a newer one.
@@ -430,8 +423,25 @@ export class SyncService {
       where: { id: stopId },
       include: { trip: { include: { vehicle: true } } },
     });
-    if (!stop || stop.trip.vehicle.driverId !== me.id) throw new RejectedEvent('FORBIDDEN_STOP');
+    if (!stop || tripDriverId(stop.trip) !== me.id) throw new RejectedEvent('FORBIDDEN_STOP');
     return stop;
+  }
+
+  /** The truck the driver is on: the trip's vehicle, else the one registered to them. */
+  private async driverVehicle(
+    tx: Prisma.TransactionClient,
+    driverId: string,
+    tripId: string | null,
+  ): Promise<{ id: string; depotId: string; numberPlate: string | null } | null> {
+    const select = { id: true, depotId: true, numberPlate: true } as const;
+    if (tripId) {
+      const trip = await tx.trip.findUnique({
+        where: { id: tripId },
+        select: { vehicle: { select } },
+      });
+      if (trip) return trip.vehicle;
+    }
+    return tx.vehicle.findUnique({ where: { driverId }, select });
   }
 
   private async storeNotifications(
@@ -467,20 +477,17 @@ export class SyncService {
     driverId: string,
     tx: Prisma.TransactionClient = this.prisma,
   ): Promise<{ id: string; planVersion: number } | null> {
-    const vehicle = await tx.vehicle.findUnique({
-      where: { driverId },
-      include: {
-        trips: {
-          where: {
-            serviceDate: asDate(this.clock.today()),
-            status: { in: ['published', 'loading', 'ready', 'on_road'] },
-          },
-        },
+    const trips = await tx.trip.findMany({
+      where: {
+        ...ownTripWhere(driverId),
+        serviceDate: asDate(this.clock.today()),
+        status: { in: ['published', 'loading', 'ready', 'on_road'] },
       },
+      select: { id: true, tripNumber: true, status: true, planVersion: true },
     });
-    if (!vehicle || vehicle.trips.length === 0) return null;
-    const onRoad = vehicle.trips.find((trip) => trip.status === 'on_road');
-    const trip = onRoad ?? vehicle.trips.sort((a, b) => a.tripNumber - b.tripNumber)[0];
+    if (trips.length === 0) return null;
+    const onRoad = trips.find((trip) => trip.status === 'on_road');
+    const trip = onRoad ?? trips.sort((a, b) => a.tripNumber - b.tripNumber)[0];
     if (!trip) return null;
     return { id: trip.id, planVersion: trip.planVersion };
   }
@@ -495,7 +502,7 @@ export class SyncService {
       where: { id: tripId },
       include: { vehicle: true },
     });
-    if (!trip || trip.vehicle.driverId !== driverId) return null;
+    if (!trip || tripDriverId(trip) !== driverId) return null;
     return { id: trip.id, planVersion: trip.planVersion };
   }
 

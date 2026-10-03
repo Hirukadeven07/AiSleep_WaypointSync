@@ -9,7 +9,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import type { DropRequest } from '@waypoint/contracts';
+import type { AssignDriverRequest, DropRequest } from '@waypoint/contracts';
 
 export class DropDto implements DropRequest {
   @IsString()
@@ -19,6 +19,14 @@ export class DropDto implements DropRequest {
   @IsString()
   @MinLength(1)
   tripId: string;
+}
+
+/** `driverId` null (or left out) goes back to the vehicle's registered driver. */
+export class AssignDriverDto implements AssignDriverRequest {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  driverId: string | null;
 }
 
 export class UnassignDto {

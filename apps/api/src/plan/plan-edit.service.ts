@@ -26,6 +26,7 @@ import {
 } from '@waypoint/domain';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { tellDriversPlanChanged } from '../driver/driver-notices';
 import { DEPART_MIN, PlanService } from './plan.service';
 import {
   isAtDepot,
@@ -265,6 +266,7 @@ export class PlanEditService {
         ...(trip.status !== 'planning' && { planVersion: { increment: 1 } }),
       },
     });
+    if (trip.status !== 'planning') await tellDriversPlanChanged(tx, [tripId]);
   }
 
   async tripView(me: Me, tripId: string, lookup: Lookup, depot: Depot) {

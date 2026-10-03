@@ -25,6 +25,7 @@ export interface StopSummary {
 
 export interface TripSummary {
   id: EntityId;
+  serviceDate?: string; // YYYY-MM-DD
   tripNumber: 1 | 2;
   status: string;
   planVersion: number; // Trip.planVersion, sent as seenPlanVersion on every action
@@ -38,8 +39,14 @@ export interface VehicleSummary {
 }
 
 export interface DriverDay {
+  serviceDate?: string; // YYYY-MM-DD, today in Asia/Colombo
   vehicle: VehicleSummary | null;
   trips: TripSummary[];
+  /** The server's pick (on_road, else the lowest trip number). */
+  activeTripId?: EntityId | null;
+  /** Published trips on the next few days. */
+  upcoming?: TripSummary[];
+  unreadNotices?: number;
 }
 
 export interface ShellCache {
@@ -87,11 +94,12 @@ export function clearCachedShell(): void {
  */
 export const fullDay = (day: DriverDay | null) => day as unknown as DriverDayResponse | null;
 
-/** The trip the driver is working on: first one that is published and not finished. */
+/** The trip the driver is working on: the server's pick, else the first one not finished. */
 export function pickActiveTrip(day: DriverDay | null): TripSummary | null {
   if (!day) return null;
-  // ASSUMPTION: status names. Adjust once the Trip status enum is final.
-  const done = new Set(['DRAFT', 'COMPLETED', 'CANCELLED']);
+  const picked = day.activeTripId != null ? day.trips.find((t) => t.id === day.activeTripId) : null;
+  if (picked) return picked;
+  const done = new Set(['planning', 'completed', 'breakdown']);
   return (
     [...day.trips]
       .sort((a, b) => a.tripNumber - b.tripNumber)

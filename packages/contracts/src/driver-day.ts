@@ -1,7 +1,7 @@
 import type { FlagType } from './dock';
 import type { StopStatus, TripStatus } from './status';
 
-/** The vehicle linked to the driver by `Vehicle.driverId`. */
+/** The vehicle of the driver's active trip, else the vehicle registered to them (`Vehicle.driverId`). */
 export interface DriverDayVehicle {
   id: string;
   /** Falls back to the vehicle id when the vehicle has no plate. */
@@ -67,18 +67,38 @@ export interface DriverDayStop {
 
 export interface DriverDayTrip {
   id: string;
+  /** YYYY-MM-DD. Today for `trips`, a later day for `upcoming`. */
+  serviceDate: string;
   tripNumber: 1 | 2;
   status: TripStatus;
   planVersion: number;
   stops: DriverDayStop[];
 }
 
-/** GET /api/driver/day. Only workable trips (published, loading, ready, on_road) for today. */
+/**
+ * GET /api/driver/day. A trip is the driver's when the dispatcher assigned them to it
+ * (`Trip.assignedDriverId`), or, with nobody assigned, when it runs on their vehicle.
+ */
 export interface DriverDayResponse {
   /** YYYY-MM-DD in Asia/Colombo. */
   serviceDate: string;
   vehicle: DriverDayVehicle | null;
+  /** Today's workable trips (published, loading, ready, on_road). */
   trips: DriverDayTrip[];
   /** Same rule as `GET /api/sync`: the on_road trip, else the lowest trip number. */
   activeTripId: string | null;
+  /** Published trips on the next few days, read-only until their day. */
+  upcoming: DriverDayTrip[];
+  /** Unread notices from dispatch and stores (GET /api/driver/notices). */
+  unreadNotices: number;
+}
+
+/** GET /api/driver/notices: what dispatch and stores sent this driver, newest first. */
+export interface DriverNotice {
+  id: string;
+  title: string;
+  body: string;
+  link: string | null;
+  read: boolean;
+  createdAt: string;
 }

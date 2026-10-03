@@ -52,6 +52,8 @@ export interface DriverDayStopRow {
 
 export interface DriverDayTripRow {
   id: string;
+  /** Optional so older callers and tests can leave it out; the trip's day is then `serviceDate`. */
+  serviceDate?: Date;
   tripNumber: number;
   status: TripStatus;
   planVersion: number;
@@ -130,9 +132,10 @@ function mapStop(stop: DriverDayStopRow): DriverDayStop {
   };
 }
 
-function mapTrip(trip: DriverDayTripRow): DriverDayTrip {
+function mapTrip(trip: DriverDayTripRow, serviceDate: string): DriverDayTrip {
   return {
     id: trip.id,
+    serviceDate: trip.serviceDate?.toISOString().slice(0, 10) ?? serviceDate,
     tripNumber: trip.tripNumber as DriverDayTrip['tripNumber'],
     status: trip.status,
     planVersion: trip.planVersion,
@@ -140,20 +143,33 @@ function mapTrip(trip: DriverDayTripRow): DriverDayTrip {
   };
 }
 
+/** What the driver day carries besides today's vehicle and trips. */
+export interface DriverDayExtras {
+  upcoming?: DriverDayTripRow[];
+  unreadNotices?: number;
+}
+
 export function buildDriverDay(
   serviceDate: string,
   vehicle: DriverDayVehicleRow | null,
+  extras: DriverDayExtras = {},
 ): DriverDayResponse {
-  if (!vehicle) return { serviceDate, vehicle: null, trips: [], activeTripId: null };
+  const common = {
+    serviceDate,
+    // Published trips on later days still show when the driver has no truck today.
+    upcoming: (extras.upcoming ?? []).map((trip) => mapTrip(trip, serviceDate)),
+    unreadNotices: extras.unreadNotices ?? 0,
+  };
+  if (!vehicle) return { ...common, vehicle: null, trips: [], activeTripId: null };
 
   const trips = vehicle.trips
     .filter((trip) => WORKABLE.has(trip.status))
     .sort((a, b) => a.tripNumber - b.tripNumber);
 
   return {
-    serviceDate,
+    ...common,
     vehicle: { id: vehicle.id, plate: vehicle.numberPlate ?? vehicle.id, type: vehicle.type },
-    trips: trips.map(mapTrip),
+    trips: trips.map((trip) => mapTrip(trip, serviceDate)),
     activeTripId: pickActiveTripId(trips),
   };
 }
