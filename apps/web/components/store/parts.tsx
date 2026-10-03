@@ -175,3 +175,47 @@ export function IssueList({ delivery }: { delivery: StoreDelivery }) {
     </ul>
   );
 }
+
+const DONE_STOP = new Set(['delivered', 'partial', 'confirmed', 'deferred']);
+
+/**
+ * Where the truck is on its run (S1): how many stops are before this store, and a strip of the
+ * trip's stops by number. Other stores are never named; only this store's stop is marked.
+ */
+export function TruckTracker({ delivery }: { delivery: StoreDelivery }) {
+  const track = delivery.track ?? [];
+  if (track.length === 0) return null;
+  const away = delivery.stopsAway;
+  return (
+    <div className="space-y-sm rounded-input bg-bg p-md" aria-label="Where the truck is">
+      {away !== null && away !== undefined && (
+        <p className="text-body font-semibold text-ink">
+          {away === 0
+            ? 'You are the next stop'
+            : `${away} ${away === 1 ? 'stop' : 'stops'} before you`}
+          {delivery.etaMin !== null ? ` · ETA ${formatMinutes(delivery.etaMin)}` : ''}
+        </p>
+      )}
+      <ol className="flex flex-wrap items-center gap-xs">
+        {track.map((t) => {
+          const done = DONE_STOP.has(t.status);
+          return (
+            <li
+              key={t.sequence}
+              aria-label={`Stop ${t.sequence}${t.isYou ? ', your store' : ''}${done ? ', done' : ''}`}
+              className={`flex h-8 min-w-[32px] items-center justify-center rounded-full px-sm text-caption font-semibold ${
+                t.isYou
+                  ? 'bg-primary text-bg'
+                  : done
+                    ? 'bg-olive-ink text-white'
+                    : 'bg-surface text-muted'
+              }`}
+            >
+              {t.isYou ? 'You' : done ? '✓' : t.sequence}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}

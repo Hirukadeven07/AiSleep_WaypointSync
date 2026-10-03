@@ -12,6 +12,7 @@ import { StatusChip } from '@/components/ui/StatusChip';
 import {
   DeferralCard,
   HandoffTimeline,
+  TruckTracker,
   IssueList,
   PageTitle,
   SPLIT,
@@ -145,6 +146,7 @@ export default function StoreHomePage() {
                   {data.delivery.driverName ? ` · ${data.delivery.driverName}` : ''} ·{' '}
                   {data.delivery.lines.length} lines
                 </p>
+                <TruckTracker delivery={data.delivery} />
                 <HandoffTimeline delivery={data.delivery} />
                 <IssueList delivery={data.delivery} />
               </>
