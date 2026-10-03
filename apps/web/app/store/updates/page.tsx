@@ -1,12 +1,14 @@
 'use client';
 
 import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import type { StoreNotice, StoreOrderView } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { formatTime } from '@/lib/clock';
 import { usePoll } from '@/lib/poll';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { DeferralCard, PageTitle } from '@/components/store/parts';
+import { requestStoreRefresh } from '@/components/store/settings';
 
 /** S3: deferral notices and other messages from dispatch. */
 export default function UpdatesPage() {
@@ -14,14 +16,20 @@ export default function UpdatesPage() {
   const orders = usePoll(() => api<StoreOrderView[]>('/store/orders'), 15_000);
   const deferred = orders.data?.filter((o) => o.status === 'deferred') ?? [];
 
+  const router = useRouter();
+
   const refreshNotices = notices.refresh;
-  const markRead = useCallback(
+  /** Marks the notice read and goes to the screen it is about, when it names one of ours. */
+  const open = useCallback(
     async (n: StoreNotice) => {
-      if (n.read) return;
-      await api(`/store/notices/${n.id}/read`, { method: 'POST' }).catch(() => undefined);
-      await refreshNotices();
+      if (!n.read) {
+        await api(`/store/notices/${n.id}/read`, { method: 'POST' }).catch(() => undefined);
+        await refreshNotices();
+        requestStoreRefresh();
+      }
+      if (n.link?.startsWith('/store') && n.link !== '/store/updates') router.push(n.link);
     },
-    [refreshNotices],
+    [refreshNotices, router],
   );
 
   return (
@@ -42,7 +50,7 @@ export default function UpdatesPage() {
           <li key={n.id}>
             <button
               type="button"
-              onClick={() => markRead(n)}
+              onClick={() => open(n)}
               className={`w-full space-y-xs rounded-card p-md text-left ${n.read ? 'bg-surface' : 'bg-info-tint'}`}
             >
               <span className="flex items-start justify-between gap-sm">
@@ -52,7 +60,7 @@ export default function UpdatesPage() {
               <span className="block text-label text-muted">{n.body}</span>
               {!n.read && (
                 <span className="block text-caption font-semibold text-slate">
-                  New · tap to mark read
+                  New · tap to open
                 </span>
               )}
             </button>

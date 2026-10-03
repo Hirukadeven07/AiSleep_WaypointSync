@@ -255,6 +255,10 @@ describe('loader dock and store (e2e)', () => {
         .expect(409);
       expect(blocked.body.reason).toBe('PLAN_LOCKED');
 
+      await loader
+        .post(`/api/loads/${ids.loadTrip}/taken-off`)
+        .send({ orderId: stopRow.orderId })
+        .expect(200);
       const acked = await loader.post(`/api/loads/${ids.loadTrip}/ack`).expect(200);
       expect(acked.body.lock.locked).toBe(false);
       // E2E-A left the truck: its delivery note now has a current 'removed' version.
@@ -500,6 +504,48 @@ describe('loader dock and store (e2e)', () => {
       );
       expect(notice.body).toContain('No truck capacity left');
       await prisma.notification.deleteMany({ where: { id: notice.id } });
+    });
+
+    it('stars catalogue items for the store and refuses another brand’s item', async () => {
+      const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+      const sorted = (res: { body: string[] }) => [...res.body].sort();
+      expect((await store.get('/api/store/saved').expect(200)).body).toEqual([]);
+
+      await store.put('/api/store/saved/F-MILK').expect(200);
+      // Starring the same item again keeps one row.
+      expect(sorted(await store.put('/api/store/saved/F-MILK').expect(200))).toEqual(['F-MILK']);
+      expect(sorted(await store.put('/api/store/saved/F-BREAD').expect(200))).toEqual([
+        'F-BREAD',
+        'F-MILK',
+      ]);
+      // E2E-HOME is a Fresh store; a Tech item is not in its catalogue.
+      await store.put('/api/store/saved/T-PHONE').expect(404);
+
+      expect(sorted(await store.delete('/api/store/saved/F-MILK').expect(200))).toEqual([
+        'F-BREAD',
+      ]);
+      expect(sorted(await store.get('/api/store/saved').expect(200))).toEqual(['F-BREAD']);
+      expect(await prisma.storeSavedItem.count({ where: { storeId: 'E2E-HOME' } })).toBe(1);
+    });
+
+    it('lists the latest order first with its lines, for "order again"', async () => {
+      const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+      const placed = await store
+        .post('/api/store/orders')
+        .send({
+          lines: [
+            { catalogueId: 'F-BREAD', qty: 12 },
+            { catalogueId: 'F-MILK', qty: 3 },
+          ],
+        })
+        .expect(201);
+      const recent = (await store.get('/api/store/orders/recent').expect(200)).body;
+      expect(recent.length).toBeLessThanOrEqual(5);
+      expect(recent[0]).toMatchObject({ id: placed.body.id, status: 'waiting', units: 15 });
+      expect(recent[0].lines).toEqual([
+        { catalogueId: 'F-MILK', name: 'Fresh milk 1 L', qty: 3, pack: 'crate of 12' },
+        { catalogueId: 'F-BREAD', name: 'Sandwich bread', qty: 12, pack: 'crate of 20' },
+      ]);
     });
   });
 });

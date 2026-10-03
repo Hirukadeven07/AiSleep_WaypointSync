@@ -63,6 +63,12 @@ enum OrderStatus {
   partial
 }
 
+/// How short the store is when it marks an order urgent.
+enum StockLevel {
+  out_of_stock
+  running_low
+}
+
 enum TripStatus {
   planning
   published
@@ -248,6 +254,7 @@ model Store {
   users             User[]
   phones            OutletPhone[]
   fieldFlags        FieldFlag[]
+  savedItems        StoreSavedItem[]
 }
 
 model User {
@@ -262,6 +269,8 @@ model User {
   passwordHash       String?
   pinHash            String?
   phone              String?
+  /// NotificationPreferences JSON; null means every preference is on. Saved only, not enforced yet.
+  notificationPrefs  Json?
   sessions           Session[]
   vehicle            Vehicle?
   notifications      Notification[]
@@ -316,6 +325,9 @@ model Order {
   weightKg            Float
   volumeM3            Float
   urgentNote          String?
+  /// Set by the store at order time; urgent orders head the dispatcher's waiting list.
+  urgent              Boolean        @default(false)
+  stockLevel          StockLevel?
   movedFromDate       DateTime?      @db.Date
   deferReason         String?
   deferredById        String?
@@ -429,6 +441,10 @@ model LoadSession {
   ackedPlanVersion Int       @default(0)
   /// Order ids on the trip when the loader last acknowledged; diffed against the live trip for the plan-change lock.
   ackedStopIds     String[]  @default([])
+  /// Removed orders the loader has confirmed are off the truck; acknowledging needs all of them. Reset on acknowledge.
+  takenOffOrderIds String[]  @default([])
+  /// Orders added by the last acknowledged plan change, shown as NEW on the checklist. Cleared on depart.
+  newOrderIds      String[]  @default([])
 }
 
 model LoadFlag {
@@ -521,6 +537,7 @@ model Item {
   dnLines      DeliveryNoteLine[]
   fieldFlags   FieldFlag[]
   loaderFlags  LoaderFlag[]
+  savedBy      StoreSavedItem[]
 
   @@index([type])
 }
@@ -534,6 +551,17 @@ model InventoryBatch {
   expiryDate        DateTime?          @db.Date
   qty               Float              @default(0)
   picks             DeliveryNotePick[]
+}
+
+/// Items a store manager starred on the order screen, kept per store so every phone shows the same list.
+model StoreSavedItem {
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([storeId, itemId])
 }
 
 /// 1:1 with User where role = driver. Vehicle assignment stays on Vehicle.driverId.

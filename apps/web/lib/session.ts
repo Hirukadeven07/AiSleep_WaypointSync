@@ -43,7 +43,13 @@ export function useRequireRole(role: Role) {
   return { ...session, allowed: session.me?.role === role };
 }
 
-export async function logout() {
-  await api('/auth/logout', { method: 'POST' });
-  window.location.assign('/login');
+/** Ends the session and leaves the app. Still leaves when the server cannot be reached. */
+export async function logout(redirectTo = '/login') {
+  try {
+    await api('/auth/logout', { method: 'POST' });
+  } catch {
+    // Offline or already signed out: the cookie expires on its own; do not trap the user here.
+  } finally {
+    window.location.assign(redirectTo);
+  }
 }

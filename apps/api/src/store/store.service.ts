@@ -12,6 +12,8 @@ import {
   type StoreDelivery,
   type StoreHome,
   type StoreNotice,
+  type StopStatus,
+  type StoreOrderDetail,
   type StoreOrderView,
 } from '@waypoint/contracts';
 import { DomainError } from '@waypoint/domain';
@@ -20,7 +22,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { nextOperatingDay } from '../common/clock/operating-day';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
-import { CATALOGUE, buildLines } from './catalogue';
+import { CATALOGUE, buildLines, catalogueItem } from './catalogue';
 import type { PlaceOrderDto, ReceiptDto } from './dto/store.dto';
 import { PhotosService } from '../photos/photos.service';
 
@@ -34,11 +36,27 @@ const deliveryInclude = {
       fieldFlags: { include: { item: true }, orderBy: { raisedAt: 'asc' } },
     },
   },
-  trip: { include: { assignedDriver: true, vehicle: { include: { driver: true } } } },
+  trip: {
+    include: {
+      assignedDriver: true,
+      vehicle: { include: { driver: true } },
+      stops: { select: { id: true, sequence: true, status: true }, orderBy: { sequence: 'asc' } },
+    },
+  },
   receipt: true,
 } satisfies Prisma.TripStopInclude;
 
 type DeliveryStop = Prisma.TripStopGetPayload<{ include: typeof deliveryInclude }>;
+
+/** Stop states where the truck has finished with that stop (or will not call there). */
+const DONE: readonly StopStatus[] = ['delivered', 'partial', 'deferred', 'confirmed'];
+const COUNTING: readonly StopStatus[] = ['upcoming', 'at_risk'];
+
+/** Stops the truck still has to serve before this one; null unless the truck is out and this stop is still ahead. */
+function stopsAway(s: DeliveryStop): number | null {
+  if (s.trip.status !== 'on_road' || !COUNTING.includes(s.status)) return null;
+  return s.trip.stops.filter((o) => o.sequence < s.sequence && !DONE.includes(o.status)).length;
+}
 
 function orderView(o: Order): StoreOrderView {
   return {
@@ -52,6 +70,9 @@ function orderView(o: Order): StoreOrderView {
     deferReason: o.deferReason,
     movedFromDate: o.movedFromDate ? isoDay(o.movedFromDate) : null,
     repeatSkip: o.repeatSkip,
+    urgent: o.urgent,
+    stockLevel: o.stockLevel,
+    urgentNote: o.urgentNote,
   };
 }
 
@@ -70,6 +91,13 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
     driverAckAt: s.driverAckAt?.toISOString() ?? null,
     signaturePhotoKey: s.receipt?.signaturePhotoKey ?? null,
     signedAt: s.receipt?.signedAt?.toISOString() ?? null,
+    stopsAway: stopsAway(s),
+    // Other stores on the trip stay anonymous: only their place in the run and their status.
+    track: s.trip.stops.map((o) => ({
+      sequence: o.sequence,
+      status: o.status,
+      isYou: o.id === s.id,
+    })),
     lines: s.order.lines.map((l) => ({
       id: l.id,
       name: l.name,
@@ -161,6 +189,60 @@ export class StoreService {
     return orders.map(orderView);
   }
 
+  /** The store's latest orders with their lines, newest first: what is already placed, and "order again". */
+  async recentOrders(me: AuthUser): Promise<StoreOrderDetail[]> {
+    const store = await this.store(me);
+    const orders = await this.prisma.order.findMany({
+      where: { storeId: store.id },
+      include: { lines: { orderBy: { name: 'asc' } } },
+      orderBy: [{ createdAt: 'desc' }, { deliveryDate: 'desc' }],
+      take: 5,
+    });
+    return orders.map((o) => ({
+      ...orderView(o),
+      lines: o.lines.map((l) => ({
+        catalogueId: l.itemId,
+        name: l.name,
+        qty: l.qty,
+        pack: l.pack,
+      })),
+    }));
+  }
+
+  /** Catalogue ids this store has starred, oldest first. */
+  async saved(me: AuthUser): Promise<string[]> {
+    const store = await this.store(me);
+    return this.savedIds(store.id);
+  }
+
+  async saveItem(me: AuthUser, itemId: string): Promise<string[]> {
+    const store = await this.store(me);
+    if (!catalogueItem(store.brand, itemId)) {
+      throw new NotFoundException('That item is not in this store’s catalogue');
+    }
+    await this.prisma.storeSavedItem.upsert({
+      where: { storeId_itemId: { storeId: store.id, itemId } },
+      update: {},
+      create: { storeId: store.id, itemId },
+    });
+    return this.savedIds(store.id);
+  }
+
+  async unsaveItem(me: AuthUser, itemId: string): Promise<string[]> {
+    const store = await this.store(me);
+    await this.prisma.storeSavedItem.deleteMany({ where: { storeId: store.id, itemId } });
+    return this.savedIds(store.id);
+  }
+
+  private async savedIds(storeId: string): Promise<string[]> {
+    const rows = await this.prisma.storeSavedItem.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'asc' },
+      select: { itemId: true },
+    });
+    return rows.map((r) => r.itemId);
+  }
+
   /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */
   async placeOrder(me: AuthUser, dto: PlaceOrderDto): Promise<StoreOrderView> {
     const store = await this.store(me);
@@ -176,6 +258,8 @@ export class StoreService {
     } catch (e) {
       throw new BadRequestException((e as Error).message);
     }
+    // Stock level and note only mean something on an urgent order.
+    const urgent = dto.urgent === true;
     const deliveryDate = asDate(await nextOperatingDay(this.prisma, asDate(this.clock.today())));
     const order = await this.prisma.order.create({
       data: {
@@ -187,6 +271,9 @@ export class StoreService {
         units: built.units,
         weightKg: built.weightKg,
         volumeM3: built.volumeM3,
+        urgent,
+        stockLevel: urgent ? (dto.stockLevel ?? null) : null,
+        urgentNote: urgent ? dto.urgentNote || null : null,
         lines: { create: built.lines },
       },
     });

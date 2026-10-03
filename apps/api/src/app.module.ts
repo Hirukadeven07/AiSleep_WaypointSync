@@ -20,6 +20,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { StoreModule } from './store/store.module';
 import { PhotosModule } from './photos/photos.module';
 import { HealthModule } from './health/health.module';
+import { ProfileModule } from './profile/profile.module';
 
 @Global()
 @Module({
@@ -48,6 +49,7 @@ class ClockModule {}
     StoreModule,
     PhotosModule,
     HealthModule,
+    ProfileModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: SessionGuard },
