@@ -324,7 +324,7 @@ describe('live day (e2e)', () => {
           brand: 'Style',
           districtId,
           serviceDate: date(day),
-          tripNumber: 5,
+          tripNumber: 2,
           status,
         },
       });
@@ -362,7 +362,7 @@ describe('live day (e2e)', () => {
         brand: 'Fresh',
         districtId,
         serviceDate: date(DAY),
-        tripNumber: 7,
+        tripNumber: 2,
         status: 'on_road',
       },
     });

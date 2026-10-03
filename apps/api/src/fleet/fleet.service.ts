@@ -291,13 +291,13 @@ export class FleetService {
   async addVehicle(me: Me, dto: AddVehicleRequest): Promise<FleetVehicle> {
     const plate = dto.plate.trim().replace(/\s+/g, ' ').toUpperCase();
     const taken = await this.prisma.vehicle.findFirst({
-      where: { OR: [{ id: plate }, { plate }] },
+      where: { OR: [{ id: plate }, { numberPlate: plate }] },
     });
     if (taken) throw new ConflictException(`A vehicle with plate ${plate} already exists.`);
     await this.prisma.vehicle.create({
       data: {
         id: plate,
-        plate,
+        numberPlate: plate,
         depotId: this.depotOf(me),
         type: dto.type,
         temp: dto.temp,
