@@ -10,6 +10,7 @@ export default tseslint.config(
       '**/.next/**',
       '**/next-env.d.ts',
       'apps/api/prisma/migrations/**',
+      'apps/web/public/maps/**',
       '**/*.config.js',
       '**/*.config.mjs',
     ],

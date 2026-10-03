@@ -495,7 +495,6 @@ export const IslandMap = forwardRef<IslandMapHandle, Props>(function IslandMap(
       setReady(false);
     };
     // Mount once. Later effects push new tones, views and markers onto the live map.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
