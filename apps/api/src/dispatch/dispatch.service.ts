@@ -19,6 +19,7 @@ import {
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
+import { tripAreaLabel } from '../plan/plan.mapper';
 
 /** A trip counts as late from this many minutes past a stop's window. */
 const LATE_MIN = 5;
@@ -137,11 +138,13 @@ export class DispatchService {
 
     const [rows, events, pings, carry, tomorrowOrders, sosRows] = await Promise.all([
       this.prisma.trip.findMany({
-        where: { depotId, serviceDate: day, status: { not: 'planning' } },
+        // Trips still being planned show too ("planned"), so a trip is visible as soon as it exists.
+        where: { depotId, serviceDate: day },
         include: {
           vehicle: { include: { driver: driverInclude } },
           assignedDriver: driverInclude,
           district: true,
+          extraDistricts: { orderBy: { name: 'asc' } },
           stops: {
             orderBy: { sequence: 'asc' },
             include: { order: { include: { store: true } }, receipt: true, flags: true },
@@ -256,6 +259,7 @@ export class DispatchService {
       else if (broke) live = 'breakdown';
       else if (notSynced) live = 'not_synced';
       else if (onRoad) live = lateMin >= LATE_MIN ? 'late' : 'on_time';
+      else if (t.status === 'planning') live = 'planned';
       else if (t.status === 'published') live = 'assigned';
       else live = 'loading';
 
@@ -331,7 +335,7 @@ export class DispatchService {
         tripNumber: t.tripNumber,
         tripsToday: perVehicle.get(t.vehicleId) ?? 1,
         brand: t.brand,
-        district: t.district.name,
+        district: tripAreaLabel(t),
         vehicleType: t.vehicle.type,
         vehicleTemp: t.vehicle.temp,
         driverName: driver ? person(driver.name) : null,
@@ -401,8 +405,9 @@ export class DispatchService {
       depotId,
       asOf: now.toISOString(),
       liveSince: departures[0]?.toISOString() ?? null,
-      vehiclesWorking: new Set(trips.filter((t) => t.live !== 'completed').map((t) => t.vehicleId))
-        .size,
+      vehiclesWorking: new Set(
+        trips.filter((t) => t.live !== 'completed' && t.live !== 'planned').map((t) => t.vehicleId),
+      ).size,
       kpis: {
         tripsOnRoad: trips.filter((t) => t.status === 'on_road' || t.status === 'breakdown').length,
         dispatched,
@@ -423,6 +428,7 @@ export class DispatchService {
         done: trips.filter((t) => t.live === 'completed').length,
       },
       trips,
+      tomorrowTrips: await this.upcoming(depotId, nextDay),
       attention,
       carryovers: {
         total: carry.length,
@@ -436,6 +442,75 @@ export class DispatchService {
         minutesToCutoff: Math.max(0, ORDER_CUTOFF_MIN - minutesNow),
       },
     };
+  }
+
+  /**
+   * Trips planned for a later day, shaped like live rows so the board can list them: nothing has
+   * moved yet, so they are "planned" until sent to the dock and driver, then "assigned".
+   */
+  private async upcoming(depotId: string, day: Date): Promise<LiveTrip[]> {
+    const rows = await this.prisma.trip.findMany({
+      where: { depotId, serviceDate: day },
+      include: {
+        vehicle: { include: { driver: driverInclude } },
+        assignedDriver: driverInclude,
+        district: true,
+        extraDistricts: { orderBy: { name: 'asc' } },
+        stops: { orderBy: { sequence: 'asc' }, include: { order: { include: { store: true } } } },
+      },
+      orderBy: [{ vehicleId: 'asc' }, { tripNumber: 'asc' }],
+    });
+    const perVehicle = new Map<string, number>();
+    for (const t of rows) perVehicle.set(t.vehicleId, (perVehicle.get(t.vehicleId) ?? 0) + 1);
+
+    return rows.map((t) => {
+      const driver = t.assignedDriver ?? t.vehicle.driver;
+      const later = rows.find((r) => r.vehicleId === t.vehicleId && r.tripNumber > t.tripNumber);
+      return {
+        id: t.id,
+        vehicleId: t.vehicleId,
+        plate: t.vehicle.plate,
+        tripNumber: t.tripNumber,
+        tripsToday: perVehicle.get(t.vehicleId) ?? 1,
+        brand: t.brand,
+        district: tripAreaLabel(t),
+        vehicleType: t.vehicle.type,
+        vehicleTemp: t.vehicle.temp,
+        driverName: driver ? person(driver.name) : null,
+        driverPhone: driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null,
+        status: t.status,
+        live: t.status === 'planning' ? 'planned' : 'assigned',
+        lateMin: null,
+        notSyncedMin: null,
+        stopsDone: 0,
+        stopsTotal: t.stops.length,
+        weightKg: t.stops.reduce((sum, s) => sum + s.order.weightKg, 0),
+        lastPlace: null,
+        lastAt: null,
+        lastSyncAt: null,
+        departedAt: null,
+        openSos: 0,
+        backAt: null,
+        bay: null,
+        missingCount: 0,
+        previousTrip: null,
+        nextTrip: later ? { tripNumber: later.tripNumber, stops: later.stops.length } : null,
+        hasIssue: false,
+        stops: t.stops.map((s) => ({
+          id: s.id,
+          sequence: s.sequence,
+          storeName: s.order.store.displayName ?? s.order.store.id,
+          status: s.status,
+          windowOpenMin: s.order.store.windowOpenMin,
+          windowCloseMin: s.order.store.windowCloseMin,
+          etaMin: s.etaMin,
+          arrivedAt: null,
+          confirmed: false,
+          issueNote: null,
+          missBy: null,
+        })),
+      };
+    });
   }
 }
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import type {
   AssignResult,
   AutoAssignProposal,
@@ -11,8 +11,10 @@ import type {
   PlanMap,
   PlanOrderDetail,
   PlanPublishResult,
+  PlanStore,
   PlanTrip,
   PublishCheck,
+  RemoveTripResult,
   TripSuggestion,
   UnassignResult,
 } from '@waypoint/contracts';
@@ -122,10 +124,27 @@ export class PlanController {
     return this.trips.options(me, date);
   }
 
+  /** Stores in a district (and brand), for the order queue's Store filter. */
+  @Get('stores')
+  stores(
+    @CurrentUser() me: AuthUser,
+    @Query('district') district: string,
+    @Query('brand') brand?: string,
+  ): Promise<PlanStore[]> {
+    return this.trips.stores(me, district, brand);
+  }
+
   @Post('trips')
   @HttpCode(200)
   createTrip(@CurrentUser() me: AuthUser, @Body() dto: CreateTripDto): Promise<PlanTrip> {
     return this.trips.create(me, dto);
+  }
+
+  /** Remove a trip that is still being planned; its orders go back to the queue. */
+  @Delete('trips/:id')
+  @HttpCode(200)
+  removeTrip(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<RemoveTripResult> {
+    return this.trips.remove(me, id);
   }
 
   /** Waiting orders the rules let onto this trip. */

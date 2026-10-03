@@ -4,9 +4,12 @@ import type {
   Me,
   NewTripOptions,
   NewTripVehicle,
+  PlanStore,
   PlanTrip,
+  RemoveTripResult,
   TripSuggestion,
 } from '@waypoint/contracts';
+import { allDistricts, districtKey } from '@waypoint/contracts';
 import { DomainError, evaluateNewTrip, formatMinutes, type Depot } from '@waypoint/domain';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -84,7 +87,8 @@ export class PlanTripsService {
         { tripNumber: 2, label: 'Trip 2 · afternoon' },
       ],
       vehicles: { '1': forRun(1), '2': forRun(2) },
-      districts: districts.map((d) => ({ id: d.id, name: d.name })),
+      // Every district of Sri Lanka; the depot's served ones keep their stored spelling.
+      districts: allDistricts(districts.map((d) => d.name)),
     };
   }
 
@@ -99,8 +103,7 @@ export class PlanTripsService {
         `${vehicle.plate ?? vehicle.id} is not available.`,
       );
     }
-    const district = await this.prisma.district.findUnique({ where: { id: dto.districtId } });
-    if (!district) throw new NotFoundException('District not found');
+    const districts = await this.resolveDistricts(dto.districts);
 
     const already = await this.prisma.trip.findMany({
       where: { vehicleId: vehicle.id, serviceDate: day },
@@ -119,7 +122,8 @@ export class PlanTripsService {
         vehicleId: vehicle.id,
         depotId,
         brand: dto.brand,
-        districtId: district.id,
+        districtId: districts[0].id,
+        extraDistricts: { connect: districts.slice(1).map((d) => ({ id: d.id })) },
         serviceDate: day,
         tripNumber: dto.tripNumber,
         status: 'planning',
@@ -129,7 +133,76 @@ export class PlanTripsService {
     return this.plan.planTrip(trip, await this.plan.loadLookup(), depotId as Depot);
   }
 
-  /** Waiting orders of the trip's brand and district that the rules let onto it, oldest waits first. */
+  /**
+   * Take a trip off the plan: its orders go back to the queue and the trip is deleted.
+   * Only a trip still being planned can go; once sent, loaders and drivers are working from it.
+   */
+  async remove(me: Me, tripId: string): Promise<RemoveTripResult> {
+    const trip = await this.edit.loadTrip(me, tripId);
+    if (trip.status !== 'planning') {
+      throw new DomainError(
+        'PLAN_LOCKED',
+        `${trip.vehicle.plate ?? trip.vehicleId} · Trip ${trip.tripNumber} has been sent to the dock and driver, so it cannot be removed.`,
+      );
+    }
+    const orderIds = trip.stops.map((s) => s.orderId);
+    await this.prisma.$transaction(async (tx) => {
+      if (orderIds.length > 0) {
+        await tx.order.updateMany({ where: { id: { in: orderIds } }, data: { status: 'waiting' } });
+      }
+      // Stops go with the trip (cascade).
+      await tx.trip.delete({ where: { id: trip.id } });
+    });
+    return { tripId: trip.id, ordersReturned: orderIds.length };
+  }
+
+  /** The depot's stores in a district, optionally of one brand, A to Z. */
+  async stores(me: Me, district: string, brand?: string): Promise<PlanStore[]> {
+    if (!district?.trim()) throw new BadRequestException('district is required');
+    if (brand && !['Fresh', 'Style', 'Tech'].includes(brand)) {
+      throw new BadRequestException('brand must be Fresh, Style or Tech');
+    }
+    const rows = await this.prisma.store.findMany({
+      where: {
+        depotId: this.edit.depotOf(me),
+        district: { name: { equals: district.trim(), mode: 'insensitive' } },
+        ...(brand ? { brand: brand as PlanStore['brand'] } : {}),
+      },
+      include: { district: true },
+    });
+    return rows
+      .map((s) => ({
+        id: s.id,
+        name: s.displayName ?? s.id,
+        brand: s.brand,
+        district: s.district.name,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * District rows for the picked names, in the order picked (the first is the trip's main district).
+   * A district of Sri Lanka the depot does not serve yet is added as not served, without travel data.
+   */
+  private async resolveDistricts(names: string[]) {
+    const keys = [...new Set(names.map(districtKey))];
+    const rows = await this.prisma.district.findMany();
+    const known = allDistricts(rows.map((r) => r.name));
+    if (keys.length === 0 || keys.some((k) => !known.some((d) => districtKey(d) === k))) {
+      throw new BadRequestException('Pick one or more districts of Sri Lanka');
+    }
+    return Promise.all(
+      keys.map(
+        (k) =>
+          rows.find((r) => districtKey(r.name) === k) ??
+          this.prisma.district.create({
+            data: { name: known.find((d) => districtKey(d) === k)!, served: false },
+          }),
+      ),
+    );
+  }
+
+  /** Waiting orders of the trip's brand and districts that the rules let onto it, oldest waits first. */
   async suggestions(me: Me, tripId: string): Promise<TripSuggestion[]> {
     const trip = await this.edit.loadTrip(me, tripId);
     const lookup = await this.plan.loadLookup();
@@ -140,7 +213,10 @@ export class PlanTripsService {
         status: 'waiting',
         stop: null,
         brand: trip.brand,
-        store: { depotId: trip.depotId, districtId: trip.districtId },
+        store: {
+          depotId: trip.depotId,
+          districtId: { in: [trip.districtId, ...trip.extraDistricts.map((d) => d.id)] },
+        },
       },
       include: orderInclude,
     });

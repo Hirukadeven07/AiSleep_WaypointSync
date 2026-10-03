@@ -69,6 +69,7 @@ export function toneOf(trip: Pick<LiveTrip, 'live' | 'lateMin'>): Tone {
     completed: { label: 'Completed', chip: 'bg-info/[0.12] text-info', fill: 'bg-success' },
     loading: { label: 'Loading', chip: 'bg-info/[0.12] text-info', fill: 'bg-slate' },
     assigned: { label: 'Assigned', chip: 'bg-muted/[0.12] text-muted', fill: 'bg-faint' },
+    planned: { label: 'Planned', chip: 'bg-olive-tint text-olive-ink', fill: 'bg-faint' },
   };
   return t[trip.live];
 }
@@ -87,5 +88,7 @@ export function lastUpdate(t: LiveTrip): string {
   }
   if (t.lastPlace && t.lastAt) return `${t.lastPlace} · ${timeOf(t.lastAt)}`;
   if (t.lastAt) return timeOf(t.lastAt);
+  if (t.live === 'planned') return 'Not sent to the dock yet';
+  if (t.live === 'assigned') return 'Sent to the dock and driver';
   return '';
 }

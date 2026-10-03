@@ -11,6 +11,7 @@ import { OrderQueue } from './OrderQueue';
 import { PlanHeader, SummaryStrip } from './PlanHeader';
 import { PlanToast } from './PlanToast';
 import { PublishModal, publishPlan } from './PublishModal';
+import { RemoveTripModal } from './RemoveTripModal';
 import { TripList } from './TripList';
 import { PlanMap } from '@/components/map/PlanMap';
 import { usePlan } from './usePlan';
@@ -105,6 +106,7 @@ export function PlanBoard() {
       {modal?.kind === 'newTrip' && <NewTripModal edit={edit} />}
       {modal?.kind === 'publish' && <PublishModal check={modal.check} edit={edit} />}
       {modal?.kind === 'auto' && <AutoAssignModal proposal={modal.proposal} edit={edit} />}
+      {modal?.kind === 'removeTrip' && <RemoveTripModal trip={modal.trip} edit={edit} />}
       {edit.toast && <PlanToast toast={edit.toast} />}
     </div>
   );
