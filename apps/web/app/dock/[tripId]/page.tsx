@@ -116,7 +116,6 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
   const locked = sheet.lock.locked;
   const added = new Set(sheet.lock.added);
   const allDone = allLines.length > 0 && doneCount === allLines.length;
-  const addedNames = sheet.loadOrder.filter((s) => added.has(s.stopId)).map((s) => s.storeName);
 
   return (
     <section className="space-y-md pb-[96px]">
@@ -140,8 +139,12 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
       {locked && (
         <PlanLockBanner
           lock={sheet.lock}
-          addedNames={addedNames}
           busy={busy}
+          onTakenOff={(orderId) =>
+            run(() =>
+              api<LoadSheet>(`/loads/${tripId}/taken-off`, { method: 'POST', body: { orderId } }),
+            )
+          }
           onAcknowledge={() =>
             run(
               () => api<LoadSheet>(`/loads/${tripId}/ack`, { method: 'POST' }),
@@ -189,7 +192,8 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
             key={stop.stopId}
             stop={stop}
             loadIndex={i + 1}
-            isNew={added.has(stop.stopId)}
+            // Added by a plan change: marked from the lock until departure.
+            isNew={stop.isNew || added.has(stop.stopId)}
             ticks={ticks}
             flagged={flaggedLines}
             onTick={toggle}

@@ -15,11 +15,8 @@ import {
   TextInput,
 } from './parts';
 import { useSignIn } from './useSignIn';
+import { DEPOTS } from '@/lib/depots';
 
-const DEPOTS = [
-  { id: 'depo1', name: 'Peliyagoda' },
-  { id: 'depo2', name: 'Kandy' },
-];
 const CODE_LENGTH = 6;
 
 export function LoaderLogin() {

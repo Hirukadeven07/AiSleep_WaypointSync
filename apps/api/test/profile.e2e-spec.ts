@@ -138,6 +138,25 @@ describe('profile: depot, password and notification preferences (e2e)', () => {
         .expect(401);
     });
 
+    it('lets a loader with no PIN set a first one, and refuses a missing current password', async () => {
+      await prisma.user.update({ where: { loginId: 'sampath' }, data: { pinHash: null } });
+      const dock = await loader();
+      await dock.post('/api/me/password').send({ newSecret: '2468' }).expect(200);
+      const saved = await prisma.user.findUniqueOrThrow({ where: { loginId: 'sampath' } });
+      expect(saved.pinHash).toBeTruthy();
+      // With a PIN now set, the current one is required.
+      const again = await dock.post('/api/me/password').send({ newSecret: '1357' }).expect(400);
+      expect(again.body.reason).toBe('WRONG_CURRENT_SECRET');
+
+      // The store manager's password is not changed by the other tests here.
+      const shop = await store();
+      const missing = await shop
+        .post('/api/me/password')
+        .send({ newSecret: 'waypoint-2027' })
+        .expect(400);
+      expect(missing.body.reason).toBe('WRONG_CURRENT_SECRET');
+    });
+
     it('changes the driver PIN and keeps PINs to 4-6 digits', async () => {
       const phone = await driver();
       const wrong = await phone

@@ -7,6 +7,7 @@ import {
   type CatalogueItem,
   type ItemType,
   type PlaceOrderRequest,
+  type StockLevel,
   type StoreHome,
   type StoreOrderDetail,
   type StoreOrderView,
@@ -79,6 +80,10 @@ export default function OrderPage() {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [placed, setPlaced] = useState<StoreOrderView>();
+  // S3: the store can mark an order urgent, with how short it is and a note for dispatch.
+  const [urgent, setUrgent] = useState(false);
+  const [stockLevel, setStockLevel] = useState<StockLevel>();
+  const [urgentNote, setUrgentNote] = useState('');
   // The placed order whose "Cancel order" is waiting for a yes or no.
   const [confirmId, setConfirmId] = useState<string>();
   const [cancellingId, setCancellingId] = useState<string>();
@@ -215,10 +220,16 @@ export default function OrderPage() {
     setBusy(true);
     const body: PlaceOrderRequest = {
       lines: picks.map((c) => ({ catalogueId: c.id, qty: qty[c.id]! })),
+      ...(urgent && stockLevel
+        ? { urgent: true, stockLevel, urgentNote: urgentNote.trim() || undefined }
+        : {}),
     };
     try {
       setPlaced(await api<StoreOrderView>('/store/orders', { method: 'POST', body }));
       setQty({});
+      setUrgent(false);
+      setStockLevel(undefined);
+      setUrgentNote('');
       setRecent(await api<StoreOrderDetail[]>('/store/orders/recent').catch(() => recent));
       requestStoreRefresh();
     } catch (e) {
@@ -361,9 +372,59 @@ export default function OrderPage() {
               {units === 1 ? 'unit' : 'units'} · {Math.round(weight * 10) / 10} kg ·{' '}
               {Math.round(volume * 1000) / 1000} m³
             </p>
+            <div className="space-y-sm rounded-input bg-bg p-md">
+              <label className="flex items-center gap-sm text-body font-semibold text-ink">
+                <input
+                  type="checkbox"
+                  checked={urgent}
+                  onChange={(e) => setUrgent(e.target.checked)}
+                  className="size-5 accent-danger"
+                />
+                Mark as urgent
+              </label>
+              {urgent && (
+                <>
+                  <div className="flex gap-xs" role="radiogroup" aria-label="How short are you?">
+                    {(
+                      [
+                        ['out_of_stock', 'Out of stock'],
+                        ['running_low', 'Running low'],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={stockLevel === value}
+                        onClick={() => setStockLevel(value)}
+                        className={`flex-1 rounded-pill border px-md py-sm text-label font-semibold ${
+                          stockLevel === value
+                            ? 'border-danger bg-danger-tint text-danger'
+                            : 'border-mist bg-surface text-ink'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={urgentNote}
+                    maxLength={200}
+                    onChange={(e) => setUrgentNote(e.target.value)}
+                    placeholder="Note for dispatch (optional)"
+                    aria-label="Note for dispatch"
+                    className="w-full rounded-input border border-mist bg-surface px-md py-sm text-body text-ink"
+                  />
+                  {!stockLevel && (
+                    <p className="text-caption text-danger">Pick out of stock or running low.</p>
+                  )}
+                </>
+              )}
+            </div>
             <Button
               className="w-full"
-              disabled={closed || busy || picks.length === 0}
+              disabled={closed || busy || picks.length === 0 || (urgent && !stockLevel)}
               onClick={place}
             >
               {busy ? 'Placing…' : upcoming.length > 0 ? 'Place another order' : 'Place order'}

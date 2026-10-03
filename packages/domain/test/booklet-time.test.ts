@@ -9,14 +9,14 @@ describe('computeTripMinutes from CSV lookups', () => {
       stop({ id: 'G2', brand: 'Fresh', district: 'Gampaha', dockType: 'rear_dock' }, { id: 'OG2' }),
       stop({ id: 'G3', brand: 'Fresh', district: 'Gampaha', dockType: 'street' }, { id: 'OG3' }),
     ];
-    expect(computeTripMinutes(stops, lookup, 'Peliyagoda')).toBe(101);
+    expect(computeTripMinutes(stops, lookup, 'depo1')).toBe(101);
   });
 
   it('Colombo with 4 street stops = 112 minutes (Fresh)', () => {
     const stops = [1, 2, 3, 4].map((n) =>
       stop({ id: `C${n}`, brand: 'Fresh', district: 'Colombo', dockType: 'street' }, { id: `OC${n}` }),
     );
-    expect(computeTripMinutes(stops, lookup, 'Peliyagoda')).toBe(112);
+    expect(computeTripMinutes(stops, lookup, 'depo1')).toBe(112);
   });
 
   it('empty trip is 0 minutes', () => {

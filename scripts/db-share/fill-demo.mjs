@@ -192,7 +192,16 @@ try {
       ORDER BY "districtId", id
     `)
   ).rows;
-  const day = '2026-10-04';
+  // Tomorrow in Asia/Colombo: the plan board always shows the next day.
+  const colomboToday = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Colombo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(process.env.DEMO_NOW ? new Date(process.env.DEMO_NOW) : new Date());
+  const next = new Date(`${colomboToday}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const day = next.toISOString().slice(0, 10);
   let made = 0;
   for (let i = 0; i < 24 && placed.length > 0; i++) {
     const store = placed[i % placed.length];
@@ -545,13 +554,13 @@ try {
   await c.query('COMMIT');
   const counts = await c.query(`
     SELECT
-      (SELECT COUNT(*) FROM "Order" WHERE status = 'waiting' AND "deliveryDate" = '2026-10-04') AS waiting,
+      (SELECT COUNT(*) FROM "Order" WHERE status = 'waiting' AND "deliveryDate" = $1::date) AS waiting,
       (SELECT COUNT(*) FROM "Store" WHERE address IS NOT NULL) AS stores,
       (SELECT COUNT(*) FROM "RouteLeg") AS legs,
       (SELECT COUNT(*) FROM "LoadingJob") AS jobs,
       (SELECT COUNT(*) FROM "StoreReceipt") AS receipts,
       (SELECT COUNT(*) FROM "LocationPing") AS pings
-  `);
+  `, [day]);
   console.log(counts.rows[0], 'orders inserted', made);
 } catch (err) {
   await c.query('ROLLBACK');
