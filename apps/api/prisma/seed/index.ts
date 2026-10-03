@@ -13,6 +13,7 @@ import { seedTeamErd } from './team-erd';
 import { seedDispatchDemo } from './dispatch-demo';
 import { seedDepotOrders } from './depot-orders';
 import { seedDepotTrips } from './depot-trips';
+import { linkDemoDriver, seedLicenceExpiry, seedSpineDemo } from './spine-demo';
 
 const prisma = new PrismaClient();
 
@@ -357,6 +358,13 @@ async function warnIfCsvEmpty() {
   }
 }
 
+/** Tomorrow's spine demo day, today's trips for the demo driver, and licence expiry dates. */
+async function seedDemoDay() {
+  await seedSpineDemo(prisma);
+  await linkDemoDriver(prisma);
+  await seedLicenceExpiry(prisma);
+}
+
 async function main() {
   const reset = process.env.SEED_RESET === '1';
   const dir = dataDir();
@@ -368,6 +376,8 @@ async function main() {
     await fillPlannerMinutes(prisma);
     await fillStoreLocations(prisma);
     await fillNumberPlates(prisma);
+    // The four demo logins are recreated on every seed, so a copied database always has them.
+    await seedUsers();
     await seedOutletManagers();
     await seedFleetDrivers();
     await seedFleetLoaders();
@@ -376,6 +386,7 @@ async function main() {
     await seedOutOfServiceDemo();
     await seedDepotOrders(prisma);
     await seedDepotTrips(prisma);
+    await seedDemoDay();
     return;
   }
 
@@ -403,6 +414,7 @@ async function main() {
   await seedOutOfServiceDemo();
   await seedDepotOrders(prisma);
   await seedDepotTrips(prisma);
+  await seedDemoDay();
   console.log('[seed] done');
 }
 
