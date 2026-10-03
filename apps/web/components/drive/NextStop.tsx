@@ -332,6 +332,22 @@ export function NextStop() {
 
       {!online && <OfflineBanner />}
 
+      {phase === 'travel' && AT_DEPOT.has(trip.status) && (
+        <section
+          className="flex flex-col gap-1 rounded-card bg-surface p-4"
+          aria-label="Waiting for the loader"
+          role="status"
+        >
+          <p className="text-[17px] font-semibold leading-[22px] text-ink">
+            Waiting for the loader
+          </p>
+          <p className="text-[14px] leading-5 text-muted">
+            You can leave once the loader confirms the truck is loaded. This screen updates on its
+            own.
+          </p>
+        </section>
+      )}
+
       {phase === 'waiting' && (
         <section
           className={`flex flex-col items-center gap-2 rounded-card p-5 text-center ${
