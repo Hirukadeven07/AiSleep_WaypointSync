@@ -9,10 +9,19 @@ export function PageTitle({ eyebrow, title }: { eyebrow?: string; title: string 
   return (
     <div>
       {eyebrow && <p className="text-eyebrow uppercase text-muted">{eyebrow}</p>}
-      <h1 className="text-heading font-semibold text-ink">{title}</h1>
+      <h1 className="text-heading font-semibold text-ink lg:text-[32px] lg:leading-10">{title}</h1>
     </div>
   );
 }
+
+/**
+ * Desktop split, after the driver screens: one column on the phone, a main column and a side
+ * panel from `lg`. A SPLIT_COL is invisible on the phone (its children sit straight in the one
+ * column, placed by their `order-*` class) and becomes a real column from `lg`.
+ */
+export const SPLIT =
+  'flex flex-col gap-md lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-6 xl:grid-cols-[minmax(0,1fr)_380px]';
+export const SPLIT_COL = 'contents lg:flex lg:min-w-0 lg:flex-col lg:gap-md';
 
 /** Server minutes-since-midnight, advanced locally once a minute so countdowns keep moving. */
 export function useServerMinutes(serverMin: number | undefined) {
