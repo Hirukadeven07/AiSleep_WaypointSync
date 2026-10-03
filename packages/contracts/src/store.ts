@@ -5,6 +5,18 @@ import type { FlagType } from './dock';
 /** Orders for tomorrow are refused from 16:00 Asia/Colombo. */
 export const ORDER_CUTOFF_MIN = 16 * 60;
 
+/**
+ * Goods that may share one order. An order holds items of a single group, so a
+ * Style or Tech order never needs a refrigerated truck. Chilled food and fresh
+ * goods travel together, as on a Fresh run.
+ */
+export const ORDER_GROUP: Record<ItemType, Brand> = {
+  chilled_food: 'Fresh',
+  fresh: 'Fresh',
+  style: 'Style',
+  tech: 'Tech',
+};
+
 export interface CatalogueItem {
   id: string;
   name: string;

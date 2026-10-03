@@ -1,13 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import type {
-  CatalogueItem,
-  ItemType,
-  PlaceOrderRequest,
-  StoreHome,
-  StoreOrderDetail,
-  StoreOrderView,
+import {
+  ORDER_GROUP,
+  type Brand,
+  type CatalogueItem,
+  type ItemType,
+  type PlaceOrderRequest,
+  type StoreHome,
+  type StoreOrderDetail,
+  type StoreOrderView,
 } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { messageOf, reasonOf } from '@/lib/api-error';
@@ -27,17 +29,30 @@ const ITEM_TYPE_LABEL: Record<ItemType, string> = {
   tech: 'Tech',
 };
 
+/** How an order group reads to the manager. One order holds one group (ORDER_GROUP). */
+const GROUP_LABEL: Record<Brand, string> = {
+  Fresh: 'fresh and chilled food',
+  Style: 'Style',
+  Tech: 'Tech',
+};
+
 const MAX_QTY = 500;
 const draftKey = (storeId: string) => `ws_store_draft_${storeId}`;
 
-/** The order being built, as it was left on this phone. Unknown items and bad counts are dropped. */
+/**
+ * The order being built, as it was left on this phone. Unknown items and bad counts are
+ * dropped, and so is anything outside the first item's group: one order holds one group.
+ */
 function readDraft(storeId: string, catalogue: CatalogueItem[]): Record<string, number> {
   try {
     const raw = JSON.parse(readLocal(draftKey(storeId)) ?? '{}') as Record<string, unknown>;
     const draft: Record<string, number> = {};
+    let group: Brand | undefined;
     for (const c of catalogue) {
       const n = raw[c.id];
-      if (typeof n === 'number' && Number.isInteger(n) && n > 0) draft[c.id] = Math.min(MAX_QTY, n);
+      if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) continue;
+      group ??= ORDER_GROUP[c.type];
+      if (ORDER_GROUP[c.type] === group) draft[c.id] = Math.min(MAX_QTY, n);
     }
     return draft;
   } catch {
@@ -103,23 +118,38 @@ export default function OrderPage() {
       return n > 0 ? { ...rest, [id]: n } : rest;
     });
 
+  // The first item picked decides the order's group; the other groups lock until it is placed or cleared.
+  const group = picks[0] ? ORDER_GROUP[picks[0].type] : null;
+  const lockedType = (t: ItemType) => group !== null && ORDER_GROUP[t] !== group;
+
   const savedSet = new Set(saved);
   const savedCount = catalogue.filter((c) => savedSet.has(c.id)).length;
   const types = [...new Set(catalogue.map((c) => c.type))];
   const q = query.trim().toLowerCase();
-  const visible = catalogue.filter(
+  const matches = catalogue.filter(
     (c) =>
       (view === 'all' || savedSet.has(c.id)) &&
       (type === 'all' || c.type === type) &&
       (!q || `${c.name} ${c.pack} ${c.id}`.toLowerCase().includes(q)),
   );
+  // What can still be added comes first; the locked groups follow, greyed out.
+  const visible = [
+    ...matches.filter((c) => !lockedType(c.type)),
+    ...matches.filter((c) => lockedType(c.type)),
+  ];
 
   // Orders already placed for a coming day, and the latest order as the source for "order again".
   const upcoming = recent.filter(
     (o) => o.deliveryDate > home.today && (o.status === 'waiting' || o.status === 'planned'),
   );
   const last = recent[0];
-  const again = (last?.lines ?? []).filter((l) => catalogue.some((c) => c.id === l.catalogueId));
+  // Lines of the last order that are still in the catalogue, kept to its first line's group.
+  const againItems = (last?.lines ?? []).flatMap((l) => {
+    const item = catalogue.find((c) => c.id === l.catalogueId);
+    return item ? [{ item, qty: l.qty }] : [];
+  });
+  const againGroup = againItems[0] ? ORDER_GROUP[againItems[0].item.type] : null;
+  const again = againItems.filter((l) => ORDER_GROUP[l.item.type] === againGroup);
 
   async function toggleSaved(item: CatalogueItem) {
     const was = saved;
@@ -134,9 +164,16 @@ export default function OrderPage() {
   }
 
   function orderAgain() {
+    if (group !== null && againGroup !== null && group !== againGroup) {
+      setToast({
+        message: `This order is ${GROUP_LABEL[group]}. Place or clear it before ordering ${GROUP_LABEL[againGroup]} again.`,
+        tone: 'warning',
+      });
+      return;
+    }
     setQty((p) => {
       const next = { ...p };
-      for (const l of again) next[l.catalogueId!] = Math.min(MAX_QTY, l.qty);
+      for (const l of again) next[l.item.id] = Math.min(MAX_QTY, l.qty);
       return next;
     });
     setToast({
@@ -168,7 +205,7 @@ export default function OrderPage() {
 
   return (
     <section className="space-y-md pb-lg">
-      <PageTitle eyebrow={`Order · ${home.brand}`} title="Order for tomorrow" />
+      <PageTitle eyebrow="Order" title="Order for tomorrow" />
 
       {closed ? (
         <div className="space-y-xs rounded-card bg-border p-lg">
@@ -234,11 +271,21 @@ export default function OrderPage() {
           </Chip>
           {types.length > 1 &&
             types.map((t) => (
-              <Chip key={t} active={type === t} onClick={() => setType(type === t ? 'all' : t)}>
+              <Chip
+                key={t}
+                active={type === t}
+                disabled={lockedType(t) && type !== t}
+                onClick={() => setType(type === t ? 'all' : t)}
+              >
                 {ITEM_TYPE_LABEL[t]}
               </Chip>
             ))}
         </div>
+        {group !== null && (
+          <p className="text-label text-muted">
+            This order is {GROUP_LABEL[group]}. Place or clear it to order from another category.
+          </p>
+        )}
         {!closed && again.length > 0 && (
           <button
             type="button"
@@ -276,6 +323,7 @@ export default function OrderPage() {
       >
         {visible.map((c) => {
           const starred = savedSet.has(c.id);
+          const locked = lockedType(c.type);
           return (
             <li key={c.id} className="flex items-center gap-xs rounded-card bg-surface p-md">
               <button
@@ -287,7 +335,7 @@ export default function OrderPage() {
               >
                 {starred ? '★' : '☆'}
               </button>
-              <div className="min-w-0 flex-1">
+              <div className={`min-w-0 flex-1 ${locked ? 'opacity-50' : ''}`}>
                 <p className="break-words text-body font-semibold text-ink">{c.name}</p>
                 <p className="text-caption text-muted">
                   {ITEM_TYPE_LABEL[c.type]} · {c.pack}
@@ -298,7 +346,7 @@ export default function OrderPage() {
                 name={c.name}
                 value={qty[c.id] ?? 0}
                 max={MAX_QTY}
-                disabled={closed}
+                disabled={closed || locked}
                 onChange={(n) => setItemQty(c.id, n)}
               />
             </li>
@@ -360,10 +408,12 @@ export default function OrderPage() {
 
 function Chip({
   active,
+  disabled = false,
   onClick,
   children,
 }: {
   active: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -371,8 +421,9 @@ function Chip({
     <button
       type="button"
       aria-pressed={active}
+      disabled={disabled}
       onClick={onClick}
-      className={`min-h-[36px] rounded-pill px-md text-label ${
+      className={`min-h-[36px] rounded-pill px-md text-label disabled:opacity-40 ${
         active ? 'bg-primary text-on-primary' : 'border border-mist text-ink'
       }`}
     >
