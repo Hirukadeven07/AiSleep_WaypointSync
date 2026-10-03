@@ -28,7 +28,7 @@ export function RoleChooser() {
 
   return (
     <main className="min-h-screen bg-surface p-4 lg:flex lg:gap-4">
-      <section className="relative flex min-h-[420px] flex-col overflow-hidden rounded-hero bg-ink px-6 py-7 sm:px-10 lg:min-h-[calc(100vh-32px)] lg:w-[540px] lg:shrink-0">
+      <section className="relative flex min-h-[420px] flex-col overflow-hidden rounded-hero bg-scrim px-6 py-7 sm:px-10 lg:min-h-[calc(100vh-32px)] lg:w-[540px] lg:shrink-0">
         <SkylinePhoto variant="hero" />
         <nav className="relative flex h-11 items-center gap-3">
           <div className="flex items-center gap-[10px]">

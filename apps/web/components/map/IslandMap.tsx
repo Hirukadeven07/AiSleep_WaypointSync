@@ -249,7 +249,7 @@ function markerElement(marker: IslandMarker) {
   for (const badge of marker.badges ?? []) {
     const chip = document.createElement('span');
     chip.className = `absolute -top-1.5 flex size-3.5 items-center justify-center rounded-full text-[8px] font-bold leading-none text-surface ${
-      badge === 'V' ? 'bg-ink' : 'bg-chilled'
+      badge === 'V' ? 'bg-scrim' : 'bg-chilled'
     }`;
     chip.style.right = `${-6 + offset}px`;
     chip.textContent = badge;

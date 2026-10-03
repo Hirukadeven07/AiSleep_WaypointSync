@@ -17,7 +17,7 @@ export function PlanToast({ toast }: { toast: ToastState }) {
         <Icon name={toast.kind === 'ok' ? 'check' : 'alert'} size={14} />
       </span>
       <span className="flex flex-col gap-px">
-        <span className="text-[14px] font-bold leading-5 text-bg">{toast.title}</span>
+        <span className="text-[14px] font-bold leading-5 text-on-primary">{toast.title}</span>
         {(toast.sub || toast.undo) && (
           <span className="text-[12px] leading-[17px] text-sand">
             {toast.sub}

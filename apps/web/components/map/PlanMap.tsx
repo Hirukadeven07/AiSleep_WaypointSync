@@ -99,7 +99,7 @@ export function PlanMap({
         id: `depot:${data.depot.id}`,
         lat: data.depot.lat,
         lng: data.depot.lng,
-        dotClass: 'bg-ink',
+        dotClass: 'bg-scrim',
         title: `${data.depot.name} depot`,
         size: 'depot',
       });
@@ -109,7 +109,7 @@ export function PlanMap({
         id: 'draft',
         lat: draft.lat,
         lng: draft.lng,
-        dotClass: 'bg-ink',
+        dotClass: 'bg-scrim',
         title: placing?.storeName ?? 'New location',
         selected: true,
         size: 'pin',
@@ -310,7 +310,7 @@ function Legend() {
           Chilled
         </li>
         <li className={row}>
-          <span className="flex size-3.5 items-center justify-center rounded-full bg-ink text-[8px] font-bold text-surface">
+          <span className="flex size-3.5 items-center justify-center rounded-full bg-scrim text-[8px] font-bold text-surface">
             V
           </span>
           Van only

@@ -53,7 +53,7 @@ function StopStrip({ stops, activeIdx }: { stops: StopSummary[]; activeIdx: numb
                 done
                   ? 'bg-olive-ink text-white'
                   : active
-                    ? 'bg-primary text-bg shadow-[0_6px_14px_0_rgba(26,38,59,0.25)]'
+                    ? 'bg-primary text-on-primary shadow-[0_6px_14px_0_rgba(26,38,59,0.25)]'
                     : 'bg-surface text-ink'
               }`}
             >
@@ -243,7 +243,7 @@ export default function DriverHome() {
                 </div>
                 <Link
                   href="/drive/stops"
-                  className="flex w-full items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[15px] font-semibold leading-5 text-bg"
+                  className="flex w-full items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[15px] font-semibold leading-5 text-on-primary"
                 >
                   View trip
                 </Link>

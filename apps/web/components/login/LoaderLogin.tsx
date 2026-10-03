@@ -45,17 +45,17 @@ export function LoaderLogin() {
         <SkylinePhoto variant="panel" />
         <div className="relative flex items-center gap-3">
           <img alt="" src="/landing/logo-mark.svg" className="size-[39.6px]" />
-          <p className="text-[20px] font-semibold text-bg">Waypoint Sync</p>
+          <p className="text-[20px] font-semibold text-on-primary">Waypoint Sync</p>
         </div>
         <div className="flex-1" />
-        <h2 className="relative text-[32px] font-semibold leading-[1.15] text-bg md:text-[40px] md:leading-[46px]">
+        <h2 className="relative text-[32px] font-semibold leading-[1.15] text-on-primary md:text-[40px] md:leading-[46px]">
           Dock login
         </h2>
         <p className="relative text-[15px] leading-[22px] text-sand">
           Shared tablet at the loading dock. Everyone on the loader team knows this password.
         </p>
         <div className="relative">
-          <span className="inline-flex rounded-pill border border-slate px-4 py-2 text-[13px] font-medium text-bg">
+          <span className="inline-flex rounded-pill border border-slate px-4 py-2 text-[13px] font-medium text-on-primary">
             Loader
           </span>
         </div>

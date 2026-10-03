@@ -46,7 +46,7 @@ export function DistrictPicker({
           {value.length > 0 ? value.join(', ') : 'Pick districts'}
         </span>
         {value.length > 1 && (
-          <span className="rounded-pill bg-primary px-[7px] text-[11px] font-semibold leading-[17px] text-bg">
+          <span className="rounded-pill bg-primary px-[7px] text-[11px] font-semibold leading-[17px] text-on-primary">
             {value.length}
           </span>
         )}
@@ -92,7 +92,7 @@ export function DistrictPicker({
                       <span
                         aria-hidden
                         className={`flex size-4 shrink-0 items-center justify-center rounded-[4px] ${
-                          on ? 'bg-primary text-bg' : 'ring-1 ring-inset ring-mist'
+                          on ? 'bg-primary text-on-primary' : 'ring-1 ring-inset ring-mist'
                         }`}
                       >
                         {on && <Icon name="check" size={12} />}

@@ -187,7 +187,7 @@ export function NoticesBell() {
       >
         <Icon name="bell" size={18} />
         {unseen > 0 && (
-          <span className="absolute -right-1 -top-1 flex min-w-[18px] items-center justify-center rounded-pill bg-danger px-1 text-[11px] font-semibold leading-[18px] text-bg">
+          <span className="absolute -right-1 -top-1 flex min-w-[18px] items-center justify-center rounded-pill bg-danger px-1 text-[11px] font-semibold leading-[18px] text-on-primary">
             {unseen > 99 ? '99+' : unseen}
           </span>
         )}
@@ -224,7 +224,7 @@ export function NoticesBell() {
                   aria-selected={tab === t.id}
                   onClick={() => setTab(t.id)}
                   className={`whitespace-nowrap rounded-pill px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] ${
-                    tab === t.id ? 'bg-primary text-bg' : 'bg-bg text-ink'
+                    tab === t.id ? 'bg-primary text-on-primary' : 'bg-bg text-ink'
                   }`}
                 >
                   {t.label} · {data?.counts[t.id] ?? 0}

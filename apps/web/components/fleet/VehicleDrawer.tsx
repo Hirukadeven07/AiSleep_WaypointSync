@@ -207,7 +207,7 @@ export function VehicleDrawer({
           <button
             type="button"
             onClick={onBack}
-            className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-bg"
+            className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-on-primary"
           >
             Mark back in service
           </button>
@@ -223,7 +223,7 @@ export function VehicleDrawer({
             {v.trips.some((t) => t.tone !== 'planned' && t.tone !== 'completed') && (
               <Link
                 href="/dispatch/board"
-                className="flex min-w-px flex-1 items-center justify-center whitespace-nowrap rounded-pill bg-primary px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-bg"
+                className="flex min-w-px flex-1 items-center justify-center whitespace-nowrap rounded-pill bg-primary px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-on-primary"
               >
                 View live trip
               </Link>

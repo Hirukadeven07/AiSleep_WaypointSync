@@ -173,7 +173,7 @@ export function TripDrawer({
         type="button"
         aria-label="Close trip details"
         onClick={onClose}
-        className="absolute inset-0 bg-ink/35"
+        className="absolute inset-0 bg-scrim/35"
       />
       <aside
         role="dialog"
@@ -293,7 +293,7 @@ export function TripDrawer({
               <button
                 type="button"
                 onClick={onNotify}
-                className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-bg"
+                className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-on-primary"
               >
                 Notify affected stores
               </button>
@@ -324,7 +324,7 @@ export function TripDrawer({
                 <button
                   type="button"
                   onClick={() => onOpenTrip(nextTripId)}
-                  className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-bg"
+                  className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-on-primary"
                 >
                   View Trip {trip.nextTrip.tripNumber}
                 </button>
@@ -339,7 +339,7 @@ export function TripDrawer({
               <Call phone={trip.driverPhone} />
               <Link
                 href="/dispatch/incidents"
-                className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-bg"
+                className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-on-primary"
               >
                 {trip.live === 'breakdown' ? 'Open incident' : 'Report issue'}
               </Link>
@@ -353,7 +353,7 @@ export function TripDrawer({
 
 function Call({ phone, primary = false }: { phone: string | null; primary?: boolean }) {
   const cls = `flex min-w-px flex-1 items-center justify-center rounded-pill px-[18px] py-3 text-[14px] font-semibold leading-5 ${
-    primary ? 'bg-primary text-bg' : 'border border-border bg-surface text-ink'
+    primary ? 'bg-primary text-on-primary' : 'border border-border bg-surface text-ink'
   }`;
   return phone ? (
     <a href={`tel:${phone}`} className={cls}>

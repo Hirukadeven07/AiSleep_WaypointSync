@@ -76,7 +76,7 @@ function DropHint({ check }: { check: DropCheck }) {
   const refused = !check.canDrop;
   return (
     <span
-      className={`pointer-events-none absolute right-4 top-full z-10 flex -translate-y-1/2 items-center gap-2 rounded-pill px-4 py-[10px] text-[13px] font-semibold leading-[18px] text-bg ${
+      className={`pointer-events-none absolute right-4 top-full z-10 flex -translate-y-1/2 items-center gap-2 rounded-pill px-4 py-[10px] text-[13px] font-semibold leading-[18px] text-on-primary ${
         refused ? 'bg-danger' : 'bg-primary'
       }`}
     >
@@ -168,7 +168,7 @@ function EmptyTrip({ trip, edit }: { trip: PlanTrip; edit: PlanEdit }) {
             <button
               type="button"
               onClick={() => void addAll()}
-              className="rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[17px] text-bg"
+              className="rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[17px] text-on-primary"
             >
               Add all {suggestions.length}
             </button>
@@ -381,7 +381,7 @@ function TripRow({
           <button
             type="button"
             onClick={() => onPublish(trip.id)}
-            className="flex shrink-0 items-center gap-[6px] whitespace-nowrap rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[15px] text-bg"
+            className="flex shrink-0 items-center gap-[6px] whitespace-nowrap rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[15px] text-on-primary"
           >
             <Icon name="send" size={12} />
             Publish

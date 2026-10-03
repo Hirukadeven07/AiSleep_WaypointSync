@@ -114,7 +114,7 @@ function Fact({ label, value }: { label: string; value: string }) {
 }
 
 function CallStore({ stop, primary = false }: { stop: DriverDayStop; primary?: boolean }) {
-  const look = primary ? 'bg-primary text-bg' : 'border border-border bg-surface text-ink';
+  const look = primary ? 'bg-primary text-on-primary' : 'border border-border bg-surface text-ink';
   return stop.phone ? (
     <a
       href={telHref(stop.phone)}
@@ -338,7 +338,7 @@ export function NextStop() {
         <button
           type="button"
           onClick={planLock.accept}
-          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg"
+          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-on-primary"
         >
           Accept new list
         </button>
@@ -381,7 +381,7 @@ export function NextStop() {
           type="button"
           onClick={() => void send(onBreak.end)}
           disabled={busy}
-          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg disabled:opacity-60"
+          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-on-primary disabled:opacity-60"
         >
           End break and resume
         </button>
@@ -424,7 +424,7 @@ export function NextStop() {
             type="button"
             onClick={resume}
             disabled={busy}
-            className="flex min-h-[56px] flex-1 items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg disabled:opacity-60"
+            className="flex min-h-[56px] flex-1 items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-on-primary disabled:opacity-60"
           >
             Resume trip
           </button>
@@ -534,7 +534,7 @@ export function NextStop() {
           type="button"
           onClick={arrived}
           disabled={busy}
-          className="flex min-h-[60px] items-center justify-center gap-2 rounded-pill bg-primary px-6 text-[18px] font-semibold text-bg disabled:opacity-60"
+          className="flex min-h-[60px] items-center justify-center gap-2 rounded-pill bg-primary px-6 text-[18px] font-semibold text-on-primary disabled:opacity-60"
         >
           <Icon name="pin" size={19} />
           I&apos;ve arrived
@@ -545,7 +545,7 @@ export function NextStop() {
             type="button"
             onClick={acknowledge}
             disabled={busy || phase !== 'ack'}
-            className="flex min-h-[60px] items-center justify-center gap-2 rounded-pill bg-primary px-6 text-[18px] font-semibold text-bg disabled:bg-bg disabled:text-muted"
+            className="flex min-h-[60px] items-center justify-center gap-2 rounded-pill bg-primary px-6 text-[18px] font-semibold text-on-primary disabled:bg-bg disabled:text-muted"
           >
             <Icon name="check" size={19} />
             Acknowledge receipt

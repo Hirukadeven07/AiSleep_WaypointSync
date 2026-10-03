@@ -24,7 +24,7 @@ function Pill({
       disabled={disabled}
       title={title}
       className={`flex shrink-0 items-center gap-2 rounded-pill px-[18px] py-[11px] text-[14px] font-semibold leading-5 ${
-        primary ? 'bg-primary text-bg' : 'border border-border bg-surface text-ink'
+        primary ? 'bg-primary text-on-primary' : 'border border-border bg-surface text-ink'
       } ${disabled ? 'cursor-default' : ''}`}
     >
       <Icon name={icon} size={16} />

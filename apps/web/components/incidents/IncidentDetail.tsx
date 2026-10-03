@@ -340,7 +340,7 @@ export function IncidentDetail({
                 <div className="flex gap-2">
                   <Link
                     href="/dispatch/board"
-                    className="rounded-pill bg-primary px-4 py-2 text-[12px] font-semibold leading-4 text-bg"
+                    className="rounded-pill bg-primary px-4 py-2 text-[12px] font-semibold leading-4 text-on-primary"
                   >
                     View on dispatch board
                   </Link>
@@ -461,7 +461,7 @@ export function IncidentDetail({
                           onResolved,
                         )
                       }
-                      className="whitespace-nowrap rounded-pill bg-primary px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-bg disabled:opacity-50"
+                      className="whitespace-nowrap rounded-pill bg-primary px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-on-primary disabled:opacity-50"
                     >
                       {confirmText}
                     </button>
@@ -488,7 +488,7 @@ export function IncidentDetail({
                     type="button"
                     disabled={busy}
                     onClick={() => run('close')}
-                    className="whitespace-nowrap rounded-pill bg-primary px-[14px] py-2 text-[12px] font-semibold leading-4 text-bg disabled:opacity-50"
+                    className="whitespace-nowrap rounded-pill bg-primary px-[14px] py-2 text-[12px] font-semibold leading-4 text-on-primary disabled:opacity-50"
                   >
                     Mark resolved
                   </button>

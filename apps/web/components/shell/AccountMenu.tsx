@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
 import { logout } from '@/lib/session';
 import { AccountSettings } from './AccountSettings';
+import { ThemeSwitch } from './ThemeSwitch';
 
 const ROLE_LABEL: Record<Me['role'], string> = {
   dispatcher: 'Dispatcher',
@@ -128,6 +129,9 @@ export function AccountMenu({
                 <p className="text-caption text-muted">Loading your details…</p>
               )}
             </dl>
+            <div className="mb-2">
+              <ThemeSwitch />
+            </div>
             <button
               type="button"
               role="menuitem"

@@ -162,7 +162,7 @@ export function CheckRow({
     >
       <span
         className={`flex shrink-0 items-center justify-center rounded-[6px] text-[12px] font-bold ${
-          checked ? 'bg-primary text-bg' : 'border-2 border-mist bg-surface'
+          checked ? 'bg-primary text-on-primary' : 'border-2 border-mist bg-surface'
         }`}
         style={{ width: size, height: size }}
       >
