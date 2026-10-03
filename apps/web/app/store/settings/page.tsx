@@ -39,100 +39,104 @@ export default function StoreSettingsPage() {
     <section className="space-y-md">
       <PageTitle eyebrow="Settings" title="Notifications" />
 
-      <div className="space-y-md rounded-card bg-surface p-lg">
-        <Toggle
-          label="Alert me about new updates"
-          hint="A message on screen when dispatch sends something."
-          checked={settings.alerts}
-          onChange={(alerts) => {
-            update({ alerts });
-            if (alerts) void allowPopups();
-          }}
-        />
-        <Toggle
-          label="Play a sound"
-          hint="A short chime with each alert."
-          checked={settings.sound}
-          disabled={!settings.alerts}
-          onChange={(sound) => update({ sound })}
-        />
-        <p className="text-caption text-muted">{POPUP_TEXT[popup]}</p>
-        <div className="flex flex-wrap gap-sm">
-          {popup === 'default' && (
-            <button
-              type="button"
-              onClick={allowPopups}
-              className="min-h-[36px] rounded-pill border border-mist px-md text-label text-ink"
-            >
-              Allow pop-ups
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={!settings.alerts}
-            onClick={() => {
-              if (settings.sound) playChime();
-              void showPopup('Sync Store', 'This is how an alert looks.');
+      <div className="space-y-md lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0">
+        <div className="space-y-md rounded-card bg-surface p-lg">
+          <Toggle
+            label="Alert me about new updates"
+            hint="A message on screen when dispatch sends something."
+            checked={settings.alerts}
+            onChange={(alerts) => {
+              update({ alerts });
+              if (alerts) void allowPopups();
             }}
-            className="min-h-[36px] rounded-pill border border-mist px-md text-label text-ink disabled:opacity-40"
-          >
-            Test alert
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-sm rounded-card bg-surface p-lg">
-        <p className="text-title text-ink">Order cutoff reminder</p>
-        <p className="text-label text-muted">
-          Reminds you before ordering closes, when nothing is ordered for tomorrow yet.
-        </p>
-        <div className="flex gap-sm" role="radiogroup" aria-label="Order cutoff reminder">
-          {REMINDER_OPTIONS.map((min) => (
+          />
+          <Toggle
+            label="Play a sound"
+            hint="A short chime with each alert."
+            checked={settings.sound}
+            disabled={!settings.alerts}
+            onChange={(sound) => update({ sound })}
+          />
+          <p className="text-caption text-muted">{POPUP_TEXT[popup]}</p>
+          <div className="flex flex-wrap gap-sm">
+            {popup === 'default' && (
+              <button
+                type="button"
+                onClick={allowPopups}
+                className="min-h-[36px] rounded-pill border border-mist px-md text-label text-ink"
+              >
+                Allow pop-ups
+              </button>
+            )}
             <button
-              key={min}
               type="button"
-              role="radio"
-              aria-checked={settings.cutoffReminderMin === min}
-              onClick={() => update({ cutoffReminderMin: min })}
-              className={`min-h-[44px] flex-1 rounded-pill text-label font-semibold ${
-                settings.cutoffReminderMin === min
-                  ? 'bg-primary text-on-primary'
-                  : 'border border-mist text-ink'
-              }`}
+              disabled={!settings.alerts}
+              onClick={() => {
+                if (settings.sound) playChime();
+                void showPopup('Sync Store', 'This is how an alert looks.');
+              }}
+              className="min-h-[36px] rounded-pill border border-mist px-md text-label text-ink disabled:opacity-40"
             >
-              {min === 0 ? 'Off' : `${min} min before`}
+              Test alert
             </button>
+          </div>
+        </div>
+
+        <div className="space-y-sm rounded-card bg-surface p-lg">
+          <p className="text-title text-ink">Order cutoff reminder</p>
+          <p className="text-label text-muted">
+            Reminds you before ordering closes, when nothing is ordered for tomorrow yet.
+          </p>
+          <div className="flex gap-sm" role="radiogroup" aria-label="Order cutoff reminder">
+            {REMINDER_OPTIONS.map((min) => (
+              <button
+                key={min}
+                type="button"
+                role="radio"
+                aria-checked={settings.cutoffReminderMin === min}
+                onClick={() => update({ cutoffReminderMin: min })}
+                className={`min-h-[44px] flex-1 rounded-pill text-label font-semibold ${
+                  settings.cutoffReminderMin === min
+                    ? 'bg-primary text-on-primary'
+                    : 'border border-mist text-ink'
+                }`}
+              >
+                {min === 0 ? 'Off' : `${min} min before`}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-md rounded-card bg-surface p-lg">
+          <div>
+            <p className="text-title text-ink">Alert me about</p>
+            <p className="text-label text-muted">
+              A kind you switch off still appears under Updates. It does not alert or add to the
+              count.
+            </p>
+          </div>
+          {NOTICE_KINDS.map((k) => (
+            <Toggle
+              key={k.kind}
+              label={k.label}
+              hint={k.hint}
+              checked={!settings.muted.includes(k.kind)}
+              onChange={(on) =>
+                update({
+                  muted: on
+                    ? settings.muted.filter((m) => m !== k.kind)
+                    : [...settings.muted, k.kind],
+                })
+              }
+            />
           ))}
         </div>
       </div>
 
-      <div className="space-y-md rounded-card bg-surface p-lg">
-        <div>
-          <p className="text-title text-ink">Alert me about</p>
-          <p className="text-label text-muted">
-            A kind you switch off still appears under Updates. It does not alert or add to the
-            count.
-          </p>
-        </div>
-        {NOTICE_KINDS.map((k) => (
-          <Toggle
-            key={k.kind}
-            label={k.label}
-            hint={k.hint}
-            checked={!settings.muted.includes(k.kind)}
-            onChange={(on) =>
-              update({
-                muted: on
-                  ? settings.muted.filter((m) => m !== k.kind)
-                  : [...settings.muted, k.kind],
-              })
-            }
-          />
-        ))}
-      </div>
-
-      <p className="text-center text-caption text-muted">
-        Saved on this phone. Alerts work while Sync Store is open.
+      <p className="text-center text-caption text-muted lg:text-left">
+        <span className="lg:hidden">Saved on this phone.</span>
+        <span className="hidden lg:inline">Saved on this computer.</span> Alerts work while Sync
+        Store is open.
       </p>
     </section>
   );
