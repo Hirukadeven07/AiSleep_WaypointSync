@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MapModule } from '../map/map.module';
 import { PlanController } from './plan.controller';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PlanAutoService } from './plan-auto.service';
@@ -9,7 +10,7 @@ import { PlanTripsService } from './plan-trips.service';
 import { PlanService } from './plan.service';
 
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, MapModule],
   controllers: [PlanController],
   providers: [
     PlanService,
