@@ -18,6 +18,7 @@ import {
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { tellDriversPlanChanged } from '../driver/driver-notices';
+import { NoticeHub } from '../notifications/notice-hub';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { toStopView, toVehicle, tripInclude, type TripRow } from '../plan/plan.mapper';
 import { DEPART_MIN, PlanService } from '../plan/plan.service';
@@ -60,6 +61,7 @@ export class MoveStopService {
     private readonly clock: ClockService,
     private readonly plan: PlanService,
     @Inject(NOTIFIER) private readonly notifier: Notifier,
+    private readonly hub: NoticeHub,
   ) {}
 
   private depotOf(me: Me): string {
@@ -155,7 +157,7 @@ export class MoveStopService {
     const etaOf = new Map((etas ?? []).map((e) => [e.orderId, e.arriveMin]));
     const idOf = new Map([...target.stops, stop].map((s) => [s.orderId, s.id] as [string, string]));
 
-    await this.prisma.$transaction(async (tx) => {
+    const raised = await this.prisma.$transaction(async (tx) => {
       // Park every stop on a temporary sequence first so (tripId, sequence) never clashes.
       for (const [i, v] of views.entries()) {
         await tx.tripStop.update({
@@ -174,8 +176,9 @@ export class MoveStopService {
         where: { id: { in: [from.id, target.id] } },
         data: { planVersion: { increment: 1 } },
       });
-      await tellDriversPlanChanged(tx, [from.id, target.id]);
+      return tellDriversPlanChanged(tx, [from.id, target.id]);
     });
+    this.hub.publishAll(raised);
 
     const storeName = stop.order.store.displayName ?? stop.order.store.id;
     const eta = etaOf.get(stop.orderId) ?? null;

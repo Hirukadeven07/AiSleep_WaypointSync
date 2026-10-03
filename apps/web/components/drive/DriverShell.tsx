@@ -15,6 +15,7 @@ import {
 } from '@/lib/driver-cache';
 import { signOutDriver } from '@/lib/driver-sign-out';
 import { useRoadPings } from '@/lib/use-road-pings';
+import { LiveNoticeAlerts } from '@/components/shell/LiveNotices';
 import { DriverSidebar } from '@/components/shell/DriverSidebar';
 import { PhoneColumn } from '@/components/shell/PhoneColumn';
 import { PhoneTabBar } from '@/components/shell/PhoneTabBar';
@@ -185,26 +186,42 @@ function ShellInner({ children }: { children: ReactNode }) {
     );
   }
 
+  const alerts = <LiveNoticeAlerts onNotice={() => void refresh()} />;
+
   // The Figma has no frames for loading, wrong account or "no signal and nothing saved", so these
   // show only the blank canvas (and, offline, the Figma offline banner).
   if (phase === 'loading' || phase === 'no-access') {
-    return <div className="min-h-dvh bg-bg" />;
+    return (
+      <>
+        {alerts}
+        <div className="min-h-dvh bg-bg" />
+      </>
+    );
   }
   if (phase === 'offline-empty') {
     return (
-      <main className="mx-auto min-h-dvh w-full max-w-[430px] px-5 pt-6">
-        <OfflineBanner />
-      </main>
+      <>
+        {alerts}
+        <main className="mx-auto min-h-dvh w-full max-w-[430px] px-5 pt-6">
+          <OfflineBanner />
+        </main>
+      </>
     );
   }
 
   // Full-screen emergency page: no tab bar, sidebar or SOS button.
   if (isSos) {
-    return <DriverContext.Provider value={value}>{children}</DriverContext.Provider>;
+    return (
+      <DriverContext.Provider value={value}>
+        {alerts}
+        {children}
+      </DriverContext.Provider>
+    );
   }
 
   return (
     <DriverContext.Provider value={value}>
+      {alerts}
       {/* Phone column with a tab bar below 1024px; sidebar layout from 1024px (Figma desktop frames). */}
       <div className="lg:flex lg:min-h-dvh">
         {me && <DriverSidebar me={me} />}

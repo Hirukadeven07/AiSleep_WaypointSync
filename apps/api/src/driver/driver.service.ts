@@ -13,6 +13,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { buildDriverDay, DRIVER_TRIP_STATUSES, pickActiveTripId } from './driver-day.mapper';
 import { BREAK_EVENT_TYPES, foldBreaks } from './driver-breaks';
+import { NoticeHub } from '../notifications/notice-hub';
 import { alertLongWaits } from './driver-notices';
 import { ownTripWhere } from './driver-trips';
 
@@ -79,6 +80,7 @@ export class DriverService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
+    private readonly hub: NoticeHub,
   ) {}
 
   /** Today's trips for this driver (see `ownTripWhere`), plus published trips on the next few days. */
@@ -112,10 +114,12 @@ export class DriverService {
     ]);
 
     // The phone polls while the driver waits at a store, so this is where a long wait is noticed.
-    await alertLongWaits(
-      this.prisma,
-      this.clock.now(),
-      trips.map((t) => t.id),
+    this.hub.publishAll(
+      await alertLongWaits(
+        this.prisma,
+        this.clock.now(),
+        trips.map((t) => t.id),
+      ),
     );
 
     // The truck the driver is on today; their own vehicle when they have no trip.

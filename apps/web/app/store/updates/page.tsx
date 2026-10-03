@@ -8,12 +8,14 @@ import { formatTime } from '@/lib/clock';
 import { usePoll } from '@/lib/poll';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { DeferralCard, PageTitle } from '@/components/store/parts';
-import { requestStoreRefresh } from '@/components/store/settings';
+import { requestStoreRefresh, useOnStoreRefresh } from '@/components/store/settings';
 
 /** S3: deferral notices and other messages from dispatch. */
 export default function UpdatesPage() {
   const notices = usePoll(() => api<StoreNotice[]>('/store/notices'), 15_000);
   const orders = usePoll(() => api<StoreOrderView[]>('/store/orders'), 15_000);
+  useOnStoreRefresh(notices.refresh);
+  useOnStoreRefresh(orders.refresh);
   const deferred = orders.data?.filter((o) => o.status === 'deferred') ?? [];
 
   const router = useRouter();

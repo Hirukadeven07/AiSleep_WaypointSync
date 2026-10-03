@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { WAIT_ALERT_MIN } from '@waypoint/contracts';
+import { toRaisedNotice, type RaisedNotice } from '../notifications/notice-hub';
 import { tripDriverId } from './driver-trips';
 
 /**
@@ -10,7 +11,7 @@ import { tripDriverId } from './driver-trips';
 export async function tellDriversPlanChanged(
   tx: Prisma.TransactionClient,
   tripIds: string[],
-): Promise<void> {
+): Promise<RaisedNotice[]> {
   const trips = await tx.trip.findMany({
     where: { id: { in: tripIds }, status: { not: 'planning' } },
     select: {
@@ -19,10 +20,11 @@ export async function tellDriversPlanChanged(
       vehicle: { select: { driverId: true, numberPlate: true, id: true } },
     },
   });
+  const raised: RaisedNotice[] = [];
   for (const trip of trips) {
     const userId = tripDriverId(trip);
     if (!userId) continue;
-    await tx.notification.create({
+    const row = await tx.notification.create({
       data: {
         userId,
         title: `Trip ${trip.tripNumber} changed`,
@@ -30,7 +32,9 @@ export async function tellDriversPlanChanged(
         link: '/drive/next',
       },
     });
+    raised.push(toRaisedNotice(row));
   }
+  return raised;
 }
 
 /**
@@ -43,8 +47,9 @@ export async function alertLongWaits(
   db: PrismaClient | Prisma.TransactionClient,
   now: Date,
   tripIds: string[],
-): Promise<void> {
-  if (tripIds.length === 0) return;
+): Promise<RaisedNotice[]> {
+  if (tripIds.length === 0) return [];
+  const raised: RaisedNotice[] = [];
   const since = new Date(now.getTime() - WAIT_ALERT_MIN * 60_000);
   const stops = await db.tripStop.findMany({
     where: {
@@ -85,7 +90,7 @@ export async function alertLongWaits(
       select: { id: true },
     });
     for (const d of dispatchers) {
-      await db.notification.create({
+      const row = await db.notification.create({
         data: {
           userId: d.id,
           title: `Waiting ${waited} min at ${store}`,
@@ -93,6 +98,8 @@ export async function alertLongWaits(
           link: '/dispatch',
         },
       });
+      raised.push(toRaisedNotice(row));
     }
   }
+  return raised;
 }

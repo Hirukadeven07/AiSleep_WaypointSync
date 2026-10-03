@@ -27,6 +27,7 @@ import {
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { tellDriversPlanChanged } from '../driver/driver-notices';
+import { NoticeHub, type RaisedNotice } from '../notifications/notice-hub';
 import { DEPART_MIN, PlanService } from './plan.service';
 import {
   isAtDepot,
@@ -56,7 +57,13 @@ export class PlanEditService {
     private readonly prisma: PrismaService,
     private readonly plan: PlanService,
     private readonly clock: ClockService,
+    private readonly hub: NoticeHub,
   ) {}
+
+  /** Push notices that were written inside a transaction, once that transaction has committed. */
+  publishRaised(rows: RaisedNotice[]) {
+    this.hub.publishAll(rows);
+  }
 
   depotOf(me: Me): string {
     if (!me.depotId) throw new ForbiddenException('This account has no depot');
@@ -167,7 +174,7 @@ export class PlanEditService {
     const lookup = await this.plan.loadLookup();
     const depot = this.depotOf(me) as Depot;
 
-    const { fromTripId, placed, resorted, order } = await this.prisma.$transaction(async (tx) => {
+    const { fromTripId, placed, resorted, order, notices } = await this.prisma.$transaction(async (tx) => {
       const order = await this.loadOrder(me, orderId);
       const trip = await this.loadTrip(me, tripId, tx);
       PlanEditService.assertEditable(trip);
@@ -184,7 +191,13 @@ export class PlanEditService {
       let fromTripId: string | null = null;
       if (existing) {
         if (existing.tripId === tripId) {
-          return { fromTripId: null, placed: result.placedSequence, resorted: false, order };
+          return {
+            fromTripId: null,
+            placed: result.placedSequence,
+            resorted: false,
+            order,
+            notices: [] as RaisedNotice[],
+          };
         }
         const source = await this.loadTrip(me, existing.tripId, tx);
         PlanEditService.assertEditable(source);
@@ -194,10 +207,11 @@ export class PlanEditService {
         await tx.tripStop.create({ data: { tripId, orderId, sequence: 9999 } });
       }
       await tx.order.update({ where: { id: orderId }, data: { status: 'planned' } });
-      await this.resequence(tx, tripId, lookup, depot);
-      if (fromTripId) await this.resequence(tx, fromTripId, lookup, depot);
-      return { fromTripId, placed: result.placedSequence, resorted: result.resorted, order };
+      const notices = await this.resequence(tx, tripId, lookup, depot);
+      if (fromTripId) notices.push(...(await this.resequence(tx, fromTripId, lookup, depot)));
+      return { fromTripId, placed: result.placedSequence, resorted: result.resorted, order, notices };
     });
+    this.publishRaised(notices);
 
     return {
       orderId,
@@ -214,16 +228,16 @@ export class PlanEditService {
     const depot = this.depotOf(me) as Depot;
     await this.loadOrder(me, orderId);
 
-    const fromTripId = await this.prisma.$transaction(async (tx) => {
+    const { fromTripId, notices } = await this.prisma.$transaction(async (tx) => {
       const stop = await tx.tripStop.findUnique({ where: { orderId } });
-      if (!stop) return null;
+      if (!stop) return { fromTripId: null, notices: [] as RaisedNotice[] };
       const trip = await this.loadTrip(me, stop.tripId, tx);
       PlanEditService.assertEditable(trip);
       await tx.tripStop.delete({ where: { orderId } });
       await tx.order.update({ where: { id: orderId }, data: { status: 'waiting' } });
-      await this.resequence(tx, stop.tripId, lookup, depot);
-      return stop.tripId;
+      return { fromTripId: stop.tripId, notices: await this.resequence(tx, stop.tripId, lookup, depot) };
     });
+    this.publishRaised(notices);
 
     return {
       orderId,
@@ -236,7 +250,12 @@ export class PlanEditService {
    * and each stop's ETA (read by the store, the driver and the dispatch board).
    * A change to a sent trip also raises its plan version, which pauses the dock until the loader accepts it.
    */
-  async resequence(tx: Prisma.TransactionClient, tripId: string, lookup: Lookup, depot: Depot) {
+  async resequence(
+    tx: Prisma.TransactionClient,
+    tripId: string,
+    lookup: Lookup,
+    depot: Depot,
+  ): Promise<RaisedNotice[]> {
     const trip = await tx.trip.findUniqueOrThrow({
       where: { id: tripId },
       select: { status: true, brand: true },
@@ -266,7 +285,8 @@ export class PlanEditService {
         ...(trip.status !== 'planning' && { planVersion: { increment: 1 } }),
       },
     });
-    if (trip.status !== 'planning') await tellDriversPlanChanged(tx, [tripId]);
+    if (trip.status === 'planning') return [];
+    return tellDriversPlanChanged(tx, [tripId]);
   }
 
   async tripView(me: Me, tripId: string, lookup: Lookup, depot: Depot) {
