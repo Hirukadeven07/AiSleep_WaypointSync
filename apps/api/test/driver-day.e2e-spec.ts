@@ -5,9 +5,11 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { DriverDayResponse } from '@waypoint/contracts';
 import { AppModule } from '../src/app.module';
+import { DomainErrorFilter } from '../src/common/filters/domain-error.filter';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 
 const DAY = '2026-10-01';
+const TOMORROW = '2026-10-02';
 const YESTERDAY = '2026-09-30';
 const NOW = `${DAY}T09:00:00+05:30`;
 const date = (iso: string) => new Date(`${iso}T00:00:00Z`);
@@ -27,6 +29,7 @@ describe('driver day (e2e)', () => {
   let namedStoreId: string;
   let bareStoreId: string;
   let liveTripId: string;
+  let otherTripId: string;
   let firstStopId: string;
   let secondStopId: string;
   let flagId: string;
@@ -92,6 +95,7 @@ describe('driver day (e2e)', () => {
     app.setGlobalPrefix('api');
     app.use(cookieParser());
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalFilters(new DomainErrorFilter());
     await app.init();
     prisma = app.get(PrismaService);
 
@@ -190,12 +194,13 @@ describe('driver day (e2e)', () => {
     });
     liveTripId = live.id;
     await createTrip({ vehicleId, serviceDate: YESTERDAY, tripNumber: 2, status: 'published' });
-    await createTrip({
+    const other = await createTrip({
       vehicleId: otherVehicleId,
       serviceDate: DAY,
       tripNumber: 1,
       status: 'on_road',
     });
+    otherTripId = other.id;
 
     // Created out of order: sequence 2 first, so the response order must come from `sequence`.
     const bareOrder = await createOrder(bareStoreId);
@@ -231,6 +236,9 @@ describe('driver day (e2e)', () => {
   });
 
   afterAll(async () => {
+    await prisma.notification.deleteMany({
+      where: { userId: { in: [driverId, otherDriverId].filter(Boolean) }, link: '/drive' },
+    });
     const vehicleIds = [vehicleId, otherVehicleId].filter(Boolean);
     await prisma.tripStop.deleteMany({ where: { trip: { vehicleId: { in: vehicleIds } } } });
     await prisma.trip.deleteMany({ where: { vehicleId: { in: vehicleIds } } });
@@ -331,9 +339,123 @@ describe('driver day (e2e)', () => {
     await prisma.vehicle.update({ where: { id: vehicleId }, data: { driverId: null } });
     try {
       const res = await driverAgent.get('/api/driver/day').expect(200);
-      expect(res.body).toEqual({ serviceDate: DAY, vehicle: null, trips: [], activeTripId: null });
+      expect(res.body).toMatchObject({
+        serviceDate: DAY,
+        vehicle: null,
+        trips: [],
+        activeTripId: null,
+        upcoming: [],
+      });
     } finally {
       await prisma.vehicle.update({ where: { id: vehicleId }, data: { driverId } });
     }
+  });
+
+  it('follows the trip the dispatcher assigned, not only the registered vehicle', async () => {
+    // The other driver's on-road trip is given to kasun, and kasun's own trip to the other driver.
+    await prisma.trip.update({ where: { id: otherTripId }, data: { assignedDriverId: driverId } });
+    await prisma.trip.update({
+      where: { id: liveTripId },
+      data: { assignedDriverId: otherDriverId },
+    });
+    try {
+      const day = (await driverAgent.get('/api/driver/day').expect(200)).body as DriverDayResponse;
+      expect(day.trips.map((t) => t.id)).toEqual([otherTripId]);
+      expect(day.activeTripId).toBe(otherTripId);
+      // The truck shown is the one the trip runs on.
+      expect(day.vehicle?.id).toBe(otherVehicleId);
+      const sync = (await driverAgent.get('/api/sync').expect(200)).body;
+      expect(sync.tripId).toBe(otherTripId);
+    } finally {
+      await prisma.trip.updateMany({
+        where: { id: { in: [otherTripId, liveTripId] } },
+        data: { assignedDriverId: null },
+      });
+    }
+  });
+
+  it('lists published trips on the next days as upcoming', async () => {
+    const tomorrow = await createTrip({
+      vehicleId,
+      serviceDate: TOMORROW,
+      tripNumber: 1,
+      status: 'published',
+    });
+    const draft = await createTrip({
+      vehicleId,
+      serviceDate: TOMORROW,
+      tripNumber: 2,
+      status: 'planning',
+    });
+    try {
+      const day = (await driverAgent.get('/api/driver/day').expect(200)).body as DriverDayResponse;
+      expect(day.upcoming.map((t) => [t.id, t.serviceDate])).toEqual([[tomorrow.id, TOMORROW]]);
+      expect(day.trips.map((t) => t.id)).toEqual([liveTripId]);
+    } finally {
+      await prisma.trip.deleteMany({ where: { id: { in: [tomorrow.id, draft.id] } } });
+    }
+  });
+
+  it('lets dispatch put another driver on a trip and tells both drivers', async () => {
+    const dispatcher = await login({ role: 'dispatcher', loginId: 'nimal', secret: 'waypoint' });
+    try {
+      const given = await dispatcher
+        .post(`/api/plan/trips/${liveTripId}/driver`)
+        .send({ driverId: otherDriverId })
+        .expect(200);
+      expect(given.body).toMatchObject({
+        driverId: otherDriverId,
+        driverName: 'Other day driver',
+        driverAssigned: true,
+      });
+      const day = (await driverAgent.get('/api/driver/day').expect(200)).body as DriverDayResponse;
+      expect(day.trips.map((t) => t.id)).not.toContain(liveTripId);
+      expect(
+        await prisma.notification.count({
+          where: { userId: otherDriverId, title: { startsWith: 'You are driving' } },
+        }),
+      ).toBe(1);
+      expect(
+        await prisma.notification.count({
+          where: { userId: driverId, title: { endsWith: 'moved to another driver' } },
+        }),
+      ).toBe(1);
+
+      // A trip that has left the depot keeps its driver; an unknown driver is not found.
+      const left = await dispatcher
+        .post(`/api/plan/trips/${otherTripId}/driver`)
+        .send({ driverId })
+        .expect(409);
+      expect(left.body.reason).toBe('PLAN_LOCKED');
+      await dispatcher
+        .post(`/api/plan/trips/${liveTripId}/driver`)
+        .send({ driverId: 'no-such-driver' })
+        .expect(404);
+
+      const back = await dispatcher
+        .post(`/api/plan/trips/${liveTripId}/driver`)
+        .send({ driverId: null })
+        .expect(200);
+      expect(back.body).toMatchObject({ driverId: driverId, driverAssigned: false });
+    } finally {
+      await prisma.trip.update({ where: { id: liveTripId }, data: { assignedDriverId: null } });
+    }
+  });
+
+  it('lists notices for the driver and marks them read', async () => {
+    const notice = await prisma.notification.create({
+      data: { userId: driverId, title: 'E2E driver notice', body: 'Hello', link: '/drive' },
+    });
+    const before = (await driverAgent.get('/api/driver/day').expect(200)).body as DriverDayResponse;
+    expect(before.unreadNotices).toBeGreaterThanOrEqual(1);
+    const list = (await driverAgent.get('/api/driver/notices').expect(200)).body;
+    expect(list.find((n: { id: string }) => n.id === notice.id)).toMatchObject({
+      title: 'E2E driver notice',
+      read: false,
+    });
+    await driverAgent.post(`/api/driver/notices/${notice.id}/read`).expect(200);
+    expect((await prisma.notification.findUniqueOrThrow({ where: { id: notice.id } })).read).toBe(
+      true,
+    );
   });
 });

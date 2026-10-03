@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/ui/Icon';
 import { DISPATCH_PHONE, telHref } from '@/lib/driver-format';
@@ -49,6 +49,50 @@ function CallCard({
   );
 }
 
+/** How often the open SOS screen sends the driver's position. */
+const SOS_PING_MS = 30_000;
+
+/**
+ * Shares the phone's position with dispatch only while the SOS screen is open: each fix (at most
+ * every 30 s) goes through the outbox as a LOCATION_PING with `sos: true`, which moves the open SOS
+ * alert. Leaving the screen clears the watch, so sharing stops when SOS is closed.
+ */
+function useSosLocation(tripId: string | null, planVersion: number | null) {
+  const [state, setState] = useState<'starting' | 'on' | 'off'>('starting');
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      setState('off');
+      return;
+    }
+    let last = 0;
+    const watch = navigator.geolocation.watchPosition(
+      (pos) => {
+        setState('on');
+        const now = Date.now();
+        if (now - last < SOS_PING_MS) return;
+        last = now;
+        const { latitude, longitude, accuracy, speed } = pos.coords;
+        void enqueueAction(
+          'LOCATION_PING',
+          {
+            lat: latitude,
+            lng: longitude,
+            accuracyM: Number.isFinite(accuracy) ? accuracy : null,
+            speedKmh: speed != null && Number.isFinite(speed) ? speed * 3.6 : null,
+            sos: true,
+          },
+          tripId,
+          planVersion,
+        ).catch(() => {});
+      },
+      () => setState('off'),
+      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 20_000 },
+    );
+    return () => navigator.geolocation.clearWatch(watch);
+  }, [tripId, planVersion]);
+  return state;
+}
+
 /**
  * Figma "Driver / SOS": a full-screen emergency page. Opening it sends one SOS alert (through the
  * outbox, so it works with no signal); there is no confirmation step.
@@ -57,6 +101,10 @@ export function SosScreen() {
   const router = useRouter();
   const { me, trip } = useDriver();
   const sent = useRef(false);
+  const sharing = useSosLocation(
+    trip?.id != null ? String(trip.id) : null,
+    trip?.planVersion ?? null,
+  );
 
   useEffect(() => {
     if (sent.current) return;
@@ -95,7 +143,13 @@ export function SosScreen() {
               <Icon name="pin" size={16} />
               Dispatch gets your vehicle, trip and last stop
             </p>
-            <p className="text-caption leading-4 text-sos-soft">Sent once when you open SOS. No live tracking.</p>
+            <p className="text-caption leading-4 text-sos-soft">
+              {sharing === 'on'
+                ? 'Your location is shared with dispatch while this screen is open. Closing SOS stops it.'
+                : sharing === 'off'
+                  ? 'Location is off on this phone, so dispatch gets your trip and last stop only.'
+                  : 'Finding your location…'}
+            </p>
           </section>
 
           <CallCard

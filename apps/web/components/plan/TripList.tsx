@@ -4,14 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import type {
   Brand,
   DropCheck,
+  PlanDriver,
   PlanTrip,
   PlanTripState,
   TripSuggestion,
 } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
+import { messageOf } from '@/lib/api-error';
 import { kgText, m3Text, stopCount, stopWindow, tone, vehicleKind } from './format';
 import { dragImage } from './OrderQueue';
+import { Select } from './Select';
 import type { PlanEdit } from './usePlanEdit';
 
 const TILE: Record<Brand, string> = {
@@ -201,14 +204,66 @@ function EmptyTrip({ trip, edit }: { trip: PlanTrip; edit: PlanEdit }) {
   );
 }
 
+/**
+ * Who drives the trip. "Vehicle's driver" follows the vehicle's registered driver; picking a name
+ * puts that driver on this trip, and the driver's phone shows it from then on.
+ */
+function DriverPicker({
+  trip,
+  drivers,
+  edit,
+}: {
+  trip: PlanTrip;
+  drivers: PlanDriver[];
+  edit: PlanEdit;
+}) {
+  const [busy, setBusy] = useState(false);
+  const own = drivers.find((d) => d.vehicleId === trip.vehicleId);
+  const options = [
+    { value: '', label: own ? `Vehicle's driver (${own.name})` : "Vehicle's driver (none)" },
+    ...drivers.map((d) => ({
+      value: d.id,
+      label: d.vehicleId === trip.vehicleId ? `${d.name} · this vehicle` : d.name,
+    })),
+  ];
+
+  async function pick(value: string) {
+    setBusy(true);
+    try {
+      await api<PlanTrip>(`/plan/trips/${trip.id}/driver`, {
+        method: 'POST',
+        body: { driverId: value || null },
+      });
+      await edit.reload();
+    } catch (e) {
+      edit.showToast({ kind: 'error', title: 'Driver not changed', sub: messageOf(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Select
+      label="Driver"
+      value={trip.driverAssigned ? (trip.driverId ?? '') : ''}
+      options={options}
+      onChange={(v) => void pick(v)}
+      searchable
+      disabled={busy || !trip.editable}
+    />
+  );
+}
+
 function TripRow({
   trip,
+  drivers,
   open,
   onToggle,
   edit,
   onPublish,
 }: {
   trip: PlanTrip;
+  drivers: PlanDriver[];
   open: boolean;
   onToggle: () => void;
   edit: PlanEdit;
@@ -292,6 +347,7 @@ function TripRow({
           </span>
           <span className="block truncate text-[12px] leading-[15px] text-muted">
             {vehicleKind(trip)} · {trip.brand} · {trip.district} · {stopCount(stopsNow)}
+            {trip.driverName ? ` · ${trip.driverName}` : ' · no driver'}
           </span>
         </span>
         <Capacity
@@ -374,6 +430,10 @@ function TripRow({
               </span>
             </div>
           ))}
+          <div className="flex items-center gap-3 pt-1">
+            <span className="text-[12px] font-semibold leading-[15px] text-muted">Driver</span>
+            <DriverPicker trip={trip} drivers={drivers} edit={edit} />
+          </div>
           <div className="flex items-center gap-3 pb-2">
             <p className="min-w-px flex-1 text-[12px] font-medium leading-[15px] text-muted">
               Stops stay sorted by delivery window, earliest first. The loader list and driver route
@@ -391,11 +451,13 @@ function TripRow({
 /** Figma "Trips": a card of trip rows with kg, m³ and minute bars, a status chip and the stops when open. */
 export function TripList({
   trips,
+  drivers = [],
   edit,
   onPublish,
   className = '',
 }: {
   trips: PlanTrip[];
+  drivers?: PlanDriver[];
   edit: PlanEdit;
   onPublish: (tripId: string) => void;
   className?: string;
@@ -464,6 +526,7 @@ export function TripList({
         <TripRow
           key={t.id}
           trip={t}
+          drivers={drivers}
           open={openId === t.id}
           onToggle={() => setOpenId(openId === t.id ? null : t.id)}
           edit={edit}

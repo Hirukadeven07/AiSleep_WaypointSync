@@ -1,13 +1,16 @@
-import type {
-  DriverDayFlag,
-  DriverDayPhone,
-  DriverDayResponse,
-  DriverDayStop,
-  DriverDayTrip,
-  DriverDayVehicle,
-  FlagType,
-  StopStatus,
-  TripStatus,
+import {
+  BREAK_ALLOWANCE_MIN,
+  type DriverDayBreak,
+  type DriverDayRoadIssue,
+  type DriverDayFlag,
+  type DriverDayPhone,
+  type DriverDayResponse,
+  type DriverDayStop,
+  type DriverDayTrip,
+  type DriverDayVehicle,
+  type FlagType,
+  type StopStatus,
+  type TripStatus,
 } from '@waypoint/contracts';
 
 /** Trips the driver can work today; the same statuses `SyncService.activeTripForDriver` uses. */
@@ -52,6 +55,8 @@ export interface DriverDayStopRow {
 
 export interface DriverDayTripRow {
   id: string;
+  /** Optional so older callers and tests can leave it out; the trip's day is then `serviceDate`. */
+  serviceDate?: Date;
   tripNumber: number;
   status: TripStatus;
   planVersion: number;
@@ -130,9 +135,10 @@ function mapStop(stop: DriverDayStopRow): DriverDayStop {
   };
 }
 
-function mapTrip(trip: DriverDayTripRow): DriverDayTrip {
+function mapTrip(trip: DriverDayTripRow, serviceDate: string): DriverDayTrip {
   return {
     id: trip.id,
+    serviceDate: trip.serviceDate?.toISOString().slice(0, 10) ?? serviceDate,
     tripNumber: trip.tripNumber as DriverDayTrip['tripNumber'],
     status: trip.status,
     planVersion: trip.planVersion,
@@ -140,20 +146,37 @@ function mapTrip(trip: DriverDayTripRow): DriverDayTrip {
   };
 }
 
+/** What the driver day carries besides today's vehicle and trips. */
+export interface DriverDayExtras {
+  upcoming?: DriverDayTripRow[];
+  unreadNotices?: number;
+  roadIssue?: DriverDayRoadIssue | null;
+  break?: DriverDayBreak;
+}
+
 export function buildDriverDay(
   serviceDate: string,
   vehicle: DriverDayVehicleRow | null,
+  extras: DriverDayExtras = {},
 ): DriverDayResponse {
-  if (!vehicle) return { serviceDate, vehicle: null, trips: [], activeTripId: null };
+  const common = {
+    serviceDate,
+    // Published trips on later days still show when the driver has no truck today.
+    upcoming: (extras.upcoming ?? []).map((trip) => mapTrip(trip, serviceDate)),
+    unreadNotices: extras.unreadNotices ?? 0,
+    roadIssue: extras.roadIssue ?? null,
+    break: extras.break ?? { onBreakSince: null, usedMin: 0, allowanceMin: BREAK_ALLOWANCE_MIN },
+  };
+  if (!vehicle) return { ...common, vehicle: null, trips: [], activeTripId: null };
 
   const trips = vehicle.trips
     .filter((trip) => WORKABLE.has(trip.status))
     .sort((a, b) => a.tripNumber - b.tripNumber);
 
   return {
-    serviceDate,
+    ...common,
     vehicle: { id: vehicle.id, plate: vehicle.numberPlate ?? vehicle.id, type: vehicle.type },
-    trips: trips.map(mapTrip),
+    trips: trips.map((trip) => mapTrip(trip, serviceDate)),
     activeTripId: pickActiveTripId(trips),
   };
 }

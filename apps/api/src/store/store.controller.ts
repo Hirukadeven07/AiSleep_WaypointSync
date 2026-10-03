@@ -57,6 +57,11 @@ export class StoreController {
     return this.store.placeOrder(me, dto);
   }
 
+  @Delete('orders/:id')
+  cancelOrder(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<{ ok: true }> {
+    return this.store.cancelOrder(me, id);
+  }
+
   @Get('deliveries')
   deliveries(@CurrentUser() me: AuthUser): Promise<StoreDelivery[]> {
     return this.store.deliveries(me);

@@ -33,7 +33,7 @@ export default function UpdatesPage() {
   );
 
   return (
-    <section className="space-y-md">
+    <section className="space-y-md lg:max-w-[720px]">
       <PageTitle eyebrow="Updates" title="From dispatch" />
 
       {deferred.map((o) => (

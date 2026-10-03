@@ -9,7 +9,7 @@ import { usePoll } from '@/lib/poll';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Toast } from '@/components/ui/Toast';
-import { HandoffTimeline, IssueList, PageTitle } from '@/components/store/parts';
+import { HandoffTimeline, IssueList, PageTitle, SPLIT } from '@/components/store/parts';
 import { QtyStepper } from '@/components/store/QtyStepper';
 
 type LineState = { receivedQty: number; issue: FlagType | null };
@@ -46,7 +46,7 @@ export default function ReceivePage() {
   }
 
   return (
-    <section className="space-y-md">
+    <section className="space-y-md lg:max-w-[720px]">
       <PageTitle eyebrow="Receive" title="Check the goods" />
       {waiting.length === 0 ? (
         <EmptyState
@@ -146,104 +146,111 @@ function ReceiptForm({
         acknowledges after you confirm.
       </p>
 
-      <ul className="space-y-sm">
-        {delivery.lines.map((line) => {
-          const st = lines[line.id] ?? { receivedQty: line.qty, issue: null };
-          return (
-            <li
-              key={line.id}
-              className={`space-y-sm rounded-card bg-surface p-md ${st.issue ? 'ring-2 ring-danger' : ''}`}
-            >
-              <div className="flex items-start justify-between gap-sm">
-                <div className="min-w-0">
-                  <p className="text-body font-semibold text-ink">{line.name}</p>
-                  <p className="text-caption text-muted">
-                    Ordered {line.qty} × {line.pack}
-                    {line.chilled ? ' · chilled' : ''}
-                  </p>
+      {/* Desktop: the lines left; the chilled question, signature and confirm in a panel right. */}
+      <div className={SPLIT}>
+        <ul className="space-y-sm">
+          {delivery.lines.map((line) => {
+            const st = lines[line.id] ?? { receivedQty: line.qty, issue: null };
+            return (
+              <li
+                key={line.id}
+                className={`space-y-sm rounded-card bg-surface p-md ${st.issue ? 'ring-2 ring-danger' : ''}`}
+              >
+                <div className="flex items-start justify-between gap-sm">
+                  <div className="min-w-0">
+                    <p className="text-body font-semibold text-ink">{line.name}</p>
+                    <p className="text-caption text-muted">
+                      Ordered {line.qty} × {line.pack}
+                      {line.chilled ? ' · chilled' : ''}
+                    </p>
+                  </div>
+                  <QtyStepper
+                    name={line.name}
+                    value={st.receivedQty}
+                    max={line.qty}
+                    plusTone="outline"
+                    onChange={(q) =>
+                      set(line.id, {
+                        receivedQty: q,
+                        // A short count is "missing" unless the manager picked another issue.
+                        issue:
+                          q < line.qty
+                            ? (st.issue ?? 'missing')
+                            : st.issue === 'missing'
+                              ? null
+                              : st.issue,
+                      })
+                    }
+                  />
                 </div>
-                <QtyStepper
-                  name={line.name}
-                  value={st.receivedQty}
-                  max={line.qty}
-                  plusTone="outline"
-                  onChange={(q) =>
-                    set(line.id, {
-                      receivedQty: q,
-                      // A short count is "missing" unless the manager picked another issue.
-                      issue:
-                        q < line.qty
-                          ? (st.issue ?? 'missing')
-                          : st.issue === 'missing'
-                            ? null
-                            : st.issue,
-                    })
-                  }
-                />
-              </div>
-              <div className="flex flex-wrap gap-xs">
-                {ISSUES.map((i) => (
+                <div className="flex flex-wrap gap-xs">
+                  {ISSUES.map((i) => (
+                    <button
+                      key={i.value}
+                      type="button"
+                      aria-pressed={st.issue === i.value}
+                      onClick={() => set(line.id, { issue: st.issue === i.value ? null : i.value })}
+                      className={`min-h-[36px] rounded-pill px-md text-label ${
+                        st.issue === i.value
+                          ? 'bg-danger text-white'
+                          : 'border border-mist text-ink'
+                      }`}
+                    >
+                      {i.label}
+                    </button>
+                  ))}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="space-y-md lg:sticky lg:top-8">
+          {delivery.chilled && (
+            <fieldset className="space-y-sm rounded-card bg-chilled-tint p-md">
+              <legend className="text-body font-semibold text-ink">
+                Did the chilled goods arrive cold?
+              </legend>
+              <div className="flex gap-sm">
+                {[
+                  { v: true, label: 'Yes, cold' },
+                  { v: false, label: 'No, warm' },
+                ].map((o) => (
                   <button
-                    key={i.value}
+                    key={o.label}
                     type="button"
-                    aria-pressed={st.issue === i.value}
-                    onClick={() => set(line.id, { issue: st.issue === i.value ? null : i.value })}
-                    className={`min-h-[36px] rounded-pill px-md text-label ${
-                      st.issue === i.value ? 'bg-danger text-white' : 'border border-mist text-ink'
+                    aria-pressed={cold === o.v}
+                    onClick={() => setCold(o.v)}
+                    className={`min-h-[44px] flex-1 rounded-pill text-label font-semibold ${
+                      cold === o.v ? 'bg-primary text-on-primary' : 'bg-surface text-ink'
                     }`}
                   >
-                    {i.label}
+                    {o.label}
                   </button>
                 ))}
               </div>
-            </li>
-          );
-        })}
-      </ul>
+            </fieldset>
+          )}
 
-      {delivery.chilled && (
-        <fieldset className="space-y-sm rounded-card bg-chilled-tint p-md">
-          <legend className="text-body font-semibold text-ink">
-            Did the chilled goods arrive cold?
-          </legend>
-          <div className="flex gap-sm">
-            {[
-              { v: true, label: 'Yes, cold' },
-              { v: false, label: 'No, warm' },
-            ].map((o) => (
-              <button
-                key={o.label}
-                type="button"
-                aria-pressed={cold === o.v}
-                onClick={() => setCold(o.v)}
-                className={`min-h-[44px] flex-1 rounded-pill text-label font-semibold ${
-                  cold === o.v ? 'bg-primary text-on-primary' : 'bg-surface text-ink'
-                }`}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-      )}
+          <SignaturePad onChange={setSignaturePng} />
 
-      <SignaturePad onChange={setSignaturePng} />
-
-      <Button className="w-full" disabled={busy || needsCold || !signaturePng} onClick={submit}>
-        {busy
-          ? 'Confirming…'
-          : issues
-            ? `Confirm receipt · ${issues} issue${issues > 1 ? 's' : ''}`
-            : 'Confirm receipt'}
-      </Button>
-      {needsCold && (
-        <p className="text-center text-caption text-muted">
-          Answer the chilled question to confirm.
-        </p>
-      )}
-      {!signaturePng && !needsCold && (
-        <p className="text-center text-caption text-muted">Sign above to confirm receipt.</p>
-      )}
+          <Button className="w-full" disabled={busy || needsCold || !signaturePng} onClick={submit}>
+            {busy
+              ? 'Confirming…'
+              : issues
+                ? `Confirm receipt · ${issues} issue${issues > 1 ? 's' : ''}`
+                : 'Confirm receipt'}
+          </Button>
+          {needsCold && (
+            <p className="text-center text-caption text-muted">
+              Answer the chilled question to confirm.
+            </p>
+          )}
+          {!signaturePng && !needsCold && (
+            <p className="text-center text-caption text-muted">Sign above to confirm receipt.</p>
+          )}
+        </div>
+      </div>
       {toast && <Toast message={toast} tone="danger" onClose={clearToast} />}
     </section>
   );
