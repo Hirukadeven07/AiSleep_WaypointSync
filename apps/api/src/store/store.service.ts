@@ -92,6 +92,15 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
   };
 }
 
+/** "Sat 3 Oct" for a service date. */
+const dayText = (d: Date) =>
+  d.toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+
 @Injectable()
 export class StoreService {
   constructor(
@@ -167,11 +176,12 @@ export class StoreService {
     } catch (e) {
       throw new BadRequestException((e as Error).message);
     }
+    const deliveryDate = asDate(await nextOperatingDay(this.prisma, asDate(this.clock.today())));
     const order = await this.prisma.order.create({
       data: {
         storeId: store.id,
         brand: store.brand,
-        deliveryDate: asDate(await nextOperatingDay(this.prisma, asDate(this.clock.today()))),
+        deliveryDate,
         temp: built.chilled ? 'chilled' : 'ambient',
         status: 'waiting',
         units: built.units,
@@ -179,6 +189,11 @@ export class StoreService {
         volumeM3: built.volumeM3,
         lines: { create: built.lines },
       },
+    });
+    await this.notifyDispatchers(store.depotId, {
+      title: 'New order',
+      body: `${store.displayName ?? store.id} ordered ${built.units} ${built.units === 1 ? 'item' : 'items'} (${Math.round(built.weightKg)} kg) for ${dayText(deliveryDate)}.`,
+      link: '/dispatch/plan',
     });
     return orderView(order);
   }
@@ -288,6 +303,20 @@ export class StoreService {
       });
     });
 
+    // A receipt with problems is the store's report to dispatch.
+    const problems = results.filter((r) => r.issue);
+    if (problems.length > 0) {
+      const store = await this.store(me);
+      await this.notifyDispatchers(store.depotId, {
+        title: 'Store report',
+        body: `${store.displayName ?? store.id}: ${problems.length} ${problems.length === 1 ? 'line' : 'lines'} with issues on ${stop.trip.vehicle.numberPlate ?? stop.trip.vehicleId} (${problems
+          .slice(0, 2)
+          .map((r) => `${r.name} ${r.issue}`)
+          .join(', ')}${problems.length > 2 ? ', …' : ''}).`,
+        link: '/dispatch/board',
+      });
+    }
+
     // The trip's own driver; the vehicle's usual driver when the dispatcher assigned nobody.
     const driverId = stop.trip.assignedDriverId ?? stop.trip.vehicle.driverId;
     if (driverId) {
@@ -331,6 +360,18 @@ export class StoreService {
         link: '/store',
       });
     }
+  }
+
+  /** One notice per dispatcher at the store's depot (the bell on their live day). */
+  private async notifyDispatchers(
+    depotId: string,
+    notice: { title: string; body: string; link: string },
+  ): Promise<void> {
+    const dispatchers = await this.prisma.user.findMany({
+      where: { role: 'dispatcher', depotId },
+      select: { id: true },
+    });
+    for (const d of dispatchers) await this.notifier.notify({ userId: d.id, ...notice });
   }
 
   async notices(me: AuthUser): Promise<StoreNotice[]> {

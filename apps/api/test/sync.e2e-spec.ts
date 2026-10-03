@@ -24,6 +24,9 @@ describe('driver sync (e2e)', () => {
   let badStopTripId: string;
   // Seeded open SOS incidents for kasun: parked (resolved) during the test, reopened in afterAll.
   let parkedSosIds: string[] = [];
+  let districtId = '';
+  // Dispatcher notices this run raises (SOS, road issue) are removed in afterAll.
+  const startedAt = new Date();
 
   /** Resolve every open SOS incident for the test driver, so activeSos starts false. */
   async function resolveOpenSos() {
@@ -52,6 +55,7 @@ describe('driver sync (e2e)', () => {
     const district = await prisma.district.create({
       data: { name: `Sync District ${Date.now()}`, depotId: 'Peliyagoda' },
     });
+    districtId = district.id;
     const store = await prisma.store.create({
       data: {
         id: `E2E-STORE-${Date.now()}`,
@@ -209,7 +213,7 @@ describe('driver sync (e2e)', () => {
       });
     }
     await prisma.notification.deleteMany({
-      where: { title: 'Driver SOS', body: { contains: 'E2E SOS' } },
+      where: { title: { in: ['Driver SOS', 'Road issue'] }, createdAt: { gte: startedAt } },
     });
     if (tripId) await prisma.tripStop.deleteMany({ where: { tripId } });
     if (badStopTripId) await prisma.tripStop.deleteMany({ where: { tripId: badStopTripId } });
@@ -217,6 +221,7 @@ describe('driver sync (e2e)', () => {
     if (badStopTripId) await prisma.trip.delete({ where: { id: badStopTripId } });
     await prisma.order.deleteMany({ where: { storeId } });
     await prisma.store.delete({ where: { id: storeId } });
+    if (districtId) await prisma.district.deleteMany({ where: { id: districtId } });
     await prisma.vehicle.deleteMany({ where: { id: { startsWith: 'SYNC-' } } });
     if (seededVehicleId) {
       await prisma.vehicle.update({ where: { id: seededVehicleId }, data: { driverId } });
@@ -489,7 +494,13 @@ describe('driver sync (e2e)', () => {
             driverId,
             tripId,
             type: 'ROAD_ISSUE',
-            payload: { note: 'wheel noise' },
+            payload: {
+              status: 'reported',
+              kind: 'vehicle',
+              note: 'wheel noise',
+              photo: null,
+              location: null,
+            },
             createdOnPhoneAt: '2026-10-01T09:41:00+05:30',
             seenPlanVersion: 1,
           },
@@ -553,7 +564,13 @@ describe('driver sync (e2e)', () => {
             driverId,
             tripId,
             type: 'ROAD_ISSUE',
-            payload: { note: 'pothole' },
+            payload: {
+              status: 'resolved',
+              kind: 'road_blocked',
+              note: 'pothole',
+              photo: null,
+              location: null,
+            },
             createdOnPhoneAt: '2026-10-01T08:01:00+05:30',
             seenPlanVersion: 1,
           },
@@ -665,5 +682,74 @@ describe('driver sync (e2e)', () => {
     expect(saved.arrivedAt?.toISOString()).toBe(
       new Date('2026-10-01T08:40:00+05:30').toISOString(),
     );
+  });
+
+  it('accepts a road issue only with a known kind, a valid photo and location, and alerts dispatch once', async () => {
+    const send = (clientId: string, payload: Record<string, unknown>) =>
+      driverAgent
+        .post('/api/sync')
+        .send({
+          events: [
+            {
+              clientId,
+              driverId,
+              tripId,
+              type: 'ROAD_ISSUE',
+              payload,
+              createdOnPhoneAt: '2026-10-01T10:05:00+05:30',
+              seenPlanVersion: 1,
+            },
+          ],
+        })
+        .expect(200);
+    const base = {
+      status: 'reported',
+      kind: 'road_blocked',
+      note: null,
+      photo: null,
+      location: null,
+    };
+    const bad = [
+      { ...base, kind: 'aliens' },
+      { ...base, status: 'maybe' },
+      { ...base, photo: 'https://example.com/x.jpg' },
+      { ...base, location: { lat: 200, lng: 79.9 } },
+      { ...base, note: 'x'.repeat(501) },
+    ];
+    for (const [i, payload] of bad.entries()) {
+      const id = `a${i}aaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`;
+      const res = await send(id, payload);
+      expect(res.body.rejectedReasons?.[id]).toBe('INVALID_PAYLOAD');
+    }
+
+    const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+    const alerts = () =>
+      prisma.notification.count({
+        where: { userId: nimal.id, title: 'Road issue', body: { contains: 'E2E fallen tree' } },
+      });
+    const before = await alerts();
+    const photo = `data:image/jpeg;base64,${'A'.repeat(200)}`;
+    const reported = await send('b1bbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', {
+      ...base,
+      note: 'E2E fallen tree',
+      photo,
+      location: { lat: 6.9, lng: 79.95, accuracyM: 12 },
+    });
+    expect(reported.body.applied).toEqual(['b1bbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']);
+    expect(await alerts()).toBe(before + 1);
+    const saved = await prisma.driverEvent.findUniqueOrThrow({
+      where: { clientId: 'b1bbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+    });
+    expect(saved).toMatchObject({ tripId, type: 'ROAD_ISSUE' });
+    expect(saved.payload).toMatchObject({ kind: 'road_blocked', photo, location: { lat: 6.9 } });
+
+    // Resuming is recorded but does not alert dispatch again.
+    const resolved = await send('b2bbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', {
+      ...base,
+      status: 'resolved',
+      note: 'E2E fallen tree',
+    });
+    expect(resolved.body.applied).toEqual(['b2bbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']);
+    expect(await alerts()).toBe(before + 1);
   });
 });

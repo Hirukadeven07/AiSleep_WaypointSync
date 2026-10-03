@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import {
   ORDER_CUTOFF_MIN,
+  ROAD_ISSUE_LABEL,
+  WAIT_ALERT_MIN,
   type AttentionItem,
   type LiveDay,
   type LiveStatus,
@@ -14,11 +16,15 @@ import {
   type LiveTrip,
   type Me,
   type NotifyPreview,
+  type DispatcherNotices,
+  type NoticeCategory,
   type NotifyResult,
+  type RoadIssuePayload,
 } from '@waypoint/contracts';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
+import { tripAreaLabel } from '../plan/plan.mapper';
 
 /** A trip counts as late from this many minutes past a stop's window. */
 const LATE_MIN = 5;
@@ -126,6 +132,41 @@ export class DispatchService {
     return { ok: true };
   }
 
+  /** The dispatcher's unseen notifications, newest first, grouped by where they lead. */
+  async notices(me: Me): Promise<DispatcherNotices> {
+    const rows = await this.prisma.notification.findMany({
+      where: { userId: me.id, read: false },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const notices = rows.map((n) => ({
+      id: n.id,
+      category: noticeCategory(n.link),
+      title: n.title,
+      body: n.body,
+      link: n.link,
+      createdAt: n.createdAt.toISOString(),
+    }));
+    const count = (c: NoticeCategory) => notices.filter((n) => n.category === c).length;
+    return {
+      notices,
+      counts: {
+        all: notices.length,
+        incidents: count('incidents'),
+        stores: count('stores'),
+        planning: count('planning'),
+      },
+    };
+  }
+
+  async markNoticeRead(me: Me, id: string): Promise<{ ok: true }> {
+    await this.prisma.notification.updateMany({
+      where: { id, userId: me.id },
+      data: { read: true },
+    });
+    return { ok: true };
+  }
+
   async live(me: Me): Promise<LiveDay> {
     if (!me.depotId) throw new ForbiddenException('This account has no depot');
     const depotId = me.depotId;
@@ -137,14 +178,20 @@ export class DispatchService {
 
     const [rows, events, pings, carry, tomorrowOrders, sosRows] = await Promise.all([
       this.prisma.trip.findMany({
-        where: { depotId, serviceDate: day, status: { not: 'planning' } },
+        // Trips still being planned show too ("planned"), so a trip is visible as soon as it exists.
+        where: { depotId, serviceDate: day },
         include: {
           vehicle: { include: { driver: driverInclude } },
           assignedDriver: driverInclude,
           district: true,
+          extraDistricts: { orderBy: { name: 'asc' } },
           stops: {
             orderBy: { sequence: 'asc' },
-            include: { order: { include: { store: true } }, receipt: true, flags: true },
+            include: {
+              order: { include: { store: { include: { phones: true } } } },
+              receipt: true,
+              flags: true,
+            },
           },
           loadingJob: true,
           loadSession: true,
@@ -184,6 +231,21 @@ export class DispatchService {
         orderBy: { raisedAt: 'asc' },
       }),
     ]);
+
+    // The latest road issue per trip; a "reported" one that was not resolved pauses the trip.
+    const roadEvents = await this.prisma.driverEvent.findMany({
+      where: { type: 'ROAD_ISSUE', tripId: { in: rows.map((t) => t.id) } },
+      orderBy: { appliedAt: 'asc' },
+      select: { tripId: true, payload: true, createdOnPhoneAt: true },
+    });
+    const openIssue = new Map<string, { payload: RoadIssuePayload; at: Date }>();
+    for (const e of roadEvents) {
+      const payload = e.payload as unknown as RoadIssuePayload;
+      if (!e.tripId) continue;
+      if (payload.status === 'reported')
+        openIssue.set(e.tripId, { payload, at: e.createdOnPhoneAt });
+      else openIssue.delete(e.tripId);
+    }
 
     const lastSeen = new Map<string, Date>();
     for (const e of events)
@@ -256,6 +318,7 @@ export class DispatchService {
       else if (broke) live = 'breakdown';
       else if (notSynced) live = 'not_synced';
       else if (onRoad) live = lateMin >= LATE_MIN ? 'late' : 'on_time';
+      else if (t.status === 'planning') live = 'planned';
       else if (t.status === 'published') live = 'assigned';
       else live = 'loading';
 
@@ -313,6 +376,40 @@ export class DispatchService {
           incidentId: d.id,
         });
       }
+      // A driver at a store that has not checked the goods for WAIT_ALERT_MIN minutes: one alert per stop.
+      for (const s of t.stops) {
+        if (!['arrived', 'waiting'].includes(s.status) || !s.arrivedAt || s.storeConfirmedAt)
+          continue;
+        const waited = Math.floor((now.getTime() - s.arrivedAt.getTime()) / 60000);
+        if (waited < WAIT_ALERT_MIN) continue;
+        const store = s.order.store.displayName ?? s.order.store.id;
+        const outletPhone =
+          s.order.store.phones.find((p) => p.label === 'shop') ?? s.order.store.phones[0];
+        attention.push({
+          id: `waiting-${s.id}`,
+          kind: 'waiting',
+          title: `${plate} waiting ${waited} min at ${store}`,
+          text: `Arrived ${clockText(s.arrivedAt)}. The store has not checked the goods yet; the driver was asked to call them${outletPhone ? ` on ${outletPhone.phoneNo}` : ''}.`,
+          tripId: t.id,
+          phone,
+        });
+      }
+      const issue = openIssue.get(t.id);
+      if (issue) {
+        const { payload } = issue;
+        attention.push({
+          id: `road-${t.id}`,
+          kind: 'road_issue',
+          title: `${ROAD_ISSUE_LABEL[payload.kind] ?? 'Road issue'} · ${plate} paused`,
+          text: `${payload.note ? `${payload.note} · ` : ''}Reported ${clockText(issue.at)}. The next stop waits until the driver resumes.`,
+          tripId: t.id,
+          phone,
+          photo: payload.photo ?? null,
+          mapUrl: payload.location
+            ? `https://www.google.com/maps/search/?api=1&query=${payload.location.lat},${payload.location.lng}`
+            : null,
+        });
+      }
       if (notSynced) {
         attention.push({
           id: `sync-${t.id}`,
@@ -331,7 +428,7 @@ export class DispatchService {
         tripNumber: t.tripNumber,
         tripsToday: perVehicle.get(t.vehicleId) ?? 1,
         brand: t.brand,
-        district: t.district.name,
+        district: tripAreaLabel(t),
         vehicleType: t.vehicle.type,
         vehicleTemp: t.vehicle.temp,
         driverName: driver ? person(driver.name) : null,
@@ -357,6 +454,7 @@ export class DispatchService {
         hasIssue:
           broke ||
           notSynced ||
+          openIssue.has(t.id) ||
           sos.length > 0 ||
           missingCount > 0 ||
           stops.some((s) => s.issueNote !== null),
@@ -401,8 +499,9 @@ export class DispatchService {
       depotId,
       asOf: now.toISOString(),
       liveSince: departures[0]?.toISOString() ?? null,
-      vehiclesWorking: new Set(trips.filter((t) => t.live !== 'completed').map((t) => t.vehicleId))
-        .size,
+      vehiclesWorking: new Set(
+        trips.filter((t) => t.live !== 'completed' && t.live !== 'planned').map((t) => t.vehicleId),
+      ).size,
       kpis: {
         tripsOnRoad: trips.filter((t) => t.status === 'on_road' || t.status === 'breakdown').length,
         dispatched,
@@ -423,6 +522,7 @@ export class DispatchService {
         done: trips.filter((t) => t.live === 'completed').length,
       },
       trips,
+      tomorrowTrips: await this.upcoming(depotId, nextDay),
       attention,
       carryovers: {
         total: carry.length,
@@ -437,6 +537,82 @@ export class DispatchService {
       },
     };
   }
+
+  /**
+   * Trips planned for a later day, shaped like live rows so the board can list them: nothing has
+   * moved yet, so they are "planned" until sent to the dock and driver, then "assigned".
+   */
+  private async upcoming(depotId: string, day: Date): Promise<LiveTrip[]> {
+    const rows = await this.prisma.trip.findMany({
+      where: { depotId, serviceDate: day },
+      include: {
+        vehicle: { include: { driver: driverInclude } },
+        assignedDriver: driverInclude,
+        district: true,
+        extraDistricts: { orderBy: { name: 'asc' } },
+        stops: { orderBy: { sequence: 'asc' }, include: { order: { include: { store: true } } } },
+      },
+      orderBy: [{ vehicleId: 'asc' }, { tripNumber: 'asc' }],
+    });
+    const perVehicle = new Map<string, number>();
+    for (const t of rows) perVehicle.set(t.vehicleId, (perVehicle.get(t.vehicleId) ?? 0) + 1);
+
+    return rows.map((t) => {
+      const driver = t.assignedDriver ?? t.vehicle.driver;
+      const later = rows.find((r) => r.vehicleId === t.vehicleId && r.tripNumber > t.tripNumber);
+      return {
+        id: t.id,
+        vehicleId: t.vehicleId,
+        plate: t.vehicle.numberPlate,
+        tripNumber: t.tripNumber,
+        tripsToday: perVehicle.get(t.vehicleId) ?? 1,
+        brand: t.brand,
+        district: tripAreaLabel(t),
+        vehicleType: t.vehicle.type,
+        vehicleTemp: t.vehicle.temp,
+        driverName: driver ? person(driver.name) : null,
+        driverPhone: driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null,
+        status: t.status,
+        live: t.status === 'planning' ? 'planned' : 'assigned',
+        lateMin: null,
+        notSyncedMin: null,
+        stopsDone: 0,
+        stopsTotal: t.stops.length,
+        weightKg: t.stops.reduce((sum, s) => sum + s.order.weightKg, 0),
+        lastPlace: null,
+        lastAt: null,
+        lastSyncAt: null,
+        departedAt: null,
+        openSos: 0,
+        backAt: null,
+        bay: null,
+        missingCount: 0,
+        previousTrip: null,
+        nextTrip: later ? { tripNumber: later.tripNumber, stops: later.stops.length } : null,
+        hasIssue: false,
+        stops: t.stops.map((s) => ({
+          id: s.id,
+          sequence: s.sequence,
+          storeName: s.order.store.displayName ?? s.order.store.id,
+          status: s.status,
+          windowOpenMin: s.order.store.windowOpenMin,
+          windowCloseMin: s.order.store.windowCloseMin,
+          etaMin: s.etaMin,
+          arrivedAt: null,
+          confirmed: false,
+          issueNote: null,
+          missBy: null,
+        })),
+      };
+    });
+  }
+}
+
+/** Store reports lead to the board, new orders to planning; everything else is an incident. */
+function noticeCategory(link: string | null): NoticeCategory {
+  if (link?.startsWith('/dispatch/plan')) return 'planning';
+  if (link?.startsWith('/dispatch/board')) return 'stores';
+  return 'incidents';
 }
 
 /** "10:12" in Colombo time. */

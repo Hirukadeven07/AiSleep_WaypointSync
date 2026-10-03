@@ -76,7 +76,7 @@ function TripRow({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(e) => e.key === 'Enter' && onOpen()}
-      className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-input p-3 ${zebra ? 'bg-wash' : ''}`}
+      className={`flex shrink-0 cursor-pointer items-center gap-2 rounded-input p-3 ${zebra ? 'bg-wash' : ''}`}
     >
       <div className="flex w-[200px] shrink-0 flex-col gap-px overflow-hidden whitespace-nowrap">
         <p className="text-[14px] font-semibold leading-5 text-ink">
@@ -96,7 +96,7 @@ function TripRow({
           {trip.district}
         </span>
       </div>
-      <div className="flex min-w-px flex-1 items-center gap-[10px]">
+      <div className="flex min-w-[150px] max-w-[280px] flex-1 items-center gap-[10px]">
         <span className="h-2 min-w-[40px] flex-1 overflow-hidden rounded-[4px] bg-bg">
           <span className={`block h-2 rounded-[4px] ${tone.fill}`} style={{ width: `${pct}%` }} />
         </span>
@@ -104,7 +104,7 @@ function TripRow({
           {trip.stopsDone}/{trip.stopsTotal} stops
         </span>
       </div>
-      <div className="flex w-[130px] shrink-0">
+      <div className="flex w-[110px] shrink-0">
         <span
           className={`flex items-center gap-[6px] whitespace-nowrap rounded-pill px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] ${tone.chip}`}
         >
@@ -112,7 +112,7 @@ function TripRow({
           {tone.label}
         </span>
       </div>
-      <div className="w-[160px] shrink-0 truncate text-[12px] leading-[17px] text-muted">
+      <div className="min-w-[160px] flex-1 truncate text-[12px] leading-[17px] text-muted">
         {lastUpdate(trip)}
       </div>
       <div className="flex h-[38px] w-[44px] shrink-0 items-center justify-center">
@@ -140,6 +140,7 @@ export function LiveDay() {
   const { day, error } = useLiveDay();
   const panels = useTripPanels(day);
   const [filter, setFilter] = useState<Filter>('all');
+  const [when, setWhen] = useState<'today' | 'tomorrow'>('today');
 
   if (!day) {
     return (
@@ -150,7 +151,8 @@ export function LiveDay() {
   }
 
   const active = FILTERS.find((f) => f.id === filter) ?? FILTERS[0];
-  const rows = day.trips.filter(active.test);
+  // Tomorrow lists what Planning has made so far; the live filters only apply to today.
+  const rows = when === 'today' ? day.trips.filter(active.test) : day.tomorrowTrips;
   const k = day.kpis;
 
   return (
@@ -205,34 +207,61 @@ export function LiveDay() {
 
         <section className="flex min-h-[280px] flex-1 flex-col gap-1 overflow-y-auto rounded-card bg-surface p-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex shrink-0 items-center gap-2">
-            <h2 className="min-w-px flex-1 text-[18px] font-semibold leading-[25px] text-ink">
-              Trips today
+            <h2 className="text-[18px] font-semibold leading-[25px] text-ink">
+              {when === 'today' ? 'Trips today' : 'Trips tomorrow'}
             </h2>
-            {FILTERS.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setFilter(f.id)}
-                aria-pressed={filter === f.id}
-                className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${
-                  filter === f.id ? 'bg-primary text-bg' : 'bg-bg text-ink'
-                }`}
-              >
-                {f.label} {f.count(day)}
-              </button>
-            ))}
+            <div className="flex gap-1 rounded-pill bg-bg p-1" role="tablist" aria-label="Day">
+              {(
+                [
+                  ['today', `Today · ${day.trips.length}`],
+                  ['tomorrow', `Tomorrow · ${day.tomorrowTrips.length}`],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={when === id}
+                  onClick={() => setWhen(id)}
+                  className={`whitespace-nowrap rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${
+                    when === id ? 'bg-surface text-ink' : 'text-muted'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="min-w-px flex-1" />
+            {when === 'today' &&
+              FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFilter(f.id)}
+                  aria-pressed={filter === f.id}
+                  className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${
+                    filter === f.id ? 'bg-primary text-bg' : 'bg-bg text-ink'
+                  }`}
+                >
+                  {f.label} {f.count(day)}
+                </button>
+              ))}
           </div>
           <div className="h-2 shrink-0" />
-          <div className="flex shrink-0 gap-3 px-3 py-2 text-[12px] font-bold leading-[15px] tracking-[0.6px] text-muted">
+          <div className="flex shrink-0 gap-2 px-3 py-2 text-[12px] font-bold leading-[15px] tracking-[0.6px] text-muted">
             <p className="w-[200px] shrink-0">VEHICLE &amp; DRIVER</p>
             <p className="w-[140px] shrink-0">BRAND · AREA</p>
-            <p className="min-w-px flex-1">PROGRESS</p>
-            <p className="w-[130px] shrink-0">STATUS</p>
-            <p className="w-[160px] shrink-0">LAST UPDATE</p>
+            <p className="min-w-[150px] max-w-[280px] flex-1">PROGRESS</p>
+            <p className="w-[110px] shrink-0">STATUS</p>
+            <p className="min-w-[160px] flex-1">LAST UPDATE</p>
             <p className="w-[44px] shrink-0" />
           </div>
           {rows.length === 0 && (
-            <p className="px-3 py-6 text-[13px] text-muted">No trips in this view.</p>
+            <p className="px-3 py-6 text-[13px] text-muted">
+              {when === 'today'
+                ? 'No trips in this view.'
+                : 'No trips planned for tomorrow yet. Create them in Planning.'}
+            </p>
           )}
           {rows.map((t, i) => (
             <TripRow

@@ -40,6 +40,9 @@ export interface DriverDayStopRow {
       windowCloseMin: number;
       lat: number | null;
       lng: number | null;
+      dockType: DriverDayStop['handover']['dockType'];
+      parkingConstraint: DriverDayStop['handover']['parking'];
+      mallWindow: string | null;
       district: { name: string };
       phones: DriverDayPhone[];
     };
@@ -115,6 +118,11 @@ function mapStop(stop: DriverDayStopRow): DriverDayStop {
     lng: store.lng,
     navigateUrl: navigateUrl(store.lat, store.lng),
     urgentNote: stop.order.urgentNote,
+    handover: {
+      dockType: store.dockType,
+      parking: store.parkingConstraint,
+      mallWindow: store.mallWindow,
+    },
     arrivedAt: iso(stop.arrivedAt),
     storeConfirmedAt: iso(stop.storeConfirmedAt),
     driverAckAt: iso(stop.driverAckAt),

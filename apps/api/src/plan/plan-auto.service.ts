@@ -12,7 +12,7 @@ import { PrismaService } from '../common/prisma/prisma.service';
 import { PlanDeferService } from './plan-defer.service';
 import { PlanEditService } from './plan-edit.service';
 import { PlanService } from './plan.service';
-import { orderInclude, toOutlet, toStopView, toVehicle, tripInclude } from './plan.mapper';
+import { orderInclude, toOutlet, toStopView, toVehicle, tripInclude, usedPct } from './plan.mapper';
 
 const dateOnly = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const isProposal = (id: string | null) => id !== null && id.startsWith('proposal-');
@@ -98,29 +98,30 @@ export class PlanAutoService {
       return { label: `${plateOf.get(a.vehicleId)} · Trip ${n}`, run: (n === 1 ? 1 : 2) as 1 | 2 };
     });
 
-    // Capacity used = planned weight against the vehicles that end up with a trip.
-    const weight = new Map<string, number>();
-    const capOf = new Map<string, number>();
-    for (const t of trips) {
-      capOf.set(t.vehicleId, t.vehicle.weightCapKg);
-      weight.set(
-        t.vehicleId,
-        (weight.get(t.vehicleId) ?? 0) + t.stops.reduce((s, st) => s + st.order.weightKg, 0),
-      );
-    }
-    for (const a of placed) {
-      const v = vehicles.find((x) => x.id === a.vehicleId)!;
-      capOf.set(v.id, v.weightCapKg);
-      weight.set(v.id, (weight.get(v.id) ?? 0) + (byId.get(a.orderId)?.weightKg ?? 0));
-    }
-    const cap = [...capOf.values()].reduce((a, b) => a + b, 0);
-    const used = [...weight.values()].reduce((a, b) => a + b, 0);
+    // Capacity used = the load after auto-assign against every trip's capacity (existing trips
+    // plus the new ones), weight or volume, whichever is fuller.
+    const vehicleOf = new Map(vehicles.map((v) => [v.id, v]));
+    const tripVehicles = [
+      ...trips.map((t) => t.vehicle),
+      ...opening.map((a) => vehicleOf.get(a.vehicleId)!),
+    ];
+    const loads = [
+      ...trips.flatMap((t) => t.stops.map((s) => s.order)),
+      ...placed.map((a) => byId.get(a.orderId)!),
+    ];
+    const total = <T>(rows: T[], f: (row: T) => number) => rows.reduce((s, r) => s + f(r), 0);
+    const capacityUsedPct = usedPct(
+      total(loads, (o) => o.weightKg),
+      total(tripVehicles, (v) => v.weightCapKg),
+      total(loads, (o) => o.volumeM3),
+      total(tripVehicles, (v) => v.volumeCapM3),
+    );
 
     return {
       tripsAfter: trips.length + newTrips.length,
       ordersPlaced: placed.length,
       movedToLater: missed.length,
-      capacityUsedPct: cap > 0 ? Math.round((used / cap) * 100) : 0,
+      capacityUsedPct,
       addedToExisting: placed.filter((a) => a.tripId !== null && !isProposal(a.tripId)).length,
       newTrips,
       deferred: missed.map((a) => {

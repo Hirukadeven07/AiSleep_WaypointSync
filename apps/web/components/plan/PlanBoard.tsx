@@ -10,6 +10,7 @@ import { OrderQueue } from './OrderQueue';
 import { PlanHeader, SummaryStrip } from './PlanHeader';
 import { PlanToast } from './PlanToast';
 import { PublishModal, publishPlan } from './PublishModal';
+import { RemoveTripModal } from './RemoveTripModal';
 import { TripList } from './TripList';
 import { usePlan } from './usePlan';
 import { usePlanEdit } from './usePlanEdit';
@@ -92,6 +93,7 @@ export function PlanBoard() {
       {modal?.kind === 'newTrip' && <NewTripModal edit={edit} />}
       {modal?.kind === 'publish' && <PublishModal check={modal.check} edit={edit} />}
       {modal?.kind === 'auto' && <AutoAssignModal proposal={modal.proposal} edit={edit} />}
+      {modal?.kind === 'removeTrip' && <RemoveTripModal trip={modal.trip} edit={edit} />}
       {edit.toast && <PlanToast toast={edit.toast} />}
     </div>
   );

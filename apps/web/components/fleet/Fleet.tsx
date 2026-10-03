@@ -7,6 +7,7 @@ import { PlanToast } from '@/components/plan/PlanToast';
 import type { ToastState } from '@/components/plan/usePlanEdit';
 import { api } from '@/lib/api';
 import { usePoll } from '@/lib/poll';
+import { AddVehicleModal } from './AddVehicleModal';
 import { OutOfServiceModal } from './OutOfServiceModal';
 import { VehicleDrawer } from './VehicleDrawer';
 
@@ -57,6 +58,7 @@ export function Fleet() {
   const [filter, setFilter] = useState<Filter>('all');
   const [openId, setOpenId] = useState<string | null>(null);
   const [marking, setMarking] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
   useEffect(() => {
@@ -90,8 +92,7 @@ export function Fleet() {
           </div>
           <button
             type="button"
-            disabled
-            title="Adding a vehicle is not built yet"
+            onClick={() => setAdding(true)}
             className="shrink-0 whitespace-pre rounded-pill border border-border bg-surface px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-ink"
           >
             {'+  Add vehicle'}
@@ -197,6 +198,22 @@ export function Fleet() {
                 result.ordersReturned > 0
                   ? `${result.ordersReturned} orders went back to Planning`
                   : 'Its trip on the road carries on',
+            });
+          }}
+        />
+      )}
+      {adding && (
+        <AddVehicleModal
+          onClose={() => setAdding(false)}
+          onDone={async (added) => {
+            setAdding(false);
+            setFilter('all');
+            await refresh();
+            setOpenId(added.id);
+            setToast({
+              kind: 'ok',
+              title: `${added.plate} added to the fleet`,
+              sub: 'It can take trips from today',
             });
           }}
         />

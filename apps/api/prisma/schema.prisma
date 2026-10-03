@@ -181,7 +181,9 @@ model District {
   interStopKm        Float?
   interStopMin       Int?
   stores             Store[]
-  trips              Trip[]
+  trips              Trip[]  @relation("TripMainDistrict")
+  /// Trips that also cover this district besides their main one.
+  coveredBy          Trip[]  @relation("TripExtraDistricts")
 }
 
 model ServiceAllowance {
@@ -353,7 +355,9 @@ model Trip {
   depot                 Depot            @relation(fields: [depotId], references: [id])
   brand                 Brand
   districtId            String
-  district              District         @relation(fields: [districtId], references: [id])
+  district              District         @relation("TripMainDistrict", fields: [districtId], references: [id])
+  /// More districts the dispatcher set this trip up for, besides the main one.
+  extraDistricts        District[]       @relation("TripExtraDistricts")
   serviceDate           DateTime         @db.Date
   /// 1 or 2. Database check Trip_tripNumber_max_2.
   tripNumber            Int

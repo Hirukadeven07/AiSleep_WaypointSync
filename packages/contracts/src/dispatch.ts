@@ -4,7 +4,14 @@ import type { Brand, StopStatus, TripStatus } from './status';
 
 /** What the dispatcher sees for a trip that is out or about to go. */
 export type LiveStatus =
-  'assigned' | 'loading' | 'on_time' | 'late' | 'breakdown' | 'not_synced' | 'completed';
+  | 'planned'
+  | 'assigned'
+  | 'loading'
+  | 'on_time'
+  | 'late'
+  | 'breakdown'
+  | 'not_synced'
+  | 'completed';
 
 export interface LiveStop {
   id: string;
@@ -71,7 +78,16 @@ export interface LiveTrip {
   stops: LiveStop[];
 }
 
-export type AttentionKind = 'breakdown' | 'damaged' | 'missing' | 'not_synced' | 'sos';
+export type AttentionKind =
+  | 'breakdown'
+  | 'damaged'
+  | 'missing'
+  | 'not_synced'
+  | 'sos'
+  /** A driver has waited 10+ minutes at a store that has not checked the goods. */
+  | 'waiting'
+  /** A driver reported a road issue that is not resolved yet; the trip is paused. */
+  | 'road_issue';
 
 export interface AttentionItem {
   id: string;
@@ -82,6 +98,9 @@ export interface AttentionItem {
   phone: string | null;
   /** The driver's SOS (DriverIncident) id, for kind "sos". */
   incidentId?: string;
+  /** Road issue: the driver's photo (a JPEG data URL) and a Google Maps link to where it was reported. */
+  photo?: string | null;
+  mapUrl?: string | null;
 }
 
 export interface LiveDay {
@@ -103,11 +122,33 @@ export interface LiveDay {
     incidentsText: string;
   };
   counts: { all: number; onTime: number; late: number; issue: number; done: number };
+  /** Today's trips, including ones still being planned (live "planned"). */
   trips: LiveTrip[];
+  /** Tomorrow's trips as planned so far: "planned" until sent, then "assigned". */
+  tomorrowTrips: LiveTrip[];
   attention: AttentionItem[];
   /** Orders that were moved from an earlier day and are due today. */
   carryovers: { total: number; onTrips: number; delivered: number };
   tomorrow: { date: string; ordersReceived: number; cutoffMin: number; minutesToCutoff: number };
+}
+
+/** Which tab of the dispatcher's notification panel a notice sits under. */
+export type NoticeCategory = 'incidents' | 'stores' | 'planning';
+
+/** One unseen notification for the dispatcher (bell on the live day). */
+export interface DispatcherNotice {
+  id: string;
+  category: NoticeCategory;
+  title: string;
+  body: string;
+  link: string | null;
+  createdAt: string; // ISO
+}
+
+/** GET /dispatch/notices: unseen notices, newest first, with a count per tab. */
+export interface DispatcherNotices {
+  notices: DispatcherNotice[];
+  counts: Record<NoticeCategory | 'all', number>;
 }
 
 /** The stores a delay would reach, and the message they would get. */

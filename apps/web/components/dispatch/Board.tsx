@@ -25,7 +25,13 @@ const tripName = (t: LiveTrip) =>
     : (t.plate ?? t.vehicleId);
 
 const COLUMNS: { id: ColumnId; title: string; dot: string; test: (t: LiveTrip) => boolean }[] = [
-  { id: 'assigned', title: 'Assigned', dot: 'bg-faint', test: (t) => t.live === 'assigned' },
+  {
+    id: 'assigned',
+    title: 'Assigned',
+    dot: 'bg-faint',
+    // Trips still being planned for today wait here with a "Planned" chip.
+    test: (t) => t.live === 'assigned' || t.live === 'planned',
+  },
   { id: 'loading', title: 'Loading', dot: 'bg-warning', test: (t) => t.live === 'loading' },
   {
     id: 'dispatched',
@@ -85,10 +91,20 @@ function Card({
           ? `${trip.bay ? `Dock ${trip.bay.replace(/^\D*/, '') || trip.bay}` : 'Dock'} · ${shortName(trip.driverName)}`
           : `${shortName(trip.driverName)} · ${kind(trip)}`}
       </p>
-      <span
-        className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${BRAND_TAG[trip.brand]}`}
-      >
-        {trip.brand}
+      <span className="flex flex-wrap items-center gap-[6px]">
+        <span
+          className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${BRAND_TAG[trip.brand]}`}
+        >
+          {trip.brand}
+        </span>
+        {/* Assigned holds both: planned (not sent yet) and sent to the dock and driver. */}
+        {column === 'assigned' && (
+          <span
+            className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${tone.chip}`}
+          >
+            {trip.live === 'planned' ? 'Planned · not sent' : 'Sent'}
+          </span>
+        )}
       </span>
       <p className="text-[12px] font-medium leading-[17px] text-muted">
         {column === 'dispatched' || column === 'complete'
@@ -167,12 +183,13 @@ function Card({
   );
 }
 
-/** Figma "Dispatch board": today's trips in four columns, from assigned to complete. */
+/** Figma "Dispatch board": today's (or tomorrow's) trips in four columns, from assigned to complete. */
 export function Board() {
   const { day, error } = useLiveDay();
   const panels = useTripPanels(day);
   const [filter, setFilter] = useState<Filter>('all');
   const [allOnTime, setAllOnTime] = useState(false);
+  const [when, setWhen] = useState<'today' | 'tomorrow'>('today');
 
   if (!day) {
     return (
@@ -184,20 +201,47 @@ export function Board() {
 
   // On the board, a late trip counts as having an issue (on the live day, "Late" is its own filter).
   const hasIssue = (t: LiveTrip) => t.hasIssue || t.live === 'late';
-  const issues = day.trips.filter(hasIssue).length;
-  const visible = day.trips.filter((t) =>
+  // Tomorrow shows what Planning made: planned trips, then assigned once the plan is published.
+  const source = when === 'today' ? day.trips : day.tomorrowTrips;
+  const issues = source.filter(hasIssue).length;
+  const visible = source.filter((t) =>
     filter === 'all' ? true : filter === 'issues' ? hasIssue(t) : t.brand === filter,
   );
 
   return (
     <div className="flex flex-col gap-[18px] px-1 pt-5 lg:-mb-6 lg:h-[calc(100vh-32px)] lg:pb-5">
-      <header className="flex shrink-0 flex-col gap-[6px]">
-        <h1 className="whitespace-nowrap text-[40px] font-medium leading-[46px] text-ink">
-          Dispatch board
-        </h1>
-        <p className="whitespace-nowrap text-[14px] leading-5 text-muted">
-          {`Today · ${dayLabel(day.date)} · ${day.vehiclesWorking} ${day.vehiclesWorking === 1 ? 'vehicle' : 'vehicles'} working`}
-        </p>
+      <header className="flex shrink-0 flex-wrap items-end gap-[10px]">
+        <div className="flex min-w-px flex-1 flex-col gap-[6px]">
+          <h1 className="whitespace-nowrap text-[40px] font-medium leading-[46px] text-ink">
+            Dispatch board
+          </h1>
+          <p className="whitespace-nowrap text-[14px] leading-5 text-muted">
+            {when === 'today'
+              ? `Today · ${dayLabel(day.date)} · ${day.vehiclesWorking} ${day.vehiclesWorking === 1 ? 'vehicle' : 'vehicles'} working`
+              : `Tomorrow · ${dayLabel(day.tomorrow.date)} · ${source.length} ${source.length === 1 ? 'trip' : 'trips'} planned`}
+          </p>
+        </div>
+        <div className="flex gap-1 rounded-pill bg-surface p-1" role="tablist" aria-label="Day">
+          {(
+            [
+              ['today', `Today · ${day.trips.length}`],
+              ['tomorrow', `Tomorrow · ${day.tomorrowTrips.length}`],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={when === id}
+              onClick={() => setWhen(id)}
+              className={`whitespace-nowrap rounded-pill px-4 py-2 text-[13px] font-semibold leading-[18px] ${
+                when === id ? 'bg-primary text-bg' : 'text-muted'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </header>
 
       <div className="flex shrink-0 flex-wrap gap-[10px]">

@@ -25,9 +25,11 @@ export function useTripPanels(day: LiveDay | undefined) {
   const openTrip = useCallback((id: string) => setPanel({ kind: 'trip', id }), []);
   const openActions = useCallback((id: string) => setPanel({ kind: 'actions', id }), []);
 
-  const trip = day?.trips.find((t) => t.id === panel?.id);
+  // Today's and tomorrow's rows can both open the drawer.
+  const all = [...(day?.trips ?? []), ...(day?.tomorrowTrips ?? [])];
+  const trip = all.find((t) => t.id === panel?.id);
   const sibling = trip
-    ? day?.trips.find(
+    ? all.find(
         (t) => t.vehicleId === trip.vehicleId && t.tripNumber === (trip.nextTrip?.tripNumber ?? -1),
       )
     : undefined;

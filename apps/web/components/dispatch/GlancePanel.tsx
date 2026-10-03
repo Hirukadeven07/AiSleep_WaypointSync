@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import { Icon } from '@/components/ui/Icon';
 import { clock12 } from '@/components/plan/format';
 import { untilText } from './live-format';
+import { NoticesBell } from './NoticesPanel';
 
 const BUTTON = 'rounded-pill bg-primary text-bg';
 
@@ -126,6 +127,65 @@ function Attention({ item }: { item: AttentionItem }) {
       </div>
     );
   }
+  if (item.kind === 'road_issue') {
+    return (
+      <div className="flex flex-col gap-2 rounded-note bg-danger-tint p-[14px]">
+        <p className="flex items-center gap-2 text-[13px] font-semibold leading-[18px] text-ink">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-danger" />
+          {item.title}
+        </p>
+        <p className="text-[12px] leading-[17px] text-muted">{item.text}</p>
+        {item.photo && (
+          <a href={item.photo} target="_blank" rel="noreferrer" className="self-start">
+            <img
+              src={item.photo}
+              alt="Photo from the driver"
+              className="h-[96px] w-auto max-w-full rounded-[10px] object-cover"
+            />
+          </a>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {item.phone && (
+            <a
+              href={`tel:${item.phone}`}
+              className={`px-3 py-[6px] text-[12px] font-semibold leading-[17px] ${BUTTON}`}
+            >
+              Call driver
+            </a>
+          )}
+          {item.mapUrl && (
+            <a
+              href={item.mapUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-pill border border-border bg-surface px-3 py-[6px] text-[12px] font-semibold leading-[17px] text-ink"
+            >
+              Where it is
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (item.kind === 'waiting') {
+    return (
+      <div className="flex flex-col gap-[6px] rounded-note bg-warning-tint p-[14px]">
+        <p className="flex items-center gap-2 text-[13px] font-semibold leading-[18px] text-ink">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-warning" />
+          {item.title}
+        </p>
+        <p className="text-[12px] leading-[17px] text-muted">{item.text}</p>
+        {item.phone && (
+          <a
+            href={`tel:${item.phone}`}
+            className={`self-start px-3 py-[6px] text-[12px] font-semibold leading-[17px] ${BUTTON}`}
+          >
+            Call driver
+          </a>
+        )}
+      </div>
+    );
+  }
   if (item.kind === 'missing') {
     return (
       <div className="flex flex-col gap-[6px] rounded-note bg-warning-tint p-[14px]">
@@ -171,9 +231,7 @@ export function GlancePanel({ day, className = '' }: { day: LiveDay; className?:
       className={`flex flex-col gap-[14px] overflow-y-auto rounded-hero bg-border p-[18px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}
     >
       <div className="flex shrink-0 items-center">
-        <span className="flex size-10 items-center justify-center rounded-full bg-surface text-slate">
-          <Icon name="bell" size={18} />
-        </span>
+        <NoticesBell />
         <span className="min-w-px flex-1" />
         <p className="whitespace-nowrap text-[13px] font-semibold leading-[18px] text-muted">
           Today at a glance

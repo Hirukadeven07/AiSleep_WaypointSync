@@ -15,6 +15,8 @@ const NOW = `${DAY}T10:00:00+05:30`;
 const date = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const STORES = ['FL-A', 'FL-B', 'FL-C', 'FL-D'];
 const VEHICLES = ['FL-V1', 'FL-V2', 'FL-V3', 'FL-V4'];
+// Added through POST /api/fleet; kept out of VEHICLES so the listing checks stay as they are.
+const ADDED = 'FL NEW-01';
 
 describe('fleet (e2e)', () => {
   let app: INestApplication;
@@ -144,7 +146,7 @@ describe('fleet (e2e)', () => {
     if (prisma) {
       await prisma.trip.deleteMany({ where: { vehicleId: { in: VEHICLES } } });
       await prisma.order.deleteMany({ where: { storeId: { in: STORES } } });
-      await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
+      await prisma.vehicle.deleteMany({ where: { id: { in: [...VEHICLES, ADDED] } } });
       await prisma.user.deleteMany({ where: { id: driverId } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
       await prisma.district.deleteMany({ where: { id: districtId } });
@@ -273,5 +275,51 @@ describe('fleet (e2e)', () => {
     expect(await prisma.trip.findUniqueOrThrow({ where: { id: ids.road } })).toMatchObject({
       status: 'on_road',
     });
+  });
+
+  it('adds a vehicle and refuses a plate already in use or a bad form', async () => {
+    const agent = await dispatcher();
+    const added = await agent
+      .post('/api/fleet')
+      .send({
+        plate: '  fl   new-01 ',
+        type: 'van',
+        temp: 'ambient',
+        weightCapKg: 1200,
+        volumeCapM3: 8,
+        kmPerL: 11,
+      })
+      .expect(200);
+    expect(added.body).toMatchObject({
+      id: ADDED,
+      plate: ADDED,
+      type: 'van',
+      temp: 'ambient',
+      weightCapKg: 1200,
+      volumeCapM3: 8,
+      status: 'at_depot',
+      homeDepot: 'Peliyagoda',
+    });
+    const row = await prisma.vehicle.findUniqueOrThrow({ where: { id: ADDED } });
+    expect(row).toMatchObject({ depotId: 'Peliyagoda', kmPerL: 11, weeklyFuelQuotaL: null });
+    const list = await agent.get('/api/fleet').expect(200);
+    expect(list.body.vehicles.map((v: { id: string }) => v.id)).toContain(ADDED);
+
+    const again = await agent
+      .post('/api/fleet')
+      .send({
+        plate: 'FL NEW-01',
+        type: 'truck',
+        temp: 'reefer',
+        weightCapKg: 3000,
+        volumeCapM3: 15,
+      })
+      .expect(409);
+    expect(again.body.message).toMatch(/already exists/);
+    await agent
+      .post('/api/fleet')
+      .send({ plate: 'FL-X', type: 'bus', temp: 'ambient', weightCapKg: 0, volumeCapM3: 15 })
+      .expect(400);
+    await agent.post('/api/fleet').send({ type: 'truck', temp: 'reefer' }).expect(400);
   });
 });

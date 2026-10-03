@@ -33,7 +33,9 @@ import {
   toOutlet,
   toStopView,
   toVehicle,
+  tripAreaLabel,
   tripInclude,
+  withoutCoveredDistricts,
   type OrderRow,
   type TripRow,
 } from './plan.mapper';
@@ -99,7 +101,11 @@ export class PlanEditService {
       trip.stops.filter((s) => s.orderId !== order.id).map((s) => toStopView(s.order)),
     );
 
-    const issues: RuleIssue[] = evaluateDrop({ vehicle, currentStops: current, candidate, lookup });
+    const issues: RuleIssue[] = withoutCoveredDistricts(
+      evaluateDrop({ vehicle, currentStops: current, candidate, lookup }),
+      trip,
+      [...current, candidate],
+    );
     // A trip with no stops yet still belongs to one brand.
     if (current.length === 0 && trip.brand !== order.brand) {
       issues.push({
@@ -325,7 +331,7 @@ export class PlanEditService {
       suggestion = {
         tripId: row.id,
         label: `${row.vehicle.numberPlate ?? row.vehicleId} · Trip ${row.tripNumber}`,
-        detail: `${kind} · ${row.brand} · ${row.district.name} · has room`,
+        detail: `${kind} · ${row.brand} · ${tripAreaLabel(row)} · has room`,
         fit: `fits as stop ${result.placedSequence}, ${late ? 'window at risk' : 'window met'}`,
       };
     }

@@ -1,10 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type {
+  AddVehicleRequest,
   FleetDay,
   FleetStatus,
   FleetTrip,
@@ -99,8 +101,12 @@ export class FleetService {
                   completed: 'Completed',
                   loading: 'Loading',
                   assigned: 'Assigned',
+                  planned: 'Planned',
                 }[l.live];
-          const tone = l.live === 'loading' || l.live === 'assigned' ? 'planned' : l.live;
+          const tone =
+            l.live === 'loading' || l.live === 'assigned' || l.live === 'planned'
+              ? 'planned'
+              : l.live;
           return {
             id: t.id,
             tripNumber: t.tripNumber,
@@ -279,6 +285,30 @@ export class FleetService {
       });
     });
     return { vehicle: await this.one(me, id), tripsReturned, ordersReturned };
+  }
+
+  /** A new vehicle at the dispatcher's depot, free from today. The plate (upper case) is its id. */
+  async addVehicle(me: Me, dto: AddVehicleRequest): Promise<FleetVehicle> {
+    const plate = dto.plate.trim().replace(/\s+/g, ' ').toUpperCase();
+    const taken = await this.prisma.vehicle.findFirst({
+      where: { OR: [{ id: plate }, { plate }] },
+    });
+    if (taken) throw new ConflictException(`A vehicle with plate ${plate} already exists.`);
+    await this.prisma.vehicle.create({
+      data: {
+        id: plate,
+        plate,
+        depotId: this.depotOf(me),
+        type: dto.type,
+        temp: dto.temp,
+        weightCapKg: dto.weightCapKg,
+        volumeCapM3: dto.volumeCapM3,
+        kmPerL: dto.kmPerL ?? null,
+        weeklyFuelQuotaL: dto.weeklyFuelQuotaL ?? null,
+        status: 'available',
+      },
+    });
+    return this.one(me, plate);
   }
 
   async backInService(me: Me, id: string): Promise<FleetVehicle> {

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { Brand, NewTripOptions, PlanTrip } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
+import { DistrictPicker } from './DistrictPicker';
 import { Modal, ModalIcon, OutlineButton, SolidButton } from './Modal';
 import type { PlanEdit } from './usePlanEdit';
 
@@ -26,13 +27,13 @@ function Radio({ on }: { on: boolean }) {
   );
 }
 
-/** Figma "Plan v2 / New trip": pick a run, a free vehicle, a brand and a district. */
+/** Figma "Plan v2 / New trip": pick a run, a free vehicle, a brand and one or more districts. */
 export function NewTripModal({ edit }: { edit: PlanEdit }) {
   const [options, setOptions] = useState<NewTripOptions | null>(null);
   const [run, setRun] = useState<1 | 2>(1);
   const [vehicleId, setVehicleId] = useState<string | null>(null);
   const [brand, setBrand] = useState<Brand>('Fresh');
-  const [districtId, setDistrictId] = useState('');
+  const [districts, setDistricts] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,7 +43,6 @@ export function NewTripModal({ edit }: { edit: PlanEdit }) {
       .then((o) => {
         if (!live) return;
         setOptions(o);
-        setDistrictId(o.districts[0]?.id ?? '');
         setVehicleId(o.vehicles['1'].find((v) => v.available)?.id ?? null);
       })
       .catch(() => live && edit.closeModal());
@@ -68,14 +68,29 @@ export function NewTripModal({ edit }: { edit: PlanEdit }) {
     );
   }
 
+  // A fix to the form clears the last "not enough info" message.
+  useEffect(() => setError(null), [chosen, districts, run, brand]);
+
   async function create() {
-    if (!chosen) return;
+    const missing = [
+      !options ? 'the trip options are still loading' : null,
+      options && !chosen
+        ? vehicles.some((v) => v.available)
+          ? 'pick a vehicle'
+          : `no vehicle is free for trip ${run}`
+        : null,
+      districts.length === 0 ? 'pick at least one district' : null,
+    ].filter(Boolean);
+    if (missing.length > 0 || !chosen) {
+      setError(`Not enough info to create the trip: ${missing.join(', ')}.`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const trip = await api<PlanTrip>('/plan/trips', {
         method: 'POST',
-        body: { vehicleId: chosen, tripNumber: run, brand, districtId },
+        body: { vehicleId: chosen, tripNumber: run, brand, districts },
       });
       await edit.reload();
       edit.closeModal();
@@ -123,6 +138,11 @@ export function NewTripModal({ edit }: { edit: PlanEdit }) {
 
       <p className="text-[12px] font-semibold leading-[17px] text-muted">Vehicle</p>
       <div className="flex max-h-[262px] flex-col gap-4 overflow-y-auto">
+        {options && vehicles.length === 0 && (
+          <p className="rounded-input bg-bg p-3 text-[13px] leading-[18px] text-muted">
+            No vehicles at this depot yet.
+          </p>
+        )}
         {vehicles.map((v) => {
           const on = chosen === v.id;
           return (
@@ -176,31 +196,18 @@ export function NewTripModal({ edit }: { edit: PlanEdit }) {
           </div>
         </div>
         <div className="flex min-w-px flex-1 flex-col gap-[6px]">
-          <p className="text-[12px] font-semibold leading-[17px] text-muted">District</p>
-          <label className="relative flex items-center rounded-input bg-bg px-[14px] py-[11px]">
-            <span className="min-w-px flex-1 text-[14px] font-medium leading-5 text-ink">
-              {options?.districts.find((d) => d.id === districtId)?.name ?? '…'}
-            </span>
-            <span className="text-[12px] font-semibold leading-[17px] text-muted">▾</span>
-            <select
-              aria-label="District"
-              value={districtId}
-              onChange={(e) => setDistrictId(e.target.value)}
-              className="absolute inset-0 cursor-pointer opacity-0"
-            >
-              {(options?.districts ?? []).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <p className="text-[12px] font-semibold leading-[17px] text-muted">Districts</p>
+          <DistrictPicker
+            options={options?.districts ?? []}
+            value={districts}
+            onChange={setDistricts}
+          />
         </div>
       </div>
 
       <p className="rounded-input bg-bg p-3 text-[12px] leading-[18px] text-muted">
-        One brand and one district per trip. Fresh trips must finish within 270 min, Style and Tech
-        within 480 min.
+        One brand per trip, covering one or more districts. Fresh trips must finish within 270 min,
+        Style and Tech within 480 min.
       </p>
       {error && (
         <p role="alert" className="text-[13px] font-medium text-danger">
@@ -210,7 +217,7 @@ export function NewTripModal({ edit }: { edit: PlanEdit }) {
 
       <div className="flex justify-end gap-[10px]">
         <OutlineButton onClick={edit.closeModal}>Cancel</OutlineButton>
-        <SolidButton onClick={create} disabled={!chosen || !districtId || busy}>
+        <SolidButton onClick={create} disabled={busy}>
           Create trip
         </SolidButton>
       </div>

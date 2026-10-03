@@ -7,7 +7,13 @@ import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { PlanEditService } from './plan-edit.service';
 import { clockText, dayLabel } from './plan-labels';
 import { DEPART_MIN, PlanService } from './plan.service';
-import { toStopView, toVehicle, tripInclude, type TripRow } from './plan.mapper';
+import {
+  toStopView,
+  toVehicle,
+  tripInclude,
+  withoutCoveredDistricts,
+  type TripRow,
+} from './plan.mapper';
 
 const dateOnly = (iso: string) => new Date(`${iso}T00:00:00Z`);
 /** The publish gate: capacity problems block, other warnings can be published through. */
@@ -71,7 +77,11 @@ export class PlanPublishService {
           message,
           severity: i.severity,
         });
-      for (const i of [...result.blocks, ...result.warnings]) {
+      for (const i of withoutCoveredDistricts(
+        [...result.blocks, ...result.warnings],
+        trip,
+        stops,
+      )) {
         if (i.code === 'OVER_VOLUME') {
           push(
             i,

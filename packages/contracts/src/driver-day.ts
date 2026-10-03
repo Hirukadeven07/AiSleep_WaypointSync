@@ -24,6 +24,15 @@ export interface DriverDayFlag {
   itemName: string | null;
 }
 
+/** How the goods are handed over at the store. */
+export interface DriverDayHandover {
+  dockType: 'rear_dock' | 'street' | 'mall_bay';
+  /** van_only: only a van can park; mall_dock: use the mall's goods dock. */
+  parking: 'normal' | 'van_only' | 'mall_dock';
+  /** The mall's delivery slot, e.g. "06:00-08:00", when the store is in a mall. */
+  mallWindow: string | null;
+}
+
 export interface DriverDayStop {
   id: string;
   sequence: number;
@@ -48,6 +57,7 @@ export interface DriverDayStop {
   /** Google Maps directions link; null when the store has no coordinates. */
   navigateUrl: string | null;
   urgentNote: string | null;
+  handover: DriverDayHandover;
   /** ISO timestamps. */
   arrivedAt: string | null;
   storeConfirmedAt: string | null;
