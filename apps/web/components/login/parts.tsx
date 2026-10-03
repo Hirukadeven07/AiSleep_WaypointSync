@@ -36,13 +36,21 @@ export function SkylinePhoto({ variant }: { variant: 'panel' | 'sheet' | 'hero' 
 
 export function SwitchRole({ className = '' }: { className?: string }) {
   return (
-    <Link
-      href="/login?switch=1"
-      className={`flex items-center gap-[6px] rounded-pill py-[9px] pl-3 pr-[14px] text-label font-semibold text-ink ${className}`}
-    >
-      <Icon name="switch" size={14} />
-      Switch role
-    </Link>
+    <span className={`flex items-center gap-2 ${className}`}>
+      <a
+        href="http://127.0.0.1:3099/"
+        className="flex items-center gap-[6px] rounded-pill bg-olive py-[9px] pl-3 pr-[14px] text-label font-semibold text-ink"
+      >
+        Check
+      </a>
+      <Link
+        href="/login?switch=1"
+        className="flex items-center gap-[6px] rounded-pill py-[9px] pl-3 pr-[14px] text-label font-semibold text-ink"
+      >
+        <Icon name="switch" size={14} />
+        Switch role
+      </Link>
+    </span>
   );
 }
 
