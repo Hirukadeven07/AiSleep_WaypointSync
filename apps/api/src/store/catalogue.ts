@@ -1,4 +1,4 @@
-import type { Brand, CatalogueItem, ItemType } from '@waypoint/contracts';
+import { ORDER_GROUP, type Brand, type CatalogueItem, type ItemType } from '@waypoint/contracts';
 
 function row(
   id: string,
@@ -68,21 +68,59 @@ export function catalogueItem(brand: Brand, id: string): CatalogueItem | undefin
   return CATALOGUE[brand].find((c) => c.id === id);
 }
 
+const BRANDS: Brand[] = ['Fresh', 'Style', 'Tech'];
+
+/** Every brand's items, the given brand's first: what any store may order from. */
+export function fullCatalogue(first: Brand): CatalogueItem[] {
+  return [first, ...BRANDS.filter((b) => b !== first)].flatMap((b) => CATALOGUE[b]);
+}
+
+/** An item from any brand's list. */
+export function anyCatalogueItem(id: string): CatalogueItem | undefined {
+  return BRANDS.flatMap((b) => CATALOGUE[b]).find((c) => c.id === id);
+}
+
+type CataloguePick = { catalogueId: string; qty: number };
+
 /** Order-line rows (without orderId) and totals for a list of catalogue picks. */
-export function buildLines(brand: Brand, picks: { catalogueId: string; qty: number }[]) {
-  const lines = picks.map((p) => {
-    const item = catalogueItem(brand, p.catalogueId);
-    if (!item) throw new Error(`Unknown catalogue item ${p.catalogueId} for ${brand}`);
-    return {
-      itemId: item.id,
-      name: item.name,
-      qty: p.qty,
-      pack: item.pack,
-      chilled: item.chilled,
-      unitWeightKg: item.unitWeightKg,
-      unitVolumeM3: item.unitVolumeM3,
-    };
+export function buildLines(brand: Brand, picks: CataloguePick[]) {
+  return totals(
+    picks.map((p) => {
+      const item = catalogueItem(brand, p.catalogueId);
+      if (!item) throw new Error(`Unknown catalogue item ${p.catalogueId} for ${brand}`);
+      return { item, qty: p.qty };
+    }),
+  );
+}
+
+/**
+ * Lines and totals for an order a store places from the full catalogue. The picks
+ * must all belong to one order group (ORDER_GROUP); a mixed order is refused.
+ */
+export function buildOrderLines(picks: CataloguePick[]) {
+  const picked = picks.map((p) => {
+    const item = anyCatalogueItem(p.catalogueId);
+    if (!item) throw new Error(`Unknown catalogue item ${p.catalogueId}`);
+    return { item, qty: p.qty };
   });
+  if (new Set(picked.map((p) => ORDER_GROUP[p.item.type])).size > 1) {
+    throw new Error(
+      'One order can hold one kind of goods: fresh and chilled food, Style, or Tech. Place a separate order for each.',
+    );
+  }
+  return totals(picked);
+}
+
+function totals(picked: { item: CatalogueItem; qty: number }[]) {
+  const lines = picked.map(({ item, qty }) => ({
+    itemId: item.id,
+    name: item.name,
+    qty,
+    pack: item.pack,
+    chilled: item.chilled,
+    unitWeightKg: item.unitWeightKg,
+    unitVolumeM3: item.unitVolumeM3,
+  }));
   const round = (n: number, dp: number) => Math.round(n * 10 ** dp) / 10 ** dp;
   return {
     lines,

@@ -69,6 +69,7 @@ describe('loader dock and store (e2e)', () => {
       ['F-MILK', 'Fresh milk'],
       ['F-BREAD', 'Bread'],
       ['F-YOG', 'Yoghurt'],
+      ['T-PHONE', 'Smartphones'],
     ] as const) {
       await prisma.item.upsert({ where: { id }, update: {}, create: { id, itemName } });
     }
@@ -506,7 +507,7 @@ describe('loader dock and store (e2e)', () => {
       await prisma.notification.deleteMany({ where: { id: notice.id } });
     });
 
-    it('stars catalogue items for the store and refuses another brand’s item', async () => {
+    it('stars catalogue items from any brand and refuses an unknown item', async () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
       const sorted = (res: { body: string[] }) => [...res.body].sort();
       expect((await store.get('/api/store/saved').expect(200)).body).toEqual([]);
@@ -518,14 +519,69 @@ describe('loader dock and store (e2e)', () => {
         'F-BREAD',
         'F-MILK',
       ]);
-      // E2E-HOME is a Fresh store; a Tech item is not in its catalogue.
-      await store.put('/api/store/saved/T-PHONE').expect(404);
+      // E2E-HOME is a Fresh store; it may still star another brand's item.
+      expect(sorted(await store.put('/api/store/saved/T-PHONE').expect(200))).toEqual([
+        'F-BREAD',
+        'F-MILK',
+        'T-PHONE',
+      ]);
+      await store.put('/api/store/saved/NOT-AN-ITEM').expect(404);
 
       expect(sorted(await store.delete('/api/store/saved/F-MILK').expect(200))).toEqual([
         'F-BREAD',
+        'T-PHONE',
       ]);
-      expect(sorted(await store.get('/api/store/saved').expect(200))).toEqual(['F-BREAD']);
-      expect(await prisma.storeSavedItem.count({ where: { storeId: 'E2E-HOME' } })).toBe(1);
+      expect(sorted(await store.get('/api/store/saved').expect(200))).toEqual([
+        'F-BREAD',
+        'T-PHONE',
+      ]);
+      expect(await prisma.storeSavedItem.count({ where: { storeId: 'E2E-HOME' } })).toBe(2);
+    });
+
+    it('offers every brand’s items, the store’s own brand first', async () => {
+      const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+      const catalogue: { id: string; type: string }[] = (
+        await store.get('/api/store/catalogue').expect(200)
+      ).body;
+      expect(catalogue).toHaveLength(35);
+      expect(catalogue[0]!.id).toBe('F-MILK');
+      expect([...new Set(catalogue.map((c) => c.type))]).toEqual([
+        'chilled_food',
+        'fresh',
+        'style',
+        'tech',
+      ]);
+    });
+
+    it('takes an order of one kind of goods and refuses a mixed one', async () => {
+      const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
+      // Tech and chilled food cannot share an order; nothing is saved.
+      const before = await prisma.order.count({ where: { storeId: 'E2E-HOME' } });
+      const mixed = await store
+        .post('/api/store/orders')
+        .send({
+          lines: [
+            { catalogueId: 'T-PHONE', qty: 1 },
+            { catalogueId: 'F-MILK', qty: 1 },
+          ],
+        })
+        .expect(400);
+      expect(mixed.body.message).toContain('one kind of goods');
+      expect(await prisma.order.count({ where: { storeId: 'E2E-HOME' } })).toBe(before);
+
+      // A Fresh store may order Tech on its own: an ambient order, still under the store's brand.
+      const tech = await store
+        .post('/api/store/orders')
+        .send({ lines: [{ catalogueId: 'T-PHONE', qty: 2 }] })
+        .expect(201);
+      expect(tech.body.chilled).toBe(false);
+      const saved = await prisma.order.findUniqueOrThrow({
+        where: { id: tech.body.id },
+        include: { lines: true },
+      });
+      expect(saved.brand).toBe('Fresh');
+      expect(saved.temp).toBe('ambient');
+      expect(saved.lines.map((l) => l.itemId)).toEqual(['T-PHONE']);
     });
 
     it('lists the latest order first with its lines, for "order again"', async () => {

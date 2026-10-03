@@ -22,7 +22,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { nextOperatingDay } from '../common/clock/operating-day';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
-import { CATALOGUE, buildLines, catalogueItem } from './catalogue';
+import { anyCatalogueItem, buildOrderLines, fullCatalogue } from './catalogue';
 import type { PlaceOrderDto, ReceiptDto } from './dto/store.dto';
 import { PhotosService } from '../photos/photos.service';
 
@@ -175,9 +175,10 @@ export class StoreService {
     };
   }
 
+  /** Every brand's items, the store's own brand first. One order still holds a single group. */
   async catalogue(me: AuthUser): Promise<CatalogueItem[]> {
     const store = await this.store(me);
-    return CATALOGUE[store.brand];
+    return fullCatalogue(store.brand);
   }
 
   async orders(me: AuthUser): Promise<StoreOrderView[]> {
@@ -217,8 +218,8 @@ export class StoreService {
 
   async saveItem(me: AuthUser, itemId: string): Promise<string[]> {
     const store = await this.store(me);
-    if (!catalogueItem(store.brand, itemId)) {
-      throw new NotFoundException('That item is not in this store’s catalogue');
+    if (!anyCatalogueItem(itemId)) {
+      throw new NotFoundException('That item is not in the catalogue');
     }
     await this.prisma.storeSavedItem.upsert({
       where: { storeId_itemId: { storeId: store.id, itemId } },
@@ -262,9 +263,9 @@ export class StoreService {
         'Orders for tomorrow close at 16:00. Order again tomorrow morning.',
       );
     }
-    let built: ReturnType<typeof buildLines>;
+    let built: ReturnType<typeof buildOrderLines>;
     try {
-      built = buildLines(store.brand, dto.lines);
+      built = buildOrderLines(dto.lines);
     } catch (e) {
       throw new BadRequestException((e as Error).message);
     }
