@@ -27,7 +27,7 @@ export type ToastState = {
 export type PlanModal =
   | { kind: 'defer'; orderId: string }
   | { kind: 'newTrip' }
-  | { kind: 'publish'; check: PublishCheck }
+  | { kind: 'publish'; check: PublishCheck; tripId?: string }
   | { kind: 'auto'; proposal: AutoAssignProposal }
   | { kind: 'removeTrip'; trip: PlanTrip };
 

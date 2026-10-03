@@ -7,14 +7,18 @@ import { Modal, ModalIcon, SolidButton } from './Modal';
 import type { PlanEdit } from './usePlanEdit';
 
 /** Sends the plan, then says how many trips and stores it reached (Figma "Published" toast). */
-export async function publishPlan(edit: PlanEdit, anyway: boolean) {
+export async function publishPlan(edit: PlanEdit, anyway: boolean, tripId?: string) {
   try {
-    const res = await api<PlanPublishResult>('/plan/publish', { method: 'POST', body: { anyway } });
+    const res = await api<PlanPublishResult>('/plan/publish', {
+      method: 'POST',
+      body: { anyway, ...(tripId ? { tripId } : {}) },
+    });
     await edit.reload();
     edit.closeModal();
+    const one = Boolean(tripId);
     edit.showToast({
       kind: 'ok',
-      title: 'Plan published',
+      title: one ? 'Trip published' : 'Plan published',
       sub: `${res.tripCount} ${res.tripCount === 1 ? 'trip' : 'trips'} sent to loaders and drivers · ${res.storeCount} ${
         res.storeCount === 1 ? 'store' : 'stores'
       } notified`,
@@ -32,7 +36,15 @@ export async function publishPlan(edit: PlanEdit, anyway: boolean) {
 }
 
 /** Figma "Plan v2 / Publish check": what is still open. A capacity problem blocks; other warnings can go through. */
-export function PublishModal({ check, edit }: { check: PublishCheck; edit: PlanEdit }) {
+export function PublishModal({
+  check,
+  edit,
+  tripId,
+}: {
+  check: PublishCheck;
+  edit: PlanEdit;
+  tripId?: string;
+}) {
   const n = check.problems.length;
   return (
     <Modal label="Publish check" width={520} onClose={edit.closeModal}>
@@ -64,7 +76,7 @@ export function PublishModal({ check, edit }: { check: PublishCheck; edit: PlanE
         <button
           type="button"
           disabled={!check.canPublish}
-          onClick={() => void publishPlan(edit, true)}
+          onClick={() => void publishPlan(edit, true, tripId)}
           className="flex min-w-px flex-1 items-center justify-center rounded-pill border border-border bg-surface px-[18px] py-3 text-[14px] font-semibold leading-5 text-ink disabled:opacity-40"
         >
           Publish anyway

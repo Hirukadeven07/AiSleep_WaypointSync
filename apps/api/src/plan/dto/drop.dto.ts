@@ -74,4 +74,10 @@ export class PublishDto {
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   date?: string;
+
+  /** When set, only this trip is checked and sent. Omitted publishes every trip that still has stops. */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  tripId?: string;
 }

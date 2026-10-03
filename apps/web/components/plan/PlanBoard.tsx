@@ -35,11 +35,14 @@ export function PlanBoard() {
   const modal = edit.modal;
 
   /** Publishing with nothing open goes straight through; otherwise the check explains what is open. */
-  async function publish() {
+  async function publish(tripId?: string) {
     try {
-      const check = await api<PublishCheck>('/plan/publish/check', { method: 'POST', body: {} });
-      if (check.problems.length === 0) await publishPlan(edit, false);
-      else edit.openModal({ kind: 'publish', check });
+      const check = await api<PublishCheck>('/plan/publish/check', {
+        method: 'POST',
+        body: tripId ? { tripId } : {},
+      });
+      if (check.problems.length === 0) await publishPlan(edit, false, tripId);
+      else edit.openModal({ kind: 'publish', check, tripId });
     } catch {
       edit.showToast({ kind: 'error', title: 'The plan could not be checked', sub: 'Try again.' });
     }
@@ -81,7 +84,12 @@ export function PlanBoard() {
           className="lg:w-[340px] lg:shrink-0"
         />
         {view === 'list' ? (
-          <TripList trips={plan.trips} edit={edit} className="min-w-0 lg:flex-1" />
+          <TripList
+            trips={plan.trips}
+            edit={edit}
+            onPublish={(tripId) => void publish(tripId)}
+            className="min-w-0 lg:flex-1"
+          />
         ) : (
           <PlanMap
             date={plan.date}
@@ -104,7 +112,9 @@ export function PlanBoard() {
       )}
       {modal?.kind === 'defer' && <DeferModal orderId={modal.orderId} edit={edit} />}
       {modal?.kind === 'newTrip' && <NewTripModal edit={edit} />}
-      {modal?.kind === 'publish' && <PublishModal check={modal.check} edit={edit} />}
+      {modal?.kind === 'publish' && (
+        <PublishModal check={modal.check} tripId={modal.tripId} edit={edit} />
+      )}
       {modal?.kind === 'auto' && <AutoAssignModal proposal={modal.proposal} edit={edit} />}
       {modal?.kind === 'removeTrip' && <RemoveTripModal trip={modal.trip} edit={edit} />}
       {edit.toast && <PlanToast toast={edit.toast} />}
