@@ -174,7 +174,16 @@ export class DriverService {
       }),
     ]);
     const done = new Set(['delivered', 'partial', 'confirmed', 'deferred']);
-    const v = user.vehicle;
+    // The registered vehicle, else the truck of today's active trip (the one Home shows).
+    let v = user.vehicle;
+    if (!v) {
+      const todays = await this.prisma.trip.findMany({
+        where: { ...ownTripWhere(me.id), serviceDate: today, status: { in: DRIVER_TRIP_STATUSES } },
+        select: { id: true, tripNumber: true, status: true, vehicle: true },
+      });
+      const activeId = pickActiveTripId(todays);
+      v = todays.find((t) => t.id === activeId)?.vehicle ?? null;
+    }
     return {
       name: user.name,
       loginId: user.loginId,

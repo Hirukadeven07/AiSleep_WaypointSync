@@ -203,17 +203,47 @@ export async function linkDemoDriver(prisma: PrismaClient) {
   const kasun = await prisma.user.findUnique({ where: { loginId: 'kasun' } });
   if (!kasun) return;
   const today = colomboDay(0);
-  const linked = await prisma.trip.updateMany({
+  // One trip per run: several demo seeds name kasun, so keep the first trip of each run (the one on
+  // the road first) and take him off the others. A driver cannot drive two trucks at once.
+  const mine = await prisma.trip.findMany({
+    where: { serviceDate: today, assignedDriverId: kasun.id, status: { notIn: ['completed'] } },
+    orderBy: [{ tripNumber: 'asc' }, { status: 'desc' }, { id: 'asc' }],
+    select: { id: true, tripNumber: true, status: true },
+  });
+  const keep = new Map<number, string>();
+  for (const t of [...mine].sort(
+    (a, b) => Number(b.status === 'on_road') - Number(a.status === 'on_road'),
+  )) {
+    if (!keep.has(t.tripNumber)) keep.set(t.tripNumber, t.id);
+  }
+  const extra = mine.filter((t) => keep.get(t.tripNumber) !== t.id).map((t) => t.id);
+  if (extra.length > 0) {
+    await prisma.trip.updateMany({
+      where: { id: { in: extra } },
+      data: { assignedDriverId: null },
+    });
+  }
+  // Runs still without a trip for him get today's on-road or published demo trip.
+  let linked = 0;
+  const demo = await prisma.trip.findMany({
     where: {
       depotId: DEPOT,
       serviceDate: today,
-      status: { in: ['published', 'on_road'] },
+      status: { in: ['on_road', 'published'] },
       assignedDriverId: null,
       csvRouteId: { in: [`DEMO-STATUS-${DEPOT}-on_road`, `DEMO-STATUS-${DEPOT}-published`] },
     },
-    data: { assignedDriverId: kasun.id },
+    select: { id: true, tripNumber: true },
   });
-  console.log(`[seed] demo driver kasun: ${linked.count} of today's trips assigned`);
+  for (const t of demo) {
+    if (keep.has(t.tripNumber)) continue;
+    await prisma.trip.update({ where: { id: t.id }, data: { assignedDriverId: kasun.id } });
+    keep.set(t.tripNumber, t.id);
+    linked += 1;
+  }
+  console.log(
+    `[seed] demo driver kasun: ${keep.size} trip(s) today (${linked} assigned, ${extra.length} unassigned)`,
+  );
 }
 
 /** Licence expiry for every driver without one: kasun's is close, so the profile shows the warning. */
