@@ -74,12 +74,30 @@ Then, from a phone on mobile data (not the VM's network), open the public hostna
 
 ```bash
 git pull
+git lfs pull
 docker compose --profile public up -d --build   # update
 docker compose logs -f api                       # logs
 docker compose --profile public down             # stop (keeps volumes)
 ```
 
+`scripts/update-from-main.sh` does that pull and rebuild, and skips the rebuild when `main` has not moved. The Sri Lanka basemap is Git LFS, so the VM needs `git lfs` installed (`git lfs pull` after every update).
+
 Do not run `docker compose down -v` or `pnpm seed:reset` on the VM unless you intend to wipe the database.
+
+## 8a. Update the demo when main changes
+
+A push to `main` runs `.github/workflows/deploy.yml`, which SSHs to this VM and runs `scripts/update-from-main.sh`. Until the secrets exist, that workflow skips and the demo stays as it is.
+
+In the GitHub repo: Settings > Secrets and variables > Actions:
+
+| Secret | Value |
+| --- | --- |
+| `DEPLOY_HOST` | VM hostname or IP |
+| `DEPLOY_USER` | SSH user that can run Docker |
+| `DEPLOY_SSH_KEY` | private key for that user |
+| `DEPLOY_PATH` | optional clone path; default `/opt/AiSleep_WaypointSync` |
+
+The deploy user must be allowed to run `docker` without a password prompt. This clone should stay on `main`. Do not develop in it.
 
 ## 9. Nightly database backup
 
