@@ -15,6 +15,7 @@ import type {
   OutOfServiceResult,
 } from '@waypoint/contracts';
 import { estimateTripLitres, sortStopsByWindow } from '@waypoint/domain';
+import { backAtLabel } from '../common/back-at';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { DispatchService } from '../dispatch/dispatch.service';
@@ -22,8 +23,7 @@ import { orderInclude, toStopView, toVehicle } from '../plan/plan.mapper';
 import { PlanService } from '../plan/plan.service';
 
 const dateOnly = (iso: string) => new Date(`${iso}T00:00:00Z`);
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-const weekday = (d: Date) => d.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+const isoDateTime = (d: Date) => d.toISOString();
 const driverName = (name: string) => name.replace(/\s*\(.*\)\s*$/, '').trim();
 const STARTED = new Set(['loading', 'ready', 'on_road', 'breakdown', 'completed']);
 
@@ -59,7 +59,7 @@ export class FleetService {
       this.prisma.vehicle.findMany({
         where: { depotId },
         include: { driver: driverInclude },
-        orderBy: { plate: 'asc' },
+        orderBy: { numberPlate: 'asc' },
       }),
       this.prisma.trip.findMany({
         where: { depotId, serviceDate: day },
@@ -142,7 +142,7 @@ export class FleetService {
       if (v.status === 'out_of_service') {
         status = 'out_of_service';
         const reason = (v.outOfServiceReason ?? 'Out of service').split(' — ')[0];
-        today = `${reason}${v.returnDate ? ` · back ${weekday(v.returnDate)}` : ''}`;
+        today = `${reason}${v.returnDate ? ` · back ${backAtLabel(v.returnDate)}` : ''}`;
       } else if (running) {
         status = running.tone === 'breakdown' ? 'breakdown' : 'on_road';
         const of = mine.length > 1 ? ` of ${mine.length}` : '';
@@ -180,7 +180,7 @@ export class FleetService {
 
       return {
         id: v.id,
-        plate: v.plate ?? v.id,
+        plate: v.numberPlate ?? v.id,
         driverName: driver ? driverName(driver.name) : null,
         driverPhone: phone,
         type: v.type,
@@ -192,7 +192,7 @@ export class FleetService {
         today,
         outOfServiceReason:
           v.status === 'out_of_service' ? (v.outOfServiceReason ?? 'Out of service') : null,
-        returnDate: v.status === 'out_of_service' && v.returnDate ? iso(v.returnDate) : null,
+        returnDate: v.status === 'out_of_service' && v.returnDate ? isoDateTime(v.returnDate) : null,
         trips: fleetTrips,
         plannedTrips: unstarted.map((t) => ({ tripNumber: t.tripNumber, stops: t.stops.length })),
         fuel:
@@ -238,6 +238,12 @@ export class FleetService {
       throw new BadRequestException('This vehicle is already out of service');
     const reason = dto.reason.trim();
     if (!reason) throw new BadRequestException('Say why the vehicle is out of service');
+    let returnDate: Date | null = null;
+    if (dto.returnDate) {
+      returnDate = new Date(dto.returnDate);
+      if (Number.isNaN(returnDate.getTime()))
+        throw new BadRequestException('Return time is not a valid date');
+    }
 
     const today = dateOnly(this.clock.today());
     let tripsReturned = 0;
@@ -268,7 +274,7 @@ export class FleetService {
         data: {
           status: 'out_of_service',
           outOfServiceReason: dto.note?.trim() ? `${reason} — ${dto.note.trim()}` : reason,
-          returnDate: dateOnly(dto.returnDate),
+          returnDate,
         },
       });
     });

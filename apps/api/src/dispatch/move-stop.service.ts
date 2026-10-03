@@ -67,7 +67,7 @@ export class MoveStopService {
   }
 
   private label(t: TripRow) {
-    return `${t.vehicle.plate ?? t.vehicleId} · Trip ${t.tripNumber}`;
+    return `${t.vehicle.numberPlate ?? t.vehicleId} · Trip ${t.tripNumber}`;
   }
 
   /** Blocking reasons for adding this stop to that trip, or [] when it fits. */

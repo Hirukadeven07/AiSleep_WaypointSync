@@ -62,7 +62,7 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
     serviceDate: isoDay(s.trip.serviceDate),
     status: s.status,
     etaMin: s.etaMin,
-    plate: s.trip.vehicle.plate ?? s.trip.vehicle.id,
+    plate: s.trip.vehicle.numberPlate ?? s.trip.vehicle.id,
     driverName: (s.trip.assignedDriver ?? s.trip.vehicle.driver)?.name ?? null,
     chilled: s.order.temp === 'chilled',
     arrivedAt: s.arrivedAt?.toISOString() ?? null,

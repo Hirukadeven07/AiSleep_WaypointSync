@@ -40,7 +40,6 @@ export interface DriverDayStopRow {
       windowCloseMin: number;
       lat: number | null;
       lng: number | null;
-      phone: string | null;
       district: { name: string };
       phones: DriverDayPhone[];
     };
@@ -58,7 +57,7 @@ export interface DriverDayTripRow {
 
 export interface DriverDayVehicleRow {
   id: string;
-  plate: string | null;
+  numberPlate: string | null;
   type: DriverDayVehicle['type'];
   trips: DriverDayTripRow[];
 }
@@ -81,9 +80,9 @@ export function navigateUrl(lat: number | null, lng: number | null): string | nu
   return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
 }
 
-function pickPhone(storePhone: string | null, phones: DriverDayPhone[]): string | null {
+function pickPhone(phones: DriverDayPhone[]): string | null {
   const shop = phones.find((phone) => phone.label === 'shop');
-  return shop?.phoneNo ?? storePhone ?? phones[0]?.phoneNo ?? null;
+  return shop?.phoneNo ?? phones[0]?.phoneNo ?? null;
 }
 
 function mapFlag(flag: DriverDayFlagRow): DriverDayFlag {
@@ -110,7 +109,7 @@ function mapStop(stop: DriverDayStopRow): DriverDayStop {
     windowStart: store.windowOpenMin,
     windowEnd: store.windowCloseMin,
     eta: stop.etaMin,
-    phone: pickPhone(store.phone, phones),
+    phone: pickPhone(phones),
     phones,
     lat: store.lat,
     lng: store.lng,
@@ -145,7 +144,7 @@ export function buildDriverDay(
 
   return {
     serviceDate,
-    vehicle: { id: vehicle.id, plate: vehicle.plate ?? vehicle.id, type: vehicle.type },
+    vehicle: { id: vehicle.id, plate: vehicle.numberPlate ?? vehicle.id, type: vehicle.type },
     trips: trips.map(mapTrip),
     activeTripId: pickActiveTripId(trips),
   };

@@ -71,7 +71,8 @@ export function OutOfServiceModal({
 }) {
   const options = days(today);
   const [reason, setReason] = useState<string>(OUT_OF_SERVICE_REASONS[0]);
-  const [back, setBack] = useState(options[1].iso);
+  const [back, setBack] = useState('');
+  const [time, setTime] = useState('14:30');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +87,11 @@ export function OutOfServiceModal({
       onDone(
         await api<OutOfServiceResult>(`/fleet/${vehicle.id}/out-of-service`, {
           method: 'POST',
-          body: { reason, returnDate: back, note: note || undefined },
+          body: {
+            reason,
+            note: note || undefined,
+            ...(back ? { returnDate: `${back}T${time.slice(0, 5)}:00+05:30` } : {}),
+          },
         }),
       );
     } catch {
@@ -122,12 +127,25 @@ export function OutOfServiceModal({
         options={OUT_OF_SERVICE_REASONS.map((r) => ({ value: r, label: r }))}
       />
       <Pick
-        label="Expected back"
+        label="Expected back (optional)"
         value={back}
-        shown={options.find((o) => o.iso === back)?.label ?? ''}
+        shown={back ? (options.find((o) => o.iso === back)?.label ?? '') : 'Not set'}
         onChange={setBack}
-        options={options.map((o) => ({ value: o.iso, label: o.label }))}
+        options={[{ value: '', label: 'Not set' }, ...options.map((o) => ({ value: o.iso, label: o.label }))]}
       />
+      {back && (
+        <label className="flex flex-col gap-[6px]">
+          <span className="text-[12px] font-semibold leading-[17px] text-muted">Time back</span>
+          <input
+            type="time"
+            aria-label="Time back"
+            value={time}
+            onChange={(e) => setTime(e.target.value || '14:30')}
+            required
+            className="rounded-note bg-bg px-4 py-3 text-[14px] leading-5 text-ink outline-none"
+          />
+        </label>
+      )}
       <label className="flex flex-col gap-[6px]">
         <span className="text-[12px] font-semibold leading-[17px] text-muted">Note (optional)</span>
         <textarea

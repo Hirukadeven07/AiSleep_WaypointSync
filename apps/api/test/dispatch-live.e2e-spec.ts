@@ -57,7 +57,7 @@ describe('live day (e2e)', () => {
       await prisma.vehicle.create({
         data: {
           id,
-          plate: id,
+          numberPlate: id,
           depotId: 'Peliyagoda',
           type: 'van',
           temp: 'ambient',

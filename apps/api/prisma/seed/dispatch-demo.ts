@@ -138,7 +138,7 @@ export async function seedDispatchDemo(prisma: PrismaClient) {
   }
 
   console.log(
-    `[seed] dispatch demo: ${truck.plate ?? truck.id} on the road with ${pick.length} stops ` +
+    `[seed] dispatch demo: ${truck.numberPlate ?? truck.id} on the road with ${pick.length} stops ` +
       `(store logins: ${pick
         .slice(1)
         .map((s) => s.id)

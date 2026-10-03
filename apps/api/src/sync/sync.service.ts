@@ -322,17 +322,11 @@ export class SyncService {
           !latest || latest.createdOnPhoneAt.getTime() <= Date.parse(event.createdOnPhoneAt);
         await this.recordEvent(tx, me, event, tripId);
 
-        if (isNewest) {
-          await tx.vehicle.update({
-            where: { id: vehicle.id },
-            data: { lastConfirmedLitres: remainingLitres },
+        if (isNewest && tripId) {
+          await tx.trip.update({
+            where: { id: tripId },
+            data: { fuelLitresAtEnd: remainingLitres },
           });
-          if (tripId) {
-            await tx.trip.update({
-              where: { id: tripId },
-              data: { fuelLitresAtEnd: remainingLitres },
-            });
-          }
         }
         return { stale, notifications: [] };
       }

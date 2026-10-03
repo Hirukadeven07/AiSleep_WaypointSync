@@ -10,9 +10,84 @@ const VERSION_AT = new Date('2026-10-01T04:00:00.000Z');
 export async function seedTeamErd(prisma: PrismaClient) {
   await seedCatalogue(prisma);
   await seedPeople(prisma);
+  await seedOutletPhones(prisma);
   await linkOrderLines(prisma);
   await seedOps(prisma);
+  await seedIncidents(prisma);
   console.log('[seed] team ERD sample rows ready');
+}
+
+/** Two extra open incidents so the desk has more than a breakdown. */
+async function seedIncidents(prisma: PrismaClient) {
+  const trips = await prisma.trip.findMany({
+    where: { status: { in: ['on_road', 'published', 'completed'] } },
+    orderBy: [{ serviceDate: 'desc' }, { tripNumber: 'asc' }],
+    take: 3,
+  });
+  if (trips.length === 0) return;
+  const wanted = [
+    {
+      type: 'delay' as const,
+      trip: trips[0]!,
+      text: 'Truck is running about 25 min late.',
+    },
+    {
+      type: 'quiet_driver' as const,
+      trip: trips[1] ?? trips[0]!,
+      text: 'No location update from the driver for 20 min.',
+    },
+  ];
+  let added = 0;
+  for (const row of wanted) {
+    const exists = await prisma.incident.findFirst({
+      where: { tripId: row.trip.id, type: row.type },
+    });
+    if (exists) continue;
+    await prisma.incident.create({
+      data: {
+        type: row.type,
+        tripId: row.trip.id,
+        status: 'open',
+        timeline: [{ at: new Date().toISOString(), text: row.text, by: 'dispatcher' }],
+      },
+    });
+    added += 1;
+  }
+  if (added > 0) console.log(`[seed] ${added} incidents ready (delay, quiet driver)`);
+}
+
+/** Same landline on two stores, and twice on the first store. phoneNo is not unique. */
+const SHARED_SHOP = '0112345678';
+
+async function seedOutletPhones(prisma: PrismaClient) {
+  const stores = await prisma.store.findMany({
+    orderBy: { id: 'asc' },
+    include: { phones: true },
+  });
+  if (stores.length === 0) return;
+
+  const rows: { storeId: string; phoneNo: string; label: 'shop' | 'manager' | 'warehouse' }[] = [];
+  for (let i = 0; i < stores.length; i++) {
+    const store = stores[i]!;
+    const have = new Set(store.phones.map((p) => `${p.label}:${p.phoneNo}`));
+    const shop = i < 2 ? SHARED_SHOP : `011${String(2100000 + i).slice(-7)}`;
+    const manager = `077${String(4100000 + i).slice(-7)}`;
+    const wanted: typeof rows = [
+      { storeId: store.id, phoneNo: shop, label: 'shop' },
+      { storeId: store.id, phoneNo: manager, label: 'manager' },
+    ];
+    if (i === 0) {
+      wanted.push({ storeId: store.id, phoneNo: shop, label: 'warehouse' });
+    }
+    for (const row of wanted) {
+      if (!have.has(`${row.label}:${row.phoneNo}`)) rows.push(row);
+    }
+  }
+  if (rows.length === 0) return;
+  await prisma.outletPhone.createMany({ data: rows });
+  console.log(
+    `[seed] ${rows.length} outlet phones ready (shared ${SHARED_SHOP} on the first two stores)`,
+  );
 }
 
 /** Item and InventoryBatch rows for the catalogue. Idempotent; order lines reference these ids. */
@@ -24,7 +99,6 @@ export async function seedCatalogue(prisma: PrismaClient) {
         where: { id: item.id },
         update: {
           itemName: item.name,
-          brand,
           type: item.type,
           isChilled: item.chilled,
           packLabel: item.pack,
@@ -33,7 +107,6 @@ export async function seedCatalogue(prisma: PrismaClient) {
         create: {
           id: item.id,
           itemName: item.name,
-          brand,
           type: item.type,
           isChilled: item.chilled,
           packLabel: item.pack,
@@ -62,10 +135,6 @@ async function seedPeople(prisma: PrismaClient) {
   const kasun = await prisma.user.findUnique({ where: { loginId: 'kasun' } });
   const sampath = await prisma.user.findUnique({ where: { loginId: 'sampath' } });
   const nimal = await prisma.user.findUnique({ where: { loginId: 'nimal' } });
-  const sunil = await prisma.user.findUnique({
-    where: { loginId: 'sunil' },
-    include: { store: true },
-  });
 
   if (kasun) {
     const driver = await prisma.driver.upsert({
@@ -113,17 +182,6 @@ async function seedPeople(prisma: PrismaClient) {
     });
   }
 
-  if (sunil?.store) {
-    const existing = await prisma.outletPhone.count({ where: { storeId: sunil.store.id } });
-    if (existing === 0) {
-      await prisma.outletPhone.createMany({
-        data: [
-          { storeId: sunil.store.id, phoneNo: '0112345678', label: 'shop' },
-          { storeId: sunil.store.id, phoneNo: '0778765432', label: 'manager' },
-        ],
-      });
-    }
-  }
 }
 
 async function linkOrderLines(prisma: PrismaClient) {

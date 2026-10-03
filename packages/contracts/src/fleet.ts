@@ -38,9 +38,10 @@ export interface FleetVehicle {
   status: FleetStatus;
   /** The "Today" column: "Trip 1 of 2 · 5/8 delivered". */
   today: string;
-  /** "Brake service" and the date it is expected back, for a vehicle out of service. */
+  /** Why it is out of service. Set only while status is out_of_service. */
   outOfServiceReason: string | null;
-  returnDate: string | null; // YYYY-MM-DD
+  /** ISO-8601 date and time it is expected back. Null when no return time is known. */
+  returnDate: string | null;
   trips: FleetTrip[];
   /** Trips that have not started (planned or assigned): they go back to Planning if the vehicle is taken out. */
   plannedTrips: { tripNumber: number; stops: number }[];
@@ -57,7 +58,8 @@ export interface FleetDay {
 
 export interface OutOfServiceRequest {
   reason: string;
-  returnDate: string; // YYYY-MM-DD
+  /** ISO-8601 with a time, for example 2031-07-11T14:30:00+05:30. Omit when unknown. */
+  returnDate?: string;
   note?: string;
 }
 

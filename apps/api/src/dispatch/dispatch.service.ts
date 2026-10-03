@@ -201,7 +201,7 @@ export class DispatchService {
     const trips: LiveTrip[] = rows.map((t) => {
       const driver = t.assignedDriver ?? t.vehicle.driver;
       const phone = driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null;
-      const plate = t.vehicle.plate ?? t.vehicleId;
+      const plate = t.vehicle.numberPlate ?? t.vehicleId;
 
       const onRoad = t.status === 'on_road';
 
@@ -327,7 +327,7 @@ export class DispatchService {
       return {
         id: t.id,
         vehicleId: t.vehicleId,
-        plate: t.vehicle.plate,
+        plate: t.vehicle.numberPlate,
         tripNumber: t.tripNumber,
         tripsToday: perVehicle.get(t.vehicleId) ?? 1,
         brand: t.brand,
@@ -381,7 +381,7 @@ export class DispatchService {
       attention.push({
         id: `sos-${d.id}`,
         kind: 'sos',
-        title: `SOS from ${person(d.driver.user.name)}${d.vehicle ? ` on ${d.vehicle.plate ?? d.vehicle.id}` : ''}`,
+        title: `SOS from ${person(d.driver.user.name)}${d.vehicle ? ` on ${d.vehicle.numberPlate ?? d.vehicle.id}` : ''}`,
         text: `${d.message ?? 'No message'} · raised ${clockText(d.raisedAt)}.`,
         tripId: d.tripId ?? '',
         phone: d.driver.user.phone ?? null,

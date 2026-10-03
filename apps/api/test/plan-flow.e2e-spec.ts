@@ -87,7 +87,7 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
       prisma.vehicle.create({
         data: {
           id,
-          plate: id,
+          numberPlate: id,
           depotId: 'Peliyagoda',
           type,
           temp,
@@ -103,7 +103,8 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
     await vehicle('BR-VAN', 'van', 'ambient', 1500, 8);
     await vehicle('BR-OOS', 'truck', 'ambient', 3000, 15, {
       status: 'out_of_service',
-      returnDate: date('2031-05-19'),
+      outOfServiceReason: 'Fridge unit repair',
+      returnDate: new Date('2031-05-19T16:00:00+05:30'),
     });
 
     const order = async (

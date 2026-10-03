@@ -24,6 +24,7 @@ import {
   type Lookup,
   type StopEta,
 } from '@waypoint/domain';
+import { backAtLabel } from '../common/back-at';
 import { ClockService, TIME_ZONE } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
@@ -179,7 +180,7 @@ export class IncidentsService {
     return {
       id: i.id,
       kind,
-      title: `${t.vehicle.plate ?? t.vehicleId} ${KIND_TITLE[kind]}`,
+      title: `${t.vehicle.numberPlate ?? t.vehicleId} ${KIND_TITLE[kind]}`,
       line:
         state === 'resolved'
           ? `${resolution?.resolution?.line ?? 'Resolved'} · ${timeOf(new Date(resolution?.at ?? i.createdAt))}`
@@ -223,7 +224,7 @@ export class IncidentsService {
     return {
       id: `missing:${m.trip.id}`,
       kind: 'missing_items',
-      title: `${qty} ${qty === 1 ? 'item' : 'items'} short on ${m.trip.vehicle.plate ?? m.trip.vehicleId}`,
+      title: `${qty} ${qty === 1 ? 'item' : 'items'} short on ${m.trip.vehicle.numberPlate ?? m.trip.vehicleId}`,
       line: `Reported by loader${bay ? ` at dock ${bay}` : ''} · ${timeOf(m.flags[0].createdAt)}`,
       brand: m.trip.brand,
       state: 'open',
@@ -329,7 +330,7 @@ export class IncidentsService {
         .sort((a, b) => b.getTime() - a.getTime())[0];
       const detail = `${back ? `Back at depot ${timeOf(back)}` : 'At depot'} · ${v.weightCapKg.toLocaleString('en-US')} kg · ${away}`;
       const tripNumber = [1, 2].find((n) => !mine.some((x) => x.tripNumber === n));
-      const base = { vehicleId: v.id, label: `${v.plate ?? v.id} · ${kind}`, detail };
+      const base = { vehicleId: v.id, label: `${v.numberPlate ?? v.id} · ${kind}`, detail };
       const no = (verdict: string, d = detail): Candidate => ({
         option: { ...base, detail: d, verdict, tone: 'bad', available: false },
         etas: [],
@@ -338,9 +339,7 @@ export class IncidentsService {
       });
 
       if (v.status === 'out_of_service') {
-        const until = v.returnDate
-          ? ` until ${v.returnDate.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' })}`
-          : '';
+        const until = v.returnDate ? ` until ${backAtLabel(v.returnDate)}` : '';
         out.push(no('Unavailable', `Out of service${until}`));
       } else if (tripNumber === undefined) {
         out.push(no('Unavailable', 'Already has two trips today'));
@@ -414,7 +413,7 @@ export class IncidentsService {
           : this.stopRows(t),
       replacements,
       details: {
-        vehicle: `${t.vehicle.plate ?? t.vehicleId} · ${kind}`,
+        vehicle: `${t.vehicle.numberPlate ?? t.vehicleId} · ${kind}`,
         trip: `Trip ${t.tripNumber} · ${t.brand} · ${t.district.name}`,
         goods:
           done?.resolution?.goods ??
@@ -467,7 +466,7 @@ export class IncidentsService {
       })),
       replacements: [],
       details: {
-        vehicle: `${t.vehicle.plate ?? t.vehicleId} · ${t.vehicle.type === 'van' ? 'Van' : t.vehicle.temp === 'reefer' ? 'Refrigerated' : 'Ambient'}`,
+        vehicle: `${t.vehicle.numberPlate ?? t.vehicleId} · ${t.vehicle.type === 'van' ? 'Van' : t.vehicle.temp === 'reefer' ? 'Refrigerated' : 'Ambient'}`,
         trip: `Trip ${t.tripNumber} · ${t.brand} · ${t.district.name}`,
         goods: `${t.stops.length} ${t.stops.length === 1 ? 'stop' : 'stops'}`,
         driver: this.driverOf(t),
@@ -623,7 +622,7 @@ export class IncidentsService {
       await this.tellStore(
         storeId,
         'Delivery delayed',
-        `Your delivery on ${t.vehicle.plate ?? t.vehicleId} is delayed by ${KIND_REASON[row.type as IncidentKind]}. We will send the new time as soon as it is sorted.`,
+        `Your delivery on ${t.vehicle.numberPlate ?? t.vehicleId} is delayed by ${KIND_REASON[row.type as IncidentKind]}. We will send the new time as soon as it is sorted.`,
       );
     }
     await this.save(id, row.timeline, [
@@ -657,7 +656,7 @@ export class IncidentsService {
       throw new BadRequestException('This incident is already resolved');
     }
     const t = row.trip;
-    const plate = t.vehicle.plate ?? t.vehicleId;
+    const plate = t.vehicle.numberPlate ?? t.vehicleId;
     const remaining = t.stops.filter((s) => !DONE.has(s.status));
     const now = this.clock.now();
 
@@ -729,7 +728,7 @@ export class IncidentsService {
             publishedAt: now,
           },
         });
-        made.push({ id: created.id, plate: vehicle.plate ?? vehicle.id });
+        made.push({ id: created.id, plate: vehicle.numberPlate ?? vehicle.id });
         // orderId is unique, so each stop moves by update rather than delete and create.
         for (const [i, s] of carry.entries()) {
           await tx.tripStop.update({
