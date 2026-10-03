@@ -158,7 +158,7 @@ async function removeExtraFleetDrivers() {
 }
 
 /**
- * 70 drivers D001–D070. PIN/password waypont.
+ * 70 drivers D001–D070. PIN 1234 (the driver keypad is 4 digits). Password waypont is unused at sign-in.
  * Active drivers (no leaving date) fill the trucks 1:1.
  * The last 10 (D061–D070) have leavingDate set and get no truck.
  */
@@ -168,7 +168,8 @@ async function seedFleetDrivers() {
     console.warn('[seed] no vehicles - skipping fleet drivers');
     return;
   }
-  const secretHash = await argon2.hash('waypont');
+  const pinHash = await argon2.hash('1234');
+  const passwordHash = await argon2.hash('waypont');
   const depots = await prisma.depot.findMany({ select: { id: true } });
   const depotIds = depots.map((d) => d.id);
   const fallbackDepot = vehicles[0]?.depotId ?? depotIds[0] ?? 'Peliyagoda';
@@ -191,8 +192,8 @@ async function seedFleetDrivers() {
         name,
         depotId,
         phone,
-        passwordHash: secretHash,
-        pinHash: secretHash,
+        passwordHash,
+        pinHash,
       },
       create: {
         loginId,
@@ -200,8 +201,8 @@ async function seedFleetDrivers() {
         name,
         depotId,
         phone,
-        passwordHash: secretHash,
-        pinHash: secretHash,
+        passwordHash,
+        pinHash,
       },
     });
     const joinDate = new Date(Date.UTC(2019, 0, 1 + ((n * 11) % 1400)));
@@ -239,7 +240,7 @@ async function seedFleetDrivers() {
   await removeExtraFleetDrivers();
   const assigned = Math.min(activeCount, vehicles.length);
   console.log(
-    `[seed] ${FLEET_DRIVER_COUNT} fleet drivers ready (D001–D${String(activeCount).padStart(3, '0')} active, D${String(activeCount + 1).padStart(3, '0')}–D${String(FLEET_DRIVER_COUNT).padStart(3, '0')} left; ${assigned} trucks assigned; PIN/password waypont)`,
+    `[seed] ${FLEET_DRIVER_COUNT} fleet drivers ready (D001–D${String(activeCount).padStart(3, '0')} active, D${String(activeCount + 1).padStart(3, '0')}–D${String(FLEET_DRIVER_COUNT).padStart(3, '0')} left; ${assigned} trucks assigned; PIN 1234)`,
   );
 }
 
