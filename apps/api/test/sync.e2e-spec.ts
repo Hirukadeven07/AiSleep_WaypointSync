@@ -53,16 +53,16 @@ describe('driver sync (e2e)', () => {
     prisma = app.get(PrismaService);
 
     const district = await prisma.district.create({
-      data: { name: `Sync District ${Date.now()}`, depotId: 'Peliyagoda' },
+      data: { name: `Sync District ${Date.now()}`, depotId: 'depo1' },
     });
-    districtId = district.id;
+    districtId = district.name;
     const store = await prisma.store.create({
       data: {
         id: `E2E-STORE-${Date.now()}`,
         displayName: 'Sync Store',
         brand: 'Fresh',
-        districtId: district.id,
-        depotId: 'Peliyagoda',
+        districtId: district.name,
+        depotId: 'depo1',
         dockType: 'street',
         windowOpenMin: 300,
         windowCloseMin: 480,
@@ -81,7 +81,7 @@ describe('driver sync (e2e)', () => {
     await prisma.vehicle.create({
       data: {
         id: vehicleId,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'truck',
         temp: 'reefer',
         weightCapKg: 2500,
@@ -95,14 +95,14 @@ describe('driver sync (e2e)', () => {
         loginId: `driver-${Date.now()}`,
         role: 'driver',
         name: 'Other driver',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         pinHash: 'unused',
       },
     });
     const otherVehicle = await prisma.vehicle.create({
       data: {
         id: `SYNC-OTHER-${Date.now()}`,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'truck',
         temp: 'ambient',
         weightCapKg: 2000,
@@ -114,9 +114,9 @@ describe('driver sync (e2e)', () => {
     const trip = await prisma.trip.create({
       data: {
         vehicleId: vehicleId,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         brand: 'Fresh',
-        districtId: district.id,
+        districtId: district.name,
         serviceDate: date(DAY),
         tripNumber: 1,
         status: 'published',
@@ -128,9 +128,9 @@ describe('driver sync (e2e)', () => {
     const otherTrip = await prisma.trip.create({
       data: {
         vehicleId: otherVehicle.id,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         brand: 'Fresh',
-        districtId: district.id,
+        districtId: district.name,
         serviceDate: date(DAY),
         tripNumber: 2,
         status: 'on_road',
@@ -221,7 +221,7 @@ describe('driver sync (e2e)', () => {
     if (badStopTripId) await prisma.trip.delete({ where: { id: badStopTripId } });
     await prisma.order.deleteMany({ where: { storeId } });
     await prisma.store.delete({ where: { id: storeId } });
-    if (districtId) await prisma.district.deleteMany({ where: { id: districtId } });
+    if (districtId) await prisma.district.deleteMany({ where: { name: districtId } });
     await prisma.vehicle.deleteMany({ where: { id: { startsWith: 'SYNC-' } } });
     if (seededVehicleId) {
       await prisma.vehicle.update({ where: { id: seededVehicleId }, data: { driverId } });

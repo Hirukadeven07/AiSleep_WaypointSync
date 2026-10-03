@@ -174,7 +174,7 @@ export class FleetService {
       }
 
       const driver = mine.find((t) => t.assignedDriver)?.assignedDriver ?? v.driver;
-      const phone = driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null;
+      const phone = driver?.driverProfile?.phones[0]?.phoneNumber ?? null;
 
       // Fuel this week: the estimate from each planned route (the board does not total real fills).
       let usedL = 0;

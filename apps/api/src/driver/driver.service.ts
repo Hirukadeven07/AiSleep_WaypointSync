@@ -157,7 +157,7 @@ export class DriverService {
     const [user, trips] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: me.id },
-        include: { driverProfile: true, vehicle: true },
+        include: { driverProfile: { include: { phones: true } }, vehicle: true },
       }),
       this.prisma.trip.findMany({
         where: { ...ownTripWhere(me.id), serviceDate: { lte: today }, status: { not: 'planning' } },
@@ -178,7 +178,7 @@ export class DriverService {
     return {
       name: user.name,
       loginId: user.loginId,
-      phone: user.phone,
+      phone: user.driverProfile?.phones[0]?.phoneNumber ?? null,
       depotId: user.depotId,
       licenseNo: user.driverProfile?.licenseNo ?? null,
       licenseExpiry: user.driverProfile?.licenseExpiry?.toISOString().slice(0, 10) ?? null,

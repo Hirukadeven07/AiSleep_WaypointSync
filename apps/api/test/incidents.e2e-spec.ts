@@ -42,14 +42,14 @@ describe('incidents (e2e)', () => {
       await prisma.district.create({
         data: {
           name: `IC District ${Date.now()}`,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           depotToDistrictKm: 20,
           depotToDistrictMin: 30,
           interStopKm: 3,
           interStopMin: 10,
         },
       })
-    ).id;
+    ).name;
     if (
       !(await prisma.serviceAllowance.findUnique({
         where: { brand_dockType: { brand: 'Fresh', dockType: 'street' } },
@@ -67,7 +67,7 @@ describe('incidents (e2e)', () => {
           displayName: `Store ${id}`,
           brand: 'Fresh',
           districtId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: 540,
           windowCloseMin: 900,
@@ -80,11 +80,14 @@ describe('incidents (e2e)', () => {
           loginId: `ic-driver-${Date.now()}`,
           role: 'driver',
           name: 'Ruwan Silva (Driver)',
-          depotId: 'Peliyagoda',
-          phone: '0771234567',
+          depotId: 'depo1',
         },
       })
     ).id;
+    const profile = await prisma.driver.create({ data: { userId: driverId } });
+    await prisma.driverPhone.create({
+      data: { driverId: profile.id, phoneNumber: '0771234567' },
+    });
     storeUserId = (
       await prisma.user.create({
         data: {
@@ -100,7 +103,7 @@ describe('incidents (e2e)', () => {
         data: {
           id,
           numberPlate: id,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           type: 'van',
           temp: 'ambient',
           weightCapKg: 1500,
@@ -130,7 +133,7 @@ describe('incidents (e2e)', () => {
       const t = await prisma.trip.create({
         data: {
           vehicleId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           brand: 'Fresh',
           districtId,
           serviceDate: date(DAY),
@@ -206,7 +209,7 @@ describe('incidents (e2e)', () => {
       await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
       await prisma.user.deleteMany({ where: { id: { in: [driverId, storeUserId] } } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
-      await prisma.district.deleteMany({ where: { id: districtId } });
+      await prisma.district.deleteMany({ where: { name: districtId } });
       if (createdAllowance) {
         await prisma.serviceAllowance.deleteMany({ where: { brand: 'Fresh', dockType: 'street' } });
       }
@@ -228,7 +231,7 @@ describe('incidents (e2e)', () => {
     const loader = request.agent(app.getHttpServer());
     await loader
       .post('/api/auth/login')
-      .send({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' })
+      .send({ role: 'loader', loginId: 'sampath', depotId: 'depo1' })
       .expect(200);
     await loader.get('/api/incidents').expect(403);
   });

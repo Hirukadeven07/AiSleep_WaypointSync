@@ -159,7 +159,7 @@ export class IncidentsService {
     if (!user) return null;
     return {
       name: person(user.name),
-      phone: user.driverProfile?.phones[0]?.phoneNumber ?? user.phone ?? null,
+      phone: user.driverProfile?.phones[0]?.phoneNumber ?? null,
     };
   }
 

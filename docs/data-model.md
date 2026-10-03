@@ -5,7 +5,7 @@
 
 `Store` is the running-app name for an **outlet**. Login people are `User` rows (`role` = dispatcher / store / loader / driver). `Driver`, `Loader`, and `Dispatcher` are 1:1 profile tables on that user. Vehicle assignment is `Vehicle.driverId` → `User`, not a column on `Driver`.
 
-Photos are **not** BLOBs. `photoKey` / `signaturePhotoKey` are MinIO object names on the owning row (`LoadFlag`, `StoreReceipt`, `FieldFlag`, `LoaderFlag`).
+Photos are **not** BLOBs. `photoKey` is a MinIO object name on `LoadFlag`, `FieldFlag`, and `LoaderFlag`. The storekeeper signature is `StoreReceipt.signaturePhotoKey`.
 
 `Session` is created at login only. Do not seed it.
 

@@ -166,18 +166,23 @@ enum SosSeverity {
 }
 
 model Depot {
-  id        String     @id
-  name      String
-  districts District[]
-  stores    Store[]
-  users     User[]
-  vehicles  Vehicle[]
-  trips     Trip[]
+  id         String     @id
+  name       String
+  telephone  String?
+  email      String?
+  address    String?
+  lat        Float?
+  lng        Float?
+  districts  District[]
+  stores     Store[]
+  users      User[]
+  vehicles   Vehicle[]
+  trips      Trip[]
 }
 
+/// The district name is the primary key. There is no separate district id.
 model District {
-  id                 String  @id @default(cuid())
-  name               String  @unique
+  name               String  @id
   depotId            String?
   depot              Depot?  @relation(fields: [depotId], references: [id])
   served             Boolean @default(true)
@@ -237,9 +242,11 @@ model RoadCondition {
 model Store {
   id                String            @id
   displayName       String?
+  address           String?
+  email             String?
   brand             Brand
   districtId        String
-  district          District          @relation(fields: [districtId], references: [id])
+  district          District          @relation(fields: [districtId], references: [name])
   depotId           String
   depot             Depot             @relation(fields: [depotId], references: [id])
   dockType          DockType
@@ -269,7 +276,6 @@ model User {
   store              Store?         @relation(fields: [storeId], references: [id])
   passwordHash       String?
   pinHash            String?
-  phone              String?
   /// NotificationPreferences JSON; null means every preference is on. Saved only, not enforced yet.
   notificationPrefs  Json?
   sessions           Session[]
@@ -308,6 +314,8 @@ model Vehicle {
   outOfServiceReason String?
   /// Optional expected return. Stores the date and the time. Null when no return time is known.
   returnDate         DateTime?
+  /// Last time this vehicle was serviced.
+  lastServiceAt      DateTime?
   driverId           String?          @unique
   driver             User?            @relation(fields: [driverId], references: [id])
   trips              Trip[]
@@ -370,7 +378,7 @@ model Trip {
   depot                 Depot            @relation(fields: [depotId], references: [id])
   brand                 Brand
   districtId            String
-  district              District         @relation("TripMainDistrict", fields: [districtId], references: [id])
+  district              District         @relation("TripMainDistrict", fields: [districtId], references: [name])
   /// More districts the dispatcher set this trip up for, besides the main one.
   extraDistricts        District[]       @relation("TripExtraDistricts")
   serviceDate           DateTime         @db.Date
@@ -463,6 +471,7 @@ model LoadFlag {
   note        String?
   photoKey    String?
   createdAt   DateTime   @default(now())
+  resolvedAt  DateTime?
 }
 
 model StoreReceipt {
@@ -471,7 +480,6 @@ model StoreReceipt {
   stop               TripStop  @relation(fields: [stopId], references: [id], onDelete: Cascade)
   lineResults        Json
   chilledWasCold     Boolean?
-  photoKey           String?
   signaturePhotoKey  String?
   signedByUserId     String?
   signedBy           User?     @relation(fields: [signedByUserId], references: [id], onDelete: SetNull)
@@ -581,6 +589,7 @@ model Driver {
   leavingDate   DateTime?        @db.Date
   lastLoginAt   DateTime?
   isActive      Boolean          @default(true)
+  address       String?
   phones        DriverPhone[]
   incidents     DriverIncident[]
   locationPings LocationPing[]
@@ -590,6 +599,18 @@ model DriverPhone {
   phoneNumber String @id
   driverId    String
   driver      Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+}
+
+model LoaderPhone {
+  phoneNumber String @id
+  loaderId    String
+  loader      Loader @relation(fields: [loaderId], references: [id], onDelete: Cascade)
+}
+
+model DispatcherPhone {
+  phoneNumber  String     @id
+  dispatcherId String
+  dispatcher   Dispatcher @relation(fields: [dispatcherId], references: [id], onDelete: Cascade)
 }
 
 model Loader {
@@ -603,6 +624,8 @@ model Loader {
   leavingDate   DateTime?            @db.Date
   lastLoginAt   DateTime?
   isActive      Boolean              @default(true)
+  address       String?
+  phones        LoaderPhone[]
   notesChanged  DeliveryNote[]
   assignments   DeliveryNoteLoader[]
   flags         LoaderFlag[]
@@ -612,9 +635,12 @@ model Dispatcher {
   id          String       @id @default(cuid())
   userId      String       @unique
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  employeeNo  String?      @unique
+  employeeNo  String?            @unique
+  email       String?
+  address     String?
   lastLoginAt DateTime?
-  isActive    Boolean      @default(true)
+  isActive    Boolean            @default(true)
+  phones      DispatcherPhone[]
   loadingJobs LoadingJob[]
   reviews     LoaderFlag[]
 }
@@ -734,6 +760,8 @@ model FieldFlag {
   driverNote       String?
   photoKey         String?
   resolvedAt       DateTime?
+  /// False until a replacement of this item is ordered, or the flag is marked solved.
+  resolveStatus    Boolean           @default(false)
 
   @@index([orderId])
 }

@@ -48,9 +48,9 @@ describe('urgent orders from the store (e2e)', () => {
       create: { id: 'F-MILK', itemName: 'Fresh milk' },
     });
     const district = await prisma.district.create({
-      data: { name: `E2E Urgent ${Date.now()}`, depotId: 'Peliyagoda' },
+      data: { name: `E2E Urgent ${Date.now()}`, depotId: 'depo1' },
     });
-    districtId = district.id;
+    districtId = district.name;
     for (const s of STORES) {
       await prisma.store.create({
         data: {
@@ -58,7 +58,7 @@ describe('urgent orders from the store (e2e)', () => {
           displayName: s.id,
           brand: 'Fresh',
           districtId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: s.open,
           windowCloseMin: s.open + 120,
@@ -77,7 +77,7 @@ describe('urgent orders from the store (e2e)', () => {
       await prisma.order.deleteMany({ where: { storeId: { in: ids } } });
       await prisma.user.update({ where: { loginId: 'sunil' }, data: { storeId: sunilStoreId } });
       await prisma.store.deleteMany({ where: { id: { in: ids } } });
-      await prisma.district.deleteMany({ where: { id: districtId } });
+      await prisma.district.deleteMany({ where: { name: districtId } });
     }
     await app?.close();
   });

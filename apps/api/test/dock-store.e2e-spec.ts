@@ -87,17 +87,17 @@ describe('loader dock and store (e2e)', () => {
     });
 
     const district = await prisma.district.create({
-      data: { name: `E2E District ${Date.now()}`, depotId: 'Peliyagoda' },
+      data: { name: `E2E District ${Date.now()}`, depotId: 'depo1' },
     });
-    ids.district = district.id;
+    ids.district = district.name;
     const store = (id: string) =>
       prisma.store.create({
         data: {
           id,
           displayName: id,
           brand: 'Fresh',
-          districtId: district.id,
-          depotId: 'Peliyagoda',
+          districtId: district.name,
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: 300,
           windowCloseMin: 480,
@@ -109,7 +109,7 @@ describe('loader dock and store (e2e)', () => {
     await prisma.vehicle.create({
       data: {
         id: 'E2E-REEFER',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'truck',
         temp: 'reefer',
         weightCapKg: 3000,
@@ -123,9 +123,9 @@ describe('loader dock and store (e2e)', () => {
 
     const base = {
       vehicleId: 'E2E-REEFER',
-      depotId: 'Peliyagoda',
+      depotId: 'depo1',
       brand: 'Fresh' as const,
-      districtId: district.id,
+      districtId: district.name,
       serviceDate: date(DAY),
     };
     const loadTrip = await prisma.trip.create({
@@ -135,7 +135,7 @@ describe('loader dock and store (e2e)', () => {
     await prisma.loadingJob.create({
       data: {
         tripId: loadTrip.id,
-        depot: 'Peliyagoda',
+        depot: 'depo1',
         assignedById: dispatcher.id,
         bay: 'Bay-9',
         instructions: 'Chilled first.',
@@ -187,14 +187,14 @@ describe('loader dock and store (e2e)', () => {
       await prisma.user.update({ where: { loginId: 'sunil' }, data: { storeId: sunilStoreId } });
       await prisma.vehicle.deleteMany({ where: { id: 'E2E-REEFER' } });
       await prisma.store.deleteMany({ where: { id: { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] } } });
-      await prisma.district.deleteMany({ where: { id: ids.district } });
+      await prisma.district.deleteMany({ where: { name: ids.district } });
     }
     await app?.close();
   });
 
   describe('loader', () => {
     it('lists the published trip and loads it last stop first', async () => {
-      const loader = await login({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' });
+      const loader = await login({ role: 'loader', loginId: 'sampath', depotId: 'depo1' });
       const queue = await loader.get('/api/loads').expect(200);
       const card = queue.body.find((t: { tripId: string }) => t.tripId === ids.loadTrip);
       expect(card.job).toMatchObject({ bay: 'Bay-9', status: 'assigned' });
@@ -218,7 +218,7 @@ describe('loader dock and store (e2e)', () => {
     });
 
     it('flags a line, locks on a plan change, and departs after acknowledging', async () => {
-      const loader = await login({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' });
+      const loader = await login({ role: 'loader', loginId: 'sampath', depotId: 'depo1' });
       const sheet = (await loader.get(`/api/loads/${ids.loadTrip}`).expect(200)).body;
       const stop = sheet.loadOrder[0];
       const flagged = await loader
@@ -434,10 +434,20 @@ describe('loader dock and store (e2e)', () => {
       });
       expect(stop.order.status).toBe('partial');
       expect(confirmed.body.issues).toEqual([
-        expect.objectContaining({ reason: 'missing', qty: 1, driverDecision: 'pending' }),
+        expect.objectContaining({
+          reason: 'missing',
+          qty: 1,
+          driverDecision: 'pending',
+          resolveStatus: false,
+        }),
       ]);
       const flag = await prisma.fieldFlag.findFirstOrThrow({ where: { orderId: stop.orderId } });
-      expect(flag).toMatchObject({ tripId: ids.storeTrip, itemId: 'F-MILK', severity: 'medium' });
+      expect(flag).toMatchObject({
+        tripId: ids.storeTrip,
+        itemId: 'F-MILK',
+        severity: 'medium',
+        resolveStatus: false,
+      });
       expect(
         await prisma.notification.count({
           where: { userId: kasun.id, title: 'E2E-HOME checked the goods' },

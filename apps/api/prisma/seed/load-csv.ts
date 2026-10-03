@@ -197,7 +197,7 @@ const DISTRICT_PLACES: Record<string, [number, number][]> = {
 
 /** Western province for Peliyagoda, Central for Kandy. LQ-1001, LQ-1002, … */
 export function numberPlateFor(depotId: string, index: number): string {
-  const province = depotId === 'Kandy' ? 'CP' : 'WP';
+  const province = depotId === 'Kandy' || depotId === 'depo2' ? 'CP' : 'WP';
   return `${province} LQ-${String(1000 + index + 1).padStart(4, '0')}`;
 }
 
@@ -288,8 +288,19 @@ const dateOf = (v: string | undefined): Date | undefined => {
 
 // ---------- loaders ----------
 
-async function ensureDepot(prisma: PrismaClient, id: string) {
-  await prisma.depot.upsert({ where: { id }, update: {}, create: { id, name: id } });
+/** CSV depot names stay Peliyagoda and Kandy. The database ids are depo1 and depo2. */
+function depotIdOf(raw: string) {
+  const key = raw.trim().toLowerCase();
+  if (key === 'peliyagoda' || key === 'depo1') return 'depo1';
+  if (key === 'kandy' || key === 'depo2') return 'depo2';
+  return raw.trim();
+}
+
+async function ensureDepot(prisma: PrismaClient, raw: string) {
+  const id = depotIdOf(raw);
+  const name = id === 'depo1' ? 'Peliyagoda' : id === 'depo2' ? 'Kandy' : raw.trim();
+  await prisma.depot.upsert({ where: { id }, update: { name }, create: { id, name } });
+  return id;
 }
 
 async function districtId(prisma: PrismaClient, name: string, depotId?: string) {
@@ -298,7 +309,7 @@ async function districtId(prisma: PrismaClient, name: string, depotId?: string) 
     update: {},
     create: { name, depotId },
   });
-  return d.id;
+  return d.name;
 }
 
 export async function loadOutlets(prisma: PrismaClient, dir: string) {
@@ -313,8 +324,8 @@ export async function loadOutlets(prisma: PrismaClient, dir: string) {
       console.warn('[seed] outlets.csv: skipping row without id/district/depot', r);
       continue;
     }
-    await ensureDepot(prisma, depot);
-    const dId = await districtId(prisma, districtName, depot);
+    const depotId = await ensureDepot(prisma, depot);
+    const dId = await districtId(prisma, districtName, depotId);
     const slot = placed.get(districtName) ?? 0;
     placed.set(districtName, slot + 1);
     const demo = demoShopPoint(districtName, slot);
@@ -322,7 +333,7 @@ export async function loadOutlets(prisma: PrismaClient, dir: string) {
       displayName: pick(r, 'display_name', 'name', 'outlet_name') ?? null,
       brand: brandOf(pick(r, 'brand')),
       districtId: dId,
-      depotId: depot,
+      depotId,
       dockType: dockOf(pick(r, 'dock_type', 'dock')),
       parkingConstraint: parkingOf(pick(r, 'parking_constraint', 'parking')),
       mallWindow: pick(r, 'mall_window') ?? null,
@@ -358,13 +369,13 @@ export async function loadDistrictTravel(prisma: PrismaClient, dir: string) {
   for (const r of rows) {
     const name = pick(r, 'district', 'district_name');
     if (!name) continue;
-    const depot = pick(r, 'depot', 'depot_id', 'depot_name');
-    if (depot) await ensureDepot(prisma, depot);
+    const depotRaw = pick(r, 'depot', 'depot_id', 'depot_name');
+    const depotId = depotRaw ? await ensureDepot(prisma, depotRaw) : undefined;
     const speed = num(pick(r, 'free_flow_kmh'));
     const depotKm = num(pick(r, 'depot_to_district_km'));
     const interKm = num(pick(r, 'inter_stop_km'));
     const data = {
-      depotId: depot,
+      depotId,
       served: bool(pick(r, 'served'), true),
       roadClass: pick(r, 'road_class'),
       freeFlowKmh: speed,
@@ -388,12 +399,12 @@ export async function loadVehicles(prisma: PrismaClient, dir: string) {
       console.warn('[seed] vehicles.csv: skipping row without id/depot', r);
       continue;
     }
-    await ensureDepot(prisma, depot);
-    const slot = issued.get(depot) ?? 0;
-    issued.set(depot, slot + 1);
+    const depotId = await ensureDepot(prisma, depot);
+    const slot = issued.get(depotId) ?? 0;
+    issued.set(depotId, slot + 1);
     const data = {
-      numberPlate: pick(r, 'plate', 'registration', 'reg_no', 'number_plate') ?? numberPlateFor(depot, slot),
-      depotId: depot,
+      numberPlate: pick(r, 'plate', 'registration', 'reg_no', 'number_plate') ?? numberPlateFor(depotId, slot),
+      depotId,
       type: slug(pick(r, 'type', 'vehicle_type')).includes('van') ? ('van' as const) : ('truck' as const),
       temp: slug(pick(r, 'temp', 'temperature', 'vehicle_temp')).includes('reef')
         ? ('reefer' as const)
@@ -487,7 +498,7 @@ export async function loadRoadConditions(prisma: PrismaClient, dir: string) {
 export async function fillPlannerMinutes(prisma: PrismaClient) {
   const districts = await prisma.district.findMany({
     select: {
-      id: true,
+      name: true,
       interStopKm: true,
       interStopMin: true,
       depotToDistrictKm: true,
@@ -507,7 +518,7 @@ export async function fillPlannerMinutes(prisma: PrismaClient) {
       null;
     if (interStopMin === district.interStopMin && depotToDistrictMin === district.depotToDistrictMin) continue;
     await prisma.district.update({
-      where: { id: district.id },
+      where: { name: district.name },
       data: { interStopMin, depotToDistrictMin },
     });
     districtUpdates += 1;

@@ -33,14 +33,14 @@ describe('plan edits (e2e)', () => {
       await prisma.district.create({
         data: {
           name: `PE District ${Date.now()}`,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           depotToDistrictKm: 10,
           depotToDistrictMin: 20,
           interStopKm: 2,
           interStopMin: 6,
         },
       })
-    ).id;
+    ).name;
     for (const brand of ['Fresh', 'Style', 'Tech'] as const) {
       await prisma.serviceAllowance.upsert({
         where: { brand_dockType: { brand, dockType: 'street' } },
@@ -55,7 +55,7 @@ describe('plan edits (e2e)', () => {
           displayName: `Store ${id}`,
           brand,
           districtId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: open,
           windowCloseMin: close,
@@ -73,7 +73,7 @@ describe('plan edits (e2e)', () => {
       await prisma.vehicle.create({
         data: {
           id,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           type: 'truck',
           temp,
           weightCapKg: 3000,
@@ -130,7 +130,7 @@ describe('plan edits (e2e)', () => {
       prisma.trip.create({
         data: {
           vehicleId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           brand: 'Fresh',
           districtId,
           serviceDate: date(DAY),
@@ -152,7 +152,7 @@ describe('plan edits (e2e)', () => {
       await prisma.order.deleteMany({ where: { storeId: { in: STORES } } });
       await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
-      await prisma.district.deleteMany({ where: { id: districtId } });
+      await prisma.district.deleteMany({ where: { name: districtId } });
     }
     await app?.close();
   });
