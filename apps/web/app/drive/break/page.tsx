@@ -1,5 +1,5 @@
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import { DriverBreak } from '@/components/drive/DriverBreak';
 
 export default function Page() {
-  return <PlaceholderPage title="Break" />;
+  return <DriverBreak />;
 }

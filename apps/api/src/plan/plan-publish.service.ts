@@ -4,6 +4,7 @@ import { DomainError, evaluatePublish, measureCapacity, type RuleIssue } from '@
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
+import { tripDriverId } from '../driver/driver-trips';
 import { PlanEditService } from './plan-edit.service';
 import { clockText, dayLabel } from './plan-labels';
 import { DEPART_MIN, PlanService } from './plan.service';
@@ -160,6 +161,19 @@ export class PlanPublishService {
       data: { status: 'published', publishedAt: now },
     });
     await this.handToDock(me, trips);
+
+    // Each driver hears that their trip is out, and for which day.
+    for (const t of trips) {
+      const driverId = tripDriverId(t);
+      if (!driverId) continue;
+      const first = t.stops[0]?.order.store;
+      await this.notifier.notify({
+        userId: driverId,
+        title: `Trip ${t.tripNumber} for ${dayLabel(t.serviceDate)} is ready`,
+        body: `${t.vehicle.numberPlate ?? t.vehicleId} · ${t.stops.length} ${t.stops.length === 1 ? 'stop' : 'stops'}${first ? ` · first window ${clockText(first.windowOpenMin)}` : ''}.`,
+        link: '/drive',
+      });
+    }
 
     const stores = new Map<string, { storeId: string; open: number; close: number; date: Date }>();
     for (const t of trips) {

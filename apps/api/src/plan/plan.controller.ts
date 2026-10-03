@@ -21,6 +21,7 @@ import type {
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
+  AssignDriverDto,
   CreateTripDto,
   DeferDto,
   DropDto,
@@ -145,6 +146,17 @@ export class PlanController {
   @HttpCode(200)
   removeTrip(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<RemoveTripResult> {
     return this.trips.remove(me, id);
+  }
+
+  /** Put a driver on a trip (or `null` for the vehicle's registered driver). */
+  @Post('trips/:id/driver')
+  @HttpCode(200)
+  assignDriver(
+    @CurrentUser() me: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AssignDriverDto,
+  ): Promise<PlanTrip> {
+    return this.trips.assignDriver(me, id, dto.driverId ?? null);
   }
 
   /** Waiting orders the rules let onto this trip. */

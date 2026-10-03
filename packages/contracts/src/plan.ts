@@ -66,7 +66,27 @@ export interface PlanTrip {
   /** Planned minutes from the domain clock, null when travel or allowance rows are missing. */
   minutes: number | null;
   budgetMin: number;
+  /**
+   * Who drives it: the driver the dispatcher assigned, else the vehicle's registered driver.
+   * `driverAssigned` is true only for an explicit assignment.
+   */
+  driverId: string | null;
+  driverName: string | null;
+  driverAssigned: boolean;
   stops: PlanStop[];
+}
+
+/** A driver the dispatcher can put on a trip. */
+export interface PlanDriver {
+  id: string;
+  name: string;
+  /** The vehicle registered to this driver, if any. */
+  vehicleId: string | null;
+}
+
+/** POST /plan/trips/:id/driver. `null` goes back to the vehicle's registered driver. */
+export interface AssignDriverRequest {
+  driverId: string | null;
 }
 
 export type LimitingResource = 'weight' | 'volume' | 'chilled' | 'vans' | 'none';
@@ -98,6 +118,8 @@ export interface PlanDay {
   orders: PlanOrder[];
   movedToLater: PlanOrder[];
   trips: PlanTrip[];
+  /** Active drivers at the depot, for the trip's driver picker. */
+  drivers: PlanDriver[];
   districts: string[];
   summary: PlanSummary;
   /** Last send, once every trip that currently has stops has been sent. Planning can continue after this. */
