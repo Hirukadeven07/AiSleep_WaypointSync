@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Waypoint local check</title>
+    <style>
+      :root {
+        --ink: #1c2430;
+        --muted: #5c6b7a;
+        --line: #e4e8ee;
+        --bg: #f4f6f8;
+        --card: #fff;
+        --ok: #1f7a4d;
+        --ok-bg: #e7f6ee;
+        --warn: #8a5a00;
+        --warn-bg: #fff4d6;
+        --bad: #9d2c2c;
+        --bad-bg: #fdecec;
+        --accent: #2457c5;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 14px/1.45 "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: flex-end;
+        padding: 20px 24px 12px;
+      }
+      h1 { margin: 0; font-size: 22px; }
+      .sub { color: var(--muted); margin-top: 4px; }
+      a { color: var(--accent); }
+      button, input, select {
+        font: inherit;
+        color: inherit;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+      }
+      button { cursor: pointer; }
+      button:hover { border-color: #b7c0cc; }
+      main { padding: 0 24px 32px; }
+      .stats, .toolbar, .issues { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+      .stat, .issue {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+        min-width: 120px;
+      }
+      .stat b { display: block; font-size: 18px; }
+      .stat span, .issue { color: var(--muted); font-size: 12px; }
+      .issue { color: var(--bad); background: var(--bad-bg); border-color: transparent; }
+      .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+      .tabs button[aria-pressed="true"] { background: var(--ink); color: white; border-color: var(--ink); }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        margin-bottom: 10px;
+        overflow: hidden;
+      }
+      .card h2 {
+        margin: 0;
+        padding: 12px 14px;
+        font-size: 15px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        cursor: pointer;
+      }
+      .meta { color: var(--muted); font-weight: 500; font-size: 13px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 8px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; font-size: 12px; }
+      .pill {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 12px;
+        font-weight: 650;
+        background: #eef2f6;
+      }
+      .pill.ok { color: var(--ok); background: var(--ok-bg); }
+      .pill.warn { color: var(--warn); background: var(--warn-bg); }
+      .pill.bad { color: var(--bad); background: var(--bad-bg); }
+      .login {
+        font-family: Consolas, monospace;
+        font-weight: 700;
+      }
+      .hidden { display: none; }
+      .empty { color: var(--muted); padding: 20px; }
+      .copy { padding: 2px 8px; margin-left: 6px; }
+      .order {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+      .order h2 { margin: 0 0 8px; font-size: 16px; }
+      .qty { display: flex; align-items: center; gap: 8px; }
+      .qty button { width: 32px; height: 32px; padding: 0; }
+      .line { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+      .note { margin: 8px 0 0; color: var(--ok); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Local check</h1>
+        <p class="sub">Live database on this machine. This page is not part of the app branch. App: <a href="http://localhost:3000" target="_blank" rel="noreferrer">localhost:3000</a></p>
+      </div>
+      <div>
+        <button id="refresh" type="button">Refresh</button>
+        <span id="when" class="sub"></span>
+      </div>
+    </header>
+    <main>
+      <section id="order" class="order">
+        <h2>Place an order</h2>
+        <p class="sub">Same catalogue a store manager uses. The order waits for dispatch. You do not sign in as the store.</p>
+        <div class="toolbar">
+          <select id="district" aria-label="District"><option value="">All districts</option></select>
+          <select id="store-id" aria-label="Store"></select>
+          <label><input id="urgent" type="checkbox" /> Urgent</label>
+          <button id="place-order" type="button" disabled>Place order</button>
+        </div>
+        <p id="order-meta" class="sub"></p>
+        <div id="catalogue"></div>
+        <p id="order-note" class="note"></p>
+      </section>
+      <div id="board"></div>
+      <div id="error" class="issues hidden"></div>
+      <div id="stats" class="stats"></div>
+      <div id="issues" class="issues"></div>
+      <div class="tabs">
+        <button type="button" data-tab="trips" aria-pressed="true">Trips</button>
+        <button type="button" data-tab="people" aria-pressed="false">Logins</button>
+      </div>
+      <div class="toolbar">
+        <input id="q" type="search" placeholder="Search plate, driver, store, login" />
+        <select id="role">
+          <option value="">All roles</option>
+          <option value="driver">Drivers</option>
+          <option value="loader">Loaders</option>
+          <option value="store">Stores</option>
+          <option value="dispatcher">Dispatchers</option>
+        </select>
+        <label><input id="active" type="checkbox" checked /> Active only</label>
+        <label><input id="withvan" type="checkbox" /> Drivers with a van</label>
+      </div>
+      <div id="trips"></div>
+      <div id="people" class="hidden"></div>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let board = null;
+      let tab = 'trips';
+      let catalogue = [];
+      let stores = [];
+      const qty = {};
+
+      function storesInDistrict() {
+        const districtId = $('district').value;
+        return stores.filter((store) => !districtId || store.districtId === districtId);
+      }
+
+      function fillStores() {
+        const list = storesInDistrict();
+        const current = $('store-id').value;
+        $('store-id').innerHTML = list.map((store) =>
+          '<option value="' + store.id + '">' + store.id + ' · ' + store.name + ' · ' + store.brand + '</option>'
+        ).join('');
+        if (list.some((store) => store.id === current)) $('store-id').value = current;
+        if ($('store-id').value) loadStore().catch((error) => { $('order-note').textContent = error.message; });
+      }
+
+      async function loadStores() {
+        const res = await fetch('/api/stores');
+        if (!res.ok) throw new Error(await res.text());
+        stores = await res.json();
+        const districts = [];
+        for (const store of stores) {
+          if (!districts.some((d) => d.id === store.districtId)) districts.push({ id: store.districtId, name: store.district });
+        }
+        districts.sort((a, b) => a.name.localeCompare(b.name));
+        $('district').innerHTML = '<option value="">All districts</option>' + districts.map((d) =>
+          '<option value="' + d.id + '">' + d.name + '</option>'
+        ).join('');
+        fillStores();
+      }
+
+      function renderCatalogue() {
+        const picks = catalogue.filter((item) => (qty[item.id] ?? 0) > 0);
+        const units = picks.reduce((sum, item) => sum + qty[item.id], 0);
+        const kg = picks.reduce((sum, item) => sum + item.unitWeightKg * qty[item.id], 0);
+        $('place-order').disabled = picks.length === 0;
+        $('order-meta').textContent = picks.length
+          ? `${units} ${units === 1 ? 'line' : 'lines'} · ${Math.round(kg)} kg`
+          : catalogue.length ? 'Set a quantity, then place the order.' : '';
+        $('catalogue').innerHTML = catalogue.map((item) =>
+          '<div class="line"><div><b>' + item.name + '</b><div class="meta">' + item.pack + ' · ' + item.group + '</div></div>' +
+          '<div class="qty"><button type="button" data-item="' + item.id + '" data-step="-1">−</button><span>' + (qty[item.id] ?? 0) + '</span><button type="button" data-item="' + item.id + '" data-step="1">+</button></div></div>'
+        ).join('');
+      }
+
+      async function loadStore() {
+        $('order-note').textContent = '';
+        const id = $('store-id').value.trim();
+        const res = await fetch('/api/catalogue?storeId=' + encodeURIComponent(id));
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        catalogue = data.catalogue;
+        for (const key of Object.keys(qty)) delete qty[key];
+        $('order-meta').textContent = data.store.name + ' · ' + data.store.brand + ' · ' + data.store.depot;
+        renderCatalogue();
+      }
+
+      async function placeStoreOrder() {
+        const lines = catalogue.filter((item) => (qty[item.id] ?? 0) > 0).map((item) => ({ catalogueId: item.id, qty: qty[item.id] }));
+        const res = await fetch('/api/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storeId: $('store-id').value.trim(), urgent: $('urgent').checked, lines }),
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(text);
+        const data = JSON.parse(text);
+        $('order-note').textContent = 'Placed for ' + data.storeId + ' on ' + data.deliveryDate + ': ' + data.items.join(', ') + '.';
+        for (const key of Object.keys(qty)) delete qty[key];
+        renderCatalogue();
+        load();
+      }
+
+      $('district').addEventListener('change', fillStores);
+      $('store-id').addEventListener('change', () => loadStore().catch((error) => { $('order-note').textContent = error.message; }));
+      loadStores().catch((error) => { $('order-note').textContent = error.message; });
+      if (location.hash) {
+        const target = document.querySelector(location.hash);
+        if (target) target.scrollIntoView();
+      }
+      $('place-order').addEventListener('click', () => placeStoreOrder().catch((error) => { $('order-note').textContent = error.message; }));
+      $('catalogue').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-item]');
+        if (!button) return;
+        const id = button.dataset.item;
+        const next = Math.max(0, Math.min(99, (qty[id] ?? 0) + Number(button.dataset.step)));
+        if (next === 0) delete qty[id];
+        else qty[id] = next;
+        renderCatalogue();
+      });
+
+      function secret(person) {
+        if (person.role === 'driver') return person.has_pin ? 'PIN 1234' : 'No PIN stored';
+        if (person.role === 'loader') return 'No password. Pick depot ' + (person.depot_id || '—');
+        if (person.has_password) return 'password waypoint';
+        return 'No password stored';
+      }
+
+      function loginHref(role) {
+        return 'http://localhost:3000/login/' + role;
+      }
+
+      function pill(text) {
+        const good = ['on_road', 'ready', 'loaded', 'handed_over', 'delivered', 'confirmed', 'available'];
+        const mid = ['published', 'loading', 'picking', 'assigned', 'planned', 'waiting', 'upcoming', 'arrived'];
+        const cls = good.includes(text) ? 'ok' : mid.includes(text) ? 'warn' : text ? 'bad' : '';
+        return '<span class="pill ' + cls + '">' + (text || '—') + '</span>';
+      }
+
+      function issuesOf(data) {
+        const notes = [];
+        for (const trip of data.trips) {
+          const label = (trip.plate || 'van') + ' trip ' + trip.trip_number;
+          if (['published', 'loading', 'ready', 'on_road'].includes(trip.status) && !trip.driver_login) {
+            notes.push(label + ' has no driver on the van');
+          }
+          if (trip.assigned_login && trip.assigned_login !== trip.driver_login) {
+            notes.push(label + ' assigned ' + trip.assigned_login + ', but the van login is ' + (trip.driver_login || 'nobody'));
+          }
+          if (trip.driver_login && !trip.driver_has_pin) {
+            notes.push(label + ' driver ' + trip.driver_login + ' has no PIN');
+          }
+        }
+        return notes;
+      }
+
+      function renderStats(data) {
+        const bits = [];
+        const add = (label, value) => bits.push('<div class="stat"><b>' + value + '</b><span>' + label + '</span></div>');
+        add('Trips', data.trips.length);
+        for (const [status, n] of Object.entries(data.orders)) add('Orders ' + status, n);
+        for (const [status, n] of Object.entries(data.vehicles)) add('Vans ' + status, n);
+        $('stats').innerHTML = bits.join('');
+        const notes = issuesOf(data);
+        $('issues').innerHTML = notes.map((n) => '<div class="issue">' + n + '</div>').join('');
+      }
+
+      function tripMatches(trip, q) {
+        const blob = [
+          trip.plate, trip.status, trip.brand, trip.district, trip.depot,
+          trip.driver_login, trip.driver_name, trip.assigned_login, trip.load_status,
+          ...(trip.stops || []).flatMap((s) => [s.storeId, s.store, s.status]),
+        ].join(' ').toLowerCase();
+        return blob.includes(q);
+      }
+
+      function renderTrips() {
+        const q = $('q').value.trim().toLowerCase();
+        const rows = board.trips.filter((t) => !q || tripMatches(t, q));
+        if (!rows.length) {
+          $('trips').innerHTML = '<p class="empty">No trips match.</p>';
+          return;
+        }
+        $('trips').innerHTML = rows.map((trip) => {
+          const who = trip.driver_login
+            ? '<span class="login">' + trip.driver_login + '</span> ' + (trip.driver_name || '') + ' · ' + (trip.driver_has_pin ? 'PIN 1234' : 'no PIN')
+            : 'No driver on this van';
+          const stops = (trip.stops || []).map((s) =>
+            '<tr><td>' + s.seq + '</td><td><span class="login">' + s.storeId + '</span><button class="copy" type="button" data-copy="' + s.storeId + '">Copy</button><div class="meta">' + s.store + '</div></td><td>' + pill(s.status) + '</td><td>' + s.window + '</td><td>' + s.kg + ' kg</td><td class="meta">password waypoint</td></tr>'
+          ).join('');
+          return '<article class="card"><h2>' +
+            (trip.plate || 'No plate') + ' · Trip ' + trip.trip_number +
+            ' ' + pill(trip.status) + ' ' + pill(trip.load_status || 'no load job') +
+            '<span class="meta">' + trip.brand + ' · ' + trip.district + ' · ' + (trip.stops || []).length + ' stops</span>' +
+            '</h2><div class="meta" style="padding:0 14px 10px">Driver who sees this trip: ' + who +
+            ' · <a href="' + loginHref('driver') + '" target="_blank" rel="noreferrer">Driver sign-in</a></div>' +
+            '<table><thead><tr><th>#</th><th>Store login</th><th>Stop</th><th>Window</th><th>Weight</th><th>Secret</th></tr></thead><tbody>' +
+            stops + '</tbody></table></article>';
+        }).join('');
+      }
+
+      function renderPeople() {
+        const q = $('q').value.trim().toLowerCase();
+        const role = $('role').value;
+        const activeOnly = $('active').checked;
+        const withVan = $('withvan').checked;
+        const rows = board.people.filter((p) => {
+          if (role && p.role !== role) return false;
+          if (activeOnly && !p.active) return false;
+          if (withVan && !p.plate) return false;
+          if (!q) return true;
+          return [p.login_id, p.name, p.role, p.depot_id, p.store_id, p.plate, p.phone].join(' ').toLowerCase().includes(q);
+        });
+        const shown = rows.slice(0, 200);
+        const extra = rows.length > shown.length ? '<p class="meta">Showing 200 of ' + rows.length + '. Search to narrow.</p>' : '';
+        $('people').innerHTML = extra + '<div class="card"><table><thead><tr><th>Login</th><th>Name</th><th>Role</th><th>Where</th><th>Secret</th><th></th></tr></thead><tbody>' +
+          shown.map((p) => {
+            const where = [p.plate, p.depot_id, p.store_id].filter(Boolean).join(' · ') || '—';
+            return '<tr><td><span class="login">' + p.login_id + '</span><button class="copy" type="button" data-copy="' + p.login_id + '">Copy</button></td><td>' + p.name + (p.active ? '' : ' <span class="pill bad">left</span>') + '</td><td>' + p.role + '</td><td>' + where + '</td><td>' + secret(p) + '</td><td><a href="' + loginHref(p.role) + '" target="_blank" rel="noreferrer">Sign in</a></td></tr>';
+          }).join('') +
+          '</tbody></table></div>';
+      }
+
+      function render() {
+        renderStats(board);
+        renderTrips();
+        renderPeople();
+        $('trips').classList.toggle('hidden', tab !== 'trips');
+        $('people').classList.toggle('hidden', tab !== 'people');
+        $('role').classList.toggle('hidden', tab !== 'people');
+        $('active').parentElement.classList.toggle('hidden', tab !== 'people');
+        $('withvan').parentElement.classList.toggle('hidden', tab !== 'people');
+      }
+
+      async function load() {
+        $('error').classList.add('hidden');
+        try {
+          const res = await fetch('/api/board', { cache: 'no-store' });
+          if (!res.ok) throw new Error(await res.text());
+          board = await res.json();
+          $('when').textContent = 'Updated ' + new Date(board.now).toLocaleTimeString();
+          render();
+        } catch (error) {
+          $('error').classList.remove('hidden');
+          $('error').innerHTML = '<div class="issue">' + error.message + '</div>';
+        }
+      }
+
+      document.body.addEventListener('click', async (event) => {
+        const copy = event.target.closest('[data-copy]');
+        if (!copy) return;
+        await navigator.clipboard.writeText(copy.dataset.copy);
+        copy.textContent = 'Copied';
+        setTimeout(() => { copy.textContent = 'Copy'; }, 800);
+      });
+      $('refresh').addEventListener('click', load);
+      $('q').addEventListener('input', () => board && render());
+      $('role').addEventListener('change', () => board && render());
+      $('active').addEventListener('change', () => board && render());
+      $('withvan').addEventListener('change', () => board && render());
+      for (const button of document.querySelectorAll('.tabs button')) {
+        button.addEventListener('click', () => {
+          tab = button.dataset.tab;
+          for (const other of document.querySelectorAll('.tabs button')) {
+            other.setAttribute('aria-pressed', other === button ? 'true' : 'false');
+          }
+          render();
+        });
+      }
+      load();
+      setInterval(load, 8000);
+    </script>
+  </body>
+</html>
