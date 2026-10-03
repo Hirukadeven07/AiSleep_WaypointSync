@@ -28,7 +28,7 @@ async function truncateAll() {
 
 async function seedUsers() {
   const store = await prisma.store.findFirst({
-    where: { depotId: 'Peliyagoda', brand: 'Fresh' },
+    where: { depotId: 'depo1', brand: 'Fresh' },
     orderBy: { id: 'asc' },
   });
   if (!store)
@@ -39,7 +39,7 @@ async function seedUsers() {
       loginId: 'nimal',
       role: 'dispatcher' as const,
       name: 'Nimal (Dispatcher)',
-      depotId: 'Peliyagoda',
+      depotId: 'depo1',
       passwordHash: await argon2.hash('waypoint'),
     },
     {
@@ -53,13 +53,13 @@ async function seedUsers() {
       loginId: 'sampath',
       role: 'loader' as const,
       name: 'Sampath (Loader)',
-      depotId: 'Peliyagoda',
+      depotId: 'depo1',
     },
     {
       loginId: 'kasun',
       role: 'driver' as const,
       name: 'Kasun (Driver)',
-      depotId: 'Peliyagoda',
+      depotId: 'depo1',
       pinHash: await argon2.hash('1234'),
     },
   ];
@@ -172,7 +172,7 @@ async function seedFleetDrivers() {
   const passwordHash = await argon2.hash('waypont');
   const depots = await prisma.depot.findMany({ select: { id: true } });
   const depotIds = depots.map((d) => d.id);
-  const fallbackDepot = vehicles[0]?.depotId ?? depotIds[0] ?? 'Peliyagoda';
+  const fallbackDepot = vehicles[0]?.depotId ?? depotIds[0] ?? 'depo1';
   const activeCount = FLEET_DRIVER_COUNT - FLEET_DRIVER_LEAVERS;
 
   await prisma.vehicle.updateMany({ data: { driverId: null } });
@@ -191,7 +191,6 @@ async function seedFleetDrivers() {
         role: 'driver',
         name,
         depotId,
-        phone,
         passwordHash,
         pinHash,
       },
@@ -200,7 +199,6 @@ async function seedFleetDrivers() {
         role: 'driver',
         name,
         depotId,
-        phone,
         passwordHash,
         pinHash,
       },
@@ -262,11 +260,10 @@ async function seedFleetLoaders() {
       const active = i <= LOADERS_PER_DEPOT - LOADER_LEAVERS_PER_DEPOT;
       const given = LOADER_NAMES[(n - 1) % LOADER_NAMES.length]!;
       const name = personName(given, n);
-      const phone = `076${String(3000000 + n).slice(-7)}`;
       const user = await prisma.user.upsert({
         where: { loginId },
-        update: { role: 'loader', name, depotId: depot.id, phone },
-        create: { loginId, role: 'loader', name, depotId: depot.id, phone },
+        update: { role: 'loader', name, depotId: depot.id },
+        create: { loginId, role: 'loader', name, depotId: depot.id },
       });
       const joinDate = new Date(Date.UTC(2020, 0, 1 + ((n * 7) % 1200)));
       await prisma.loader.upsert({
@@ -323,7 +320,7 @@ async function seedOutOfServiceDemo() {
       ? marked
       : await prisma.vehicle.findFirst({
           where: {
-            depotId: 'Peliyagoda',
+            depotId: 'depo1',
             id: { notIn: [...busyIds] },
             status: { not: 'on_road' },
           },
@@ -383,8 +380,8 @@ async function main() {
   }
 
   for (const [id, name] of [
-    ['Peliyagoda', 'Peliyagoda Depot'],
-    ['Kandy', 'Kandy Depot'],
+    ['depo1', 'Peliyagoda'],
+    ['depo2', 'Kandy'],
   ]) {
     await prisma.depot.upsert({ where: { id }, update: { name }, create: { id, name } });
   }

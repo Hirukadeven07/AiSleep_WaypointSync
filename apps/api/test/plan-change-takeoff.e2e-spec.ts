@@ -26,7 +26,7 @@ describe('plan change at the dock: taken-off goods (e2e)', () => {
     await agent.post('/api/auth/login').send(body).expect(200);
     return agent;
   }
-  const loader = () => login({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' });
+  const loader = () => login({ role: 'loader', loginId: 'sampath', depotId: 'depo1' });
   const dispatcher = () => login({ role: 'dispatcher', loginId: 'nimal', secret: 'waypoint' });
   const session = () => prisma.loadSession.findUniqueOrThrow({ where: { tripId: ids.trip } });
 
@@ -80,14 +80,14 @@ describe('plan change at the dock: taken-off goods (e2e)', () => {
       await prisma.district.create({
         data: {
           name: `E2E Takeoff ${Date.now()}`,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           depotToDistrictKm: 10,
           depotToDistrictMin: 20,
           interStopKm: 2,
           interStopMin: 6,
         },
       })
-    ).id;
+    ).name;
     await prisma.serviceAllowance.upsert({
       where: { brand_dockType: { brand: 'Fresh', dockType: 'street' } },
       update: {},
@@ -100,7 +100,7 @@ describe('plan change at the dock: taken-off goods (e2e)', () => {
           displayName: s.id,
           brand: 'Fresh',
           districtId: ids.district,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: s.open,
           windowCloseMin: 720,
@@ -110,7 +110,7 @@ describe('plan change at the dock: taken-off goods (e2e)', () => {
     await prisma.vehicle.create({
       data: {
         id: 'E2E-TO-REEFER',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'truck',
         temp: 'reefer',
         weightCapKg: 3000,
@@ -122,7 +122,7 @@ describe('plan change at the dock: taken-off goods (e2e)', () => {
     const trip = await prisma.trip.create({
       data: {
         vehicleId: 'E2E-TO-REEFER',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         brand: 'Fresh',
         districtId: ids.district,
         serviceDate: date(DAY),
@@ -146,7 +146,7 @@ describe('plan change at the dock: taken-off goods (e2e)', () => {
       await prisma.order.deleteMany({ where: { storeId: { in: storeIds } } });
       await prisma.vehicle.deleteMany({ where: { id: 'E2E-TO-REEFER' } });
       await prisma.store.deleteMany({ where: { id: { in: storeIds } } });
-      await prisma.district.deleteMany({ where: { id: ids.district } });
+      await prisma.district.deleteMany({ where: { name: ids.district } });
     }
     await app?.close();
   });

@@ -11,7 +11,7 @@ import type { Brand, PrismaClient, Store } from '@prisma/client';
 import { buildLines } from '../../src/store/catalogue';
 import { seedCatalogue } from './team-erd';
 
-const DEPOT = 'Peliyagoda';
+const DEPOT = 'depo1';
 
 function colomboDate(offsetDays = 0): string {
   const now = process.env.DEMO_NOW ? new Date(process.env.DEMO_NOW) : new Date();

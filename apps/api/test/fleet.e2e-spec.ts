@@ -39,9 +39,9 @@ describe('fleet (e2e)', () => {
 
     districtId = (
       await prisma.district.create({
-        data: { name: `FL District ${Date.now()}`, depotId: 'Peliyagoda' },
+        data: { name: `FL District ${Date.now()}`, depotId: 'depo1' },
       })
-    ).id;
+    ).name;
     for (const id of STORES) {
       await prisma.store.create({
         data: {
@@ -49,7 +49,7 @@ describe('fleet (e2e)', () => {
           displayName: `Store ${id}`,
           brand: 'Fresh',
           districtId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: 540,
           windowCloseMin: 900,
@@ -61,17 +61,20 @@ describe('fleet (e2e)', () => {
         loginId: `fl-driver-${Date.now()}`,
         role: 'driver',
         name: 'Kasun Rathnayake (Driver)',
-        depotId: 'Peliyagoda',
-        phone: '0771112233',
+        depotId: 'depo1',
       },
     });
     driverId = driver.id;
+    const profile = await prisma.driver.create({ data: { userId: driver.id } });
+    await prisma.driverPhone.create({
+      data: { driverId: profile.id, phoneNumber: '0771112233' },
+    });
     const vehicle = (id: string, extra = {}) =>
       prisma.vehicle.create({
         data: {
           id,
           numberPlate: id,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           type: 'van',
           temp: 'ambient',
           weightCapKg: 1500,
@@ -101,7 +104,7 @@ describe('fleet (e2e)', () => {
       const t = await prisma.trip.create({
         data: {
           vehicleId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           brand: 'Fresh',
           districtId,
           serviceDate: date(DAY),
@@ -149,7 +152,7 @@ describe('fleet (e2e)', () => {
       await prisma.vehicle.deleteMany({ where: { id: { in: [...VEHICLES, ADDED] } } });
       await prisma.user.deleteMany({ where: { id: driverId } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
-      await prisma.district.deleteMany({ where: { id: districtId } });
+      await prisma.district.deleteMany({ where: { name: districtId } });
     }
     await app?.close();
   });
@@ -171,7 +174,7 @@ describe('fleet (e2e)', () => {
     const loader = request.agent(app.getHttpServer());
     await loader
       .post('/api/auth/login')
-      .send({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' })
+      .send({ role: 'loader', loginId: 'sampath', depotId: 'depo1' })
       .expect(200);
     await loader.get('/api/fleet').expect(403);
   });
@@ -298,10 +301,10 @@ describe('fleet (e2e)', () => {
       weightCapKg: 1200,
       volumeCapM3: 8,
       status: 'at_depot',
-      homeDepot: 'Peliyagoda',
+      homeDepot: 'depo1',
     });
     const row = await prisma.vehicle.findUniqueOrThrow({ where: { id: ADDED } });
-    expect(row).toMatchObject({ depotId: 'Peliyagoda', kmPerL: 11, weeklyFuelQuotaL: null });
+    expect(row).toMatchObject({ depotId: 'depo1', kmPerL: 11, weeklyFuelQuotaL: null });
     const list = await agent.get('/api/fleet').expect(200);
     expect(list.body.vehicles.map((v: { id: string }) => v.id)).toContain(ADDED);
 

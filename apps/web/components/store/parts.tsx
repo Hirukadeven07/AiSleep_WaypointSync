@@ -161,6 +161,7 @@ export function IssueList({ delivery }: { delivery: StoreDelivery }) {
               <span className="block text-caption text-danger">
                 {ISSUE_LABEL[i.reason] ?? i.reason}
                 {i.qty !== null ? ` · ${i.qty}` : ''}
+                {i.resolveStatus ? ' · Resolved' : ' · Not resolved'}
               </span>
             </span>
             <span

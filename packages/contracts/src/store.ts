@@ -63,6 +63,8 @@ export interface StoreIssue {
   qty: number | null;
   reason: string;
   driverDecision: 'pending' | 'accepted' | 'rejected';
+  /** False until a replacement of this item is ordered, or the flag is marked solved. */
+  resolveStatus: boolean;
 }
 
 /** One stop on the trip for the store's progress strip; `isYou` marks this store's stop. */

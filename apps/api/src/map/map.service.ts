@@ -116,7 +116,7 @@ export class MapService {
     return {
       date,
       depotId,
-      depot: depot ? depotPoint(depot.id, depot.name) : null,
+      depot: depot ? depotPoint(depot.id, depot.name, depot) : null,
       districts,
       pins,
       stores,
@@ -270,7 +270,7 @@ export class MapService {
       asOf: now.toISOString(),
       depotId,
       depots: depots.flatMap((d) => {
-        const point = depotPoint(d.id, d.name);
+        const point = depotPoint(d.id, d.name, d);
         return point ? [point] : [];
       }),
       districts,

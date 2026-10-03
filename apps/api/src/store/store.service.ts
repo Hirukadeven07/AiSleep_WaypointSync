@@ -117,6 +117,7 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
         qty: f.qtyFlagged,
         reason: f.reason,
         driverDecision: f.driverDecision,
+        resolveStatus: f.resolveStatus,
       })),
   };
 }
@@ -308,6 +309,7 @@ export class StoreService {
         lines: { create: built.lines },
       },
     });
+    await this.closeFlagsForSentItems(store.id, built.lines.map((l) => l.itemId));
     await this.notifyDispatchers(store.depotId, {
       title: 'New order',
       body: `${store.displayName ?? store.id} ordered ${built.units} ${built.units === 1 ? 'item' : 'items'} (${Math.round(built.weightKg)} kg) for ${dayText(deliveryDate)}.`,
@@ -358,6 +360,20 @@ export class StoreService {
       link: '/dispatch/plan',
     });
     return { ok: true };
+  }
+
+  /**
+   * An open FieldFlag stays resolveStatus false until this shop orders that item again,
+   * or the flag is marked solved (resolvedAt).
+   */
+  private async closeFlagsForSentItems(storeId: string, itemIds: string[]) {
+    const ids = [...new Set(itemIds.filter(Boolean))];
+    if (ids.length === 0) return;
+    const now = new Date();
+    await this.prisma.fieldFlag.updateMany({
+      where: { storeId, resolveStatus: false, itemId: { in: ids } },
+      data: { resolveStatus: true, resolvedAt: now },
+    });
   }
 
   /** Today's stops for this store, in ETA order. */
@@ -457,6 +473,7 @@ export class StoreService {
             reason: r.issue!,
             reasonDetail: `${r.name}: ${r.receivedQty} of ${r.orderedQty} received`,
             severity: r.chilled && warm ? ('high' as const) : ('medium' as const),
+            resolveStatus: false,
           })),
       });
       await tx.order.update({

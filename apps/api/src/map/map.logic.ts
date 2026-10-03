@@ -14,19 +14,19 @@ export const SYNC_STALE_MIN = 20;
  * and the rest of the island stays dark. A loaded district_travel.csv replaces this.
  */
 export const FALLBACK_TERRITORY: Record<string, string> = {
-  Puttalam: 'Peliyagoda',
-  Kurunegala: 'Peliyagoda',
-  Gampaha: 'Peliyagoda',
-  Colombo: 'Peliyagoda',
-  Kalutara: 'Peliyagoda',
-  Galle: 'Peliyagoda',
-  Matara: 'Peliyagoda',
-  Kegalle: 'Kandy',
-  Kandy: 'Kandy',
-  Matale: 'Kandy',
-  'Nuwara Eliya': 'Kandy',
-  Ratnapura: 'Kandy',
-  Badulla: 'Kandy',
+  Puttalam: 'depo1',
+  Kurunegala: 'depo1',
+  Gampaha: 'depo1',
+  Colombo: 'depo1',
+  Kalutara: 'depo1',
+  Galle: 'depo1',
+  Matara: 'depo1',
+  Kegalle: 'depo2',
+  Kandy: 'depo2',
+  Matale: 'depo2',
+  'Nuwara Eliya': 'depo2',
+  Ratnapura: 'depo2',
+  Badulla: 'depo2',
 };
 
 export function fallbackDistricts() {
@@ -37,14 +37,21 @@ export function fallbackDistricts() {
   }));
 }
 
-/** Known yard positions. Depots have no coordinate column. */
+/** Yard positions used when a depot row has no latitude yet. */
 export const DEPOT_POINT: Record<string, { lat: number; lng: number }> = {
+  depo1: { lat: 6.9678, lng: 79.8832 },
   Peliyagoda: { lat: 6.9678, lng: 79.8832 },
+  depo2: { lat: 7.2906, lng: 80.6337 },
   Kandy: { lat: 7.2906, lng: 80.6337 },
 };
 
-export function depotPoint(id: string, name: string) {
-  const point = DEPOT_POINT[id];
+export function depotPoint(
+  id: string,
+  name: string,
+  coords?: { lat: number | null; lng: number | null },
+) {
+  if (coords?.lat != null && coords.lng != null) return { id, name, lat: coords.lat, lng: coords.lng };
+  const point = DEPOT_POINT[id] ?? DEPOT_POINT[name];
   return point ? { id, name, lat: point.lat, lng: point.lng } : null;
 }
 

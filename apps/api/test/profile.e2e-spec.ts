@@ -29,7 +29,7 @@ describe('profile: depot, password and notification preferences (e2e)', () => {
     return agent;
   }
   const dispatcher = () => login({ role: 'dispatcher', loginId: 'nimal', secret: 'waypoint' });
-  const loader = () => login({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' });
+  const loader = () => login({ role: 'loader', loginId: 'sampath', depotId: 'depo1' });
   const driver = () => login({ role: 'driver', loginId: 'kasun', secret: '1234' });
   const store = () => login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
 
@@ -88,12 +88,12 @@ describe('profile: depot, password and notification preferences (e2e)', () => {
       const me = await desk.patch('/api/me/depot').send({ depotId: DEPOT }).expect(200);
       expect(me.body).toMatchObject({ role: 'dispatcher', depotId: DEPOT });
       expect((await desk.get('/api/me').expect(200)).body.depotId).toBe(DEPOT);
-      await desk.patch('/api/me/depot').send({ depotId: 'Peliyagoda' }).expect(200);
+      await desk.patch('/api/me/depot').send({ depotId: 'depo1' }).expect(200);
 
       const dock = await loader();
       const moved = await dock.patch('/api/me/depot').send({ depotId: DEPOT }).expect(200);
       expect(moved.body).toMatchObject({ role: 'loader', depotId: DEPOT });
-      await dock.patch('/api/me/depot').send({ depotId: 'Peliyagoda' }).expect(200);
+      await dock.patch('/api/me/depot').send({ depotId: 'depo1' }).expect(200);
     });
 
     it('refuses the store and the driver, and an unknown depot', async () => {

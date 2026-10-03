@@ -6,10 +6,10 @@ describe('fallbackDistricts', () => {
   it('paints the west coast for Peliyagoda and the hill country for Kandy', () => {
     const rows = fallbackDistricts();
     const depot = (name: string) => rows.find((row) => row.name === name)?.depotId;
-    expect(depot('Colombo')).toBe('Peliyagoda');
-    expect(depot('Galle')).toBe('Peliyagoda');
-    expect(depot('Kandy')).toBe('Kandy');
-    expect(depot('Ratnapura')).toBe('Kandy');
+    expect(depot('Colombo')).toBe('depo1');
+    expect(depot('Galle')).toBe('depo1');
+    expect(depot('Kandy')).toBe('depo2');
+    expect(depot('Ratnapura')).toBe('depo2');
   });
 });
 

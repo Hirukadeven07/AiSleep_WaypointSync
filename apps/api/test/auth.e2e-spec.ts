@@ -43,7 +43,7 @@ describe('auth (e2e)', () => {
     expect(profile).toMatchObject({
       loginId: 'nimal',
       role: 'dispatcher',
-      depot: { id: 'Peliyagoda' },
+      depot: { id: 'depo1' },
       store: null,
     });
     expect(Date.parse(profile.signedInAt)).toBeLessThanOrEqual(
@@ -65,6 +65,6 @@ describe('auth (e2e)', () => {
       .post('/api/auth/login')
       .send({ role: 'driver', loginId: 'kasun', secret: '1234' })
       .expect(200);
-    await agent.get('/api/orders').expect(403);
+    await agent.get('/api/plan').expect(403);
   });
 });

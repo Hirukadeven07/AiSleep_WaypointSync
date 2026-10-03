@@ -56,16 +56,29 @@ export class AuthService {
     const [user, session] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: userId },
-        include: { depot: true, store: true, dispatcherProfile: true },
+        include: {
+          depot: true,
+          store: { include: { phones: true } },
+          dispatcherProfile: { include: { phones: true } },
+          driverProfile: { include: { phones: true } },
+          loaderProfile: { include: { phones: true } },
+        },
       }),
       sessionId ? this.prisma.session.findUnique({ where: { id: sessionId } }) : null,
     ]);
+    const phone =
+      user.driverProfile?.phones[0]?.phoneNumber ??
+      user.loaderProfile?.phones[0]?.phoneNumber ??
+      user.dispatcherProfile?.phones[0]?.phoneNumber ??
+      user.store?.phones.find((p) => p.label === 'shop')?.phoneNo ??
+      user.store?.phones[0]?.phoneNo ??
+      null;
     return {
       id: user.id,
       name: user.name,
       role: user.role,
       loginId: user.loginId,
-      phone: user.phone,
+      phone,
       depot: user.depot ? { id: user.depot.id, name: user.depot.name } : null,
       store: user.store
         ? { id: user.store.id, name: user.store.displayName ?? user.store.id }

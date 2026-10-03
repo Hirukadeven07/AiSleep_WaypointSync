@@ -16,12 +16,15 @@ import {
 } from './parts';
 import { useSignIn } from './useSignIn';
 
-const DEPOTS = ['Peliyagoda', 'Kandy'];
+const DEPOTS = [
+  { id: 'depo1', name: 'Peliyagoda' },
+  { id: 'depo2', name: 'Kandy' },
+];
 const CODE_LENGTH = 6;
 
 export function LoaderLogin() {
   const { signIn, busy, error, clearError } = useSignIn();
-  const [depotId, setDepotId] = useState(DEPOTS[0]!);
+  const [depotId, setDepotId] = useState(DEPOTS[0]!.id);
   const [loginId, setLoginId] = useState('');
   useEffect(() => {
     setLoginId((cur) => cur || (rememberedLoginId('loader') ?? ''));
@@ -69,20 +72,20 @@ export function LoaderLogin() {
           <Field label="Depot">
             <div className="flex w-full gap-[10px]" role="radiogroup" aria-label="Depot">
               {DEPOTS.map((d) => {
-                const on = d === depotId;
+                const on = d.id === depotId;
                 return (
                   <button
-                    key={d}
+                    key={d.id}
                     type="button"
                     role="radio"
                     aria-checked={on}
-                    onClick={() => setDepotId(d)}
+                    onClick={() => setDepotId(d.id)}
                     className={`flex flex-1 items-center gap-[10px] rounded-note px-[14px] py-3 text-left ${
                       on ? 'border-2 border-slate bg-info-tint' : 'border-2 border-transparent bg-bg'
                     }`}
                   >
                     <Icon name="pin" size={18} className="text-slate" />
-                    <span className="text-[15px] font-bold text-ink">{d}</span>
+                    <span className="text-[15px] font-bold text-ink">{d.name}</span>
                   </button>
                 );
               })}

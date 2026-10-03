@@ -9,7 +9,7 @@
 import type { Brand, PrismaClient, Store } from '@prisma/client';
 import { buildLines } from '../../src/store/catalogue';
 
-const DEPOT = 'Peliyagoda';
+const DEPOT = 'depo1';
 const TAG = 'DEMO-DISPATCH-BREAKDOWN';
 
 function clockNow(): Date {

@@ -231,7 +231,7 @@ export class DispatchService {
           resolvedAt: null,
           OR: [{ trip: { depotId } }, { vehicle: { depotId } }],
         },
-        include: { driver: { include: { user: true } }, vehicle: true },
+        include: { driver: { include: { user: true, phones: true } }, vehicle: true },
         orderBy: { raisedAt: 'asc' },
       }),
     ]);
@@ -290,7 +290,7 @@ export class DispatchService {
     const attention: AttentionItem[] = [];
     const trips: LiveTrip[] = rows.map((t) => {
       const driver = t.assignedDriver ?? t.vehicle.driver;
-      const phone = driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null;
+      const phone = driver?.driverProfile?.phones[0]?.phoneNumber ?? null;
       const plate = t.vehicle.numberPlate ?? t.vehicleId;
 
       const onRoad = t.status === 'on_road';
@@ -511,7 +511,7 @@ export class DispatchService {
         title: `SOS from ${person(d.driver.user.name)}${d.vehicle ? ` on ${d.vehicle.numberPlate ?? d.vehicle.id}` : ''}`,
         text: `${d.message ?? 'No message'} · raised ${clockText(d.raisedAt)}.`,
         tripId: d.tripId ?? '',
-        phone: d.driver.user.phone ?? null,
+        phone: d.driver.phones[0]?.phoneNumber ?? null,
         incidentId: d.id,
       });
     }
@@ -600,7 +600,7 @@ export class DispatchService {
         vehicleType: t.vehicle.type,
         vehicleTemp: t.vehicle.temp,
         driverName: driver ? person(driver.name) : null,
-        driverPhone: driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null,
+        driverPhone: driver?.driverProfile?.phones[0]?.phoneNumber ?? null,
         status: t.status,
         live: t.status === 'planning' ? 'planned' : 'assigned',
         lateMin: null,
