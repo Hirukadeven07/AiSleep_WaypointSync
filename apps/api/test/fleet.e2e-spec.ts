@@ -301,7 +301,7 @@ describe('fleet (e2e)', () => {
       weightCapKg: 1200,
       volumeCapM3: 8,
       status: 'at_depot',
-      homeDepot: 'Peliyagoda',
+      homeDepot: 'depo1',
     });
     const row = await prisma.vehicle.findUniqueOrThrow({ where: { id: ADDED } });
     expect(row).toMatchObject({ depotId: 'depo1', kmPerL: 11, weeklyFuelQuotaL: null });

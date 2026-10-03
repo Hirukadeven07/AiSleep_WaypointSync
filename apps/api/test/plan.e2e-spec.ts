@@ -176,7 +176,7 @@ describe('plan board (e2e)', () => {
     const agent = await dispatcher();
     const { body } = await agent.get(`/api/plan?date=${DAY}`).expect(200);
 
-    expect(body.depotId).toBe('Peliyagoda');
+    expect(body.depotId).toBe('depo1');
     expect(body.orders.map((o: { storeId: string }) => o.storeId)).toEqual(['PB-C']);
     expect(body.orders[0]).toMatchObject({
       movedCount: 1,

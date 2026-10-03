@@ -43,7 +43,7 @@ describe('auth (e2e)', () => {
     expect(profile).toMatchObject({
       loginId: 'nimal',
       role: 'dispatcher',
-      depot: { id: 'Peliyagoda' },
+      depot: { id: 'depo1' },
       store: null,
     });
     expect(Date.parse(profile.signedInAt)).toBeLessThanOrEqual(

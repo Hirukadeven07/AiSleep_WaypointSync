@@ -86,7 +86,7 @@ describe('incidents (e2e)', () => {
     ).id;
     const profile = await prisma.driver.create({ data: { userId: driverId } });
     await prisma.driverPhone.create({
-      data: { driverId: profile.id, phoneNumber: '0771234567' },
+      data: { driverId: profile.id, phoneNumber: '0777654321' },
     });
     storeUserId = (
       await prisma.user.create({
@@ -257,7 +257,7 @@ describe('incidents (e2e)', () => {
     const { body } = await agent.get(`/api/incidents/${ids.inc}`).expect(200);
     expect(body.recoverable).toBe(true);
     expect(body.stops.map((s: { chip: string }) => s.chip)).toEqual(['At risk', 'At risk']);
-    expect(body.details.driver).toEqual({ name: 'Ruwan Silva', phone: '0771234567' });
+    expect(body.details.driver).toEqual({ name: 'Ruwan Silva', phone: '0777654321' });
 
     const byId = Object.fromEntries(
       body.replacements.map((r: { vehicleId: string }) => [r.vehicleId, r]),
@@ -393,7 +393,7 @@ describe('incidents (e2e)', () => {
       prisma.trip.create({
         data: {
           vehicleId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           brand: 'Fresh',
           districtId,
           serviceDate: date(DAY),
