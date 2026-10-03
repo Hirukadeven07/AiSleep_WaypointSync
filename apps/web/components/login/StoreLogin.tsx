@@ -65,7 +65,6 @@ export function StoreLogin() {
         <Field label="Password">
           <PasswordInput tone="tint" value={secret} onChange={setSecret} />
         </Field>
-        <p className="-mt-3 text-right text-label font-semibold text-slate">Forgot password?</p>
 
         <CheckRow checked={remember} onChange={setRemember}>
           Remember this phone

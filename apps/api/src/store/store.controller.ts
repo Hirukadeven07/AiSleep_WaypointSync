@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
 import type {
   CatalogueItem,
   StoreDelivery,
   StoreHome,
   StoreNotice,
+  StoreOrderDetail,
   StoreOrderView,
 } from '@waypoint/contracts';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -29,6 +30,26 @@ export class StoreController {
   @Get('orders')
   orders(@CurrentUser() me: AuthUser): Promise<StoreOrderView[]> {
     return this.store.orders(me);
+  }
+
+  @Get('orders/recent')
+  recentOrders(@CurrentUser() me: AuthUser): Promise<StoreOrderDetail[]> {
+    return this.store.recentOrders(me);
+  }
+
+  @Get('saved')
+  saved(@CurrentUser() me: AuthUser): Promise<string[]> {
+    return this.store.saved(me);
+  }
+
+  @Put('saved/:itemId')
+  saveItem(@CurrentUser() me: AuthUser, @Param('itemId') itemId: string): Promise<string[]> {
+    return this.store.saveItem(me, itemId);
+  }
+
+  @Delete('saved/:itemId')
+  unsaveItem(@CurrentUser() me: AuthUser, @Param('itemId') itemId: string): Promise<string[]> {
+    return this.store.unsaveItem(me, itemId);
   }
 
   @Post('orders')

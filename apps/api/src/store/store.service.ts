@@ -12,6 +12,7 @@ import {
   type StoreDelivery,
   type StoreHome,
   type StoreNotice,
+  type StoreOrderDetail,
   type StoreOrderView,
 } from '@waypoint/contracts';
 import { DomainError } from '@waypoint/domain';
@@ -20,7 +21,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { nextOperatingDay } from '../common/clock/operating-day';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
-import { CATALOGUE, buildLines } from './catalogue';
+import { CATALOGUE, buildLines, catalogueItem } from './catalogue';
 import type { PlaceOrderDto, ReceiptDto } from './dto/store.dto';
 import { PhotosService } from '../photos/photos.service';
 
@@ -159,6 +160,60 @@ export class StoreService {
       orderBy: [{ deliveryDate: 'asc' }, { createdAt: 'asc' }],
     });
     return orders.map(orderView);
+  }
+
+  /** The store's latest orders with their lines, newest first: what is already placed, and "order again". */
+  async recentOrders(me: AuthUser): Promise<StoreOrderDetail[]> {
+    const store = await this.store(me);
+    const orders = await this.prisma.order.findMany({
+      where: { storeId: store.id },
+      include: { lines: { orderBy: { name: 'asc' } } },
+      orderBy: [{ createdAt: 'desc' }, { deliveryDate: 'desc' }],
+      take: 5,
+    });
+    return orders.map((o) => ({
+      ...orderView(o),
+      lines: o.lines.map((l) => ({
+        catalogueId: l.itemId,
+        name: l.name,
+        qty: l.qty,
+        pack: l.pack,
+      })),
+    }));
+  }
+
+  /** Catalogue ids this store has starred, oldest first. */
+  async saved(me: AuthUser): Promise<string[]> {
+    const store = await this.store(me);
+    return this.savedIds(store.id);
+  }
+
+  async saveItem(me: AuthUser, itemId: string): Promise<string[]> {
+    const store = await this.store(me);
+    if (!catalogueItem(store.brand, itemId)) {
+      throw new NotFoundException('That item is not in this store’s catalogue');
+    }
+    await this.prisma.storeSavedItem.upsert({
+      where: { storeId_itemId: { storeId: store.id, itemId } },
+      update: {},
+      create: { storeId: store.id, itemId },
+    });
+    return this.savedIds(store.id);
+  }
+
+  async unsaveItem(me: AuthUser, itemId: string): Promise<string[]> {
+    const store = await this.store(me);
+    await this.prisma.storeSavedItem.deleteMany({ where: { storeId: store.id, itemId } });
+    return this.savedIds(store.id);
+  }
+
+  private async savedIds(storeId: string): Promise<string[]> {
+    const rows = await this.prisma.storeSavedItem.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'asc' },
+      select: { itemId: true },
+    });
+    return rows.map((r) => r.itemId);
   }
 
   /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */

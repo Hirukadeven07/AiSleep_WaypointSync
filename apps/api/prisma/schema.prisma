@@ -248,6 +248,7 @@ model Store {
   users             User[]
   phones            OutletPhone[]
   fieldFlags        FieldFlag[]
+  savedItems        StoreSavedItem[]
 }
 
 model User {
@@ -521,6 +522,7 @@ model Item {
   dnLines      DeliveryNoteLine[]
   fieldFlags   FieldFlag[]
   loaderFlags  LoaderFlag[]
+  savedBy      StoreSavedItem[]
 
   @@index([type])
 }
@@ -534,6 +536,17 @@ model InventoryBatch {
   expiryDate        DateTime?          @db.Date
   qty               Float              @default(0)
   picks             DeliveryNotePick[]
+}
+
+/// Items a store manager starred on the order screen, kept per store so every phone shows the same list.
+model StoreSavedItem {
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([storeId, itemId])
 }
 
 /// 1:1 with User where role = driver. Vehicle assignment stays on Vehicle.driverId.
