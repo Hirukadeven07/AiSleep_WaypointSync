@@ -47,6 +47,7 @@ const ACTION: Partial<Record<DriverEventType, string>> = {
   ACKNOWLEDGEMENT: 'Your acknowledgement',
   ROAD_ISSUE: 'Your road issue report',
   SOS_ALERT: 'Your SOS',
+  SOS_CLEARED: '"I\'m safe"',
   FUEL_READING: 'Your fuel reading',
   BREAK_START: 'Your break start',
   BREAK_END: 'Your break end',

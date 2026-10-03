@@ -224,11 +224,13 @@ export class DispatchService {
           store: { depotId },
         },
       }),
-      // Driver SOS alerts that dispatch has not resolved yet.
+      // Today's driver SOS alerts that are still open: an old one nobody closed does not haunt
+      // every later day.
       this.prisma.driverIncident.findMany({
         where: {
           incidentType: 'sos',
           resolvedAt: null,
+          raisedAt: { gte: new Date(`${date}T00:00:00+05:30`) },
           OR: [{ trip: { depotId } }, { vehicle: { depotId } }],
         },
         include: { driver: { include: { user: true, phones: true } }, vehicle: true },
