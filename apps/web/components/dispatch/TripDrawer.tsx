@@ -273,7 +273,13 @@ export function TripDrawer({
 
         <div className="flex shrink-0 flex-col">
           {trip.stops.map((s) => (
-            <Stop key={s.id} stop={s} next={s.id === firstOpen?.id} onRoad={onRoad} />
+            <Stop
+              key={s.id}
+              stop={s}
+              next={s.id === firstOpen?.id}
+              onRoad={onRoad}
+              offline={trip.live === 'not_synced'}
+            />
           ))}
         </div>
 
