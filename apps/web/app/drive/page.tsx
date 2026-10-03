@@ -18,6 +18,7 @@ import {
   vehicleLabel,
   windowText,
 } from '@/lib/driver-format';
+import { usePlanLock } from '@/lib/plan-ack';
 import { usePendingCount } from '@/lib/use-pending-count';
 
 const stopCount = (n: number) => `${n} ${n === 1 ? 'stop' : 'stops'}`;
@@ -117,6 +118,7 @@ export default function DriverHome() {
   const vehicle = day?.vehicle ?? null;
   const upcoming = day?.upcoming ?? [];
   const unread = day?.unreadNotices ?? 0;
+  const planLock = usePlanLock(trip);
 
   const subtitle = [displayName(me?.name), vehicle?.plate, vehicleLabel(vehicle?.type)].filter(Boolean).join(' · ');
   const name = firstName(me?.name);
@@ -142,6 +144,20 @@ export default function DriverHome() {
       </header>
 
       {!online && <OfflineBanner />}
+
+      {planLock.locked && (
+        <Link
+          href="/drive/next"
+          className="flex items-center gap-3 rounded-card bg-warning/[0.12] p-4"
+          role="alert"
+        >
+          <Icon name="alert" size={18} className="text-warning" />
+          <span className="flex-1 text-[15px] font-semibold leading-5 text-ink">
+            Dispatch changed Trip {trip?.tripNumber}. Check and accept the new stop list.
+          </span>
+          <Icon name="chevron-right" size={18} className="text-muted" />
+        </Link>
+      )}
 
       {unread > 0 && (
         <Link href="/drive/notices" className="flex items-center gap-3 rounded-card bg-surface p-4">

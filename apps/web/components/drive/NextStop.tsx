@@ -22,6 +22,7 @@ import {
 } from '@/lib/driver-format';
 import { enqueueAction, getPendingActions, subscribeOutbox } from '@/lib/outbox';
 import { useRoadIssue, writeRoadIssue } from '@/lib/road-issue';
+import { usePlanLock } from '@/lib/plan-ack';
 import { useBreak } from '@/lib/use-break';
 
 const DOCK: Record<DriverDayHandover['dockType'], string> = {
@@ -195,6 +196,7 @@ export function NextStop() {
       : null;
   const issue = localIssue ?? serverIssue;
   const onBreak = useBreak();
+  const planLock = usePlanLock(active);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -278,6 +280,78 @@ export function NextStop() {
       );
       writeRoadIssue(trip.id, null);
     });
+
+  // Dispatch changed the plan: the driver sees what changed and accepts it before the next action.
+  if (planLock.locked) {
+    return (
+      <div className="flex flex-col gap-4 lg:max-w-[640px]">
+        <header className="flex flex-col gap-1 pr-[111px]">
+          <p className="text-[13px] font-semibold leading-[17px] text-muted">
+            Trip {trip.tripNumber} · plan version {trip.planVersion}
+          </p>
+          <h1 className="text-[26px] font-semibold leading-8 text-ink">Your stops changed</h1>
+        </header>
+        {!online && <OfflineBanner />}
+        <section
+          className="flex flex-col gap-3 rounded-card bg-warning/[0.12] p-4"
+          aria-label="Plan changed"
+          role="alert"
+        >
+          {planLock.added.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <p className="text-[13px] font-semibold leading-[17px] text-success">Added</p>
+              {planLock.added.map((name) => (
+                <p key={`a-${name}`} className="text-[15px] font-semibold leading-5 text-ink">
+                  + {name}
+                </p>
+              ))}
+            </div>
+          )}
+          {planLock.removed.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <p className="text-[13px] font-semibold leading-[17px] text-danger">Taken off</p>
+              {planLock.removed.map((name) => (
+                <p
+                  key={`r-${name}`}
+                  className="text-[15px] font-semibold leading-5 text-ink line-through"
+                >
+                  {name}
+                </p>
+              ))}
+            </div>
+          )}
+          {planLock.added.length === 0 && planLock.removed.length === 0 && (
+            <p className="text-[15px] leading-5 text-ink">
+              The order or times of your stops changed.
+            </p>
+          )}
+          <div className="flex flex-col gap-1 border-t border-border pt-3">
+            <p className="text-[13px] font-semibold leading-[17px] text-muted">New list</p>
+            {stops.map((s) => (
+              <p key={s.id} className="text-[14px] leading-5 text-ink">
+                {s.sequence}. {s.outletName}
+                {s.eta !== null ? ` · ETA ${clockText(s.eta)}` : ''}
+              </p>
+            ))}
+          </div>
+        </section>
+        <button
+          type="button"
+          onClick={planLock.accept}
+          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg"
+        >
+          Accept new list
+        </button>
+        <a
+          href={telHref(DISPATCH_PHONE)}
+          className="flex min-h-[48px] items-center justify-center gap-2 rounded-pill border border-border bg-surface px-5 text-[15px] font-semibold text-ink"
+        >
+          <Icon name="phone" size={16} />
+          Call dispatch
+        </a>
+      </div>
+    );
+  }
 
   // A break pauses the next stop until the driver ends it.
   if (onBreak.onBreakSince !== null && phase === 'travel') {
