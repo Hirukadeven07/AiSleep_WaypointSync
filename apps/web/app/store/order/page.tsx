@@ -79,6 +79,9 @@ export default function OrderPage() {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [placed, setPlaced] = useState<StoreOrderView>();
+  // The placed order whose "Cancel order" is waiting for a yes or no.
+  const [confirmId, setConfirmId] = useState<string>();
+  const [cancellingId, setCancellingId] = useState<string>();
   const [toast, setToast] = useState<{ message: string; tone: 'danger' | 'warning' | 'success' }>();
   const [loadError, setLoadError] = useState<string>();
   const clearToast = useCallback(() => setToast(undefined), []);
@@ -189,6 +192,25 @@ export default function OrderPage() {
     });
   }
 
+  /** Takes back an order that is still waiting. The server refuses one that is planned. */
+  async function cancelOrder(o: StoreOrderDetail) {
+    setCancellingId(o.id);
+    try {
+      await api(`/store/orders/${o.id}`, { method: 'DELETE' });
+      setRecent((r) => r.filter((x) => x.id !== o.id));
+      setPlaced((p) => (p?.id === o.id ? undefined : p));
+      setToast({ message: `Order for ${formatDate(o.deliveryDate)} cancelled`, tone: 'success' });
+      requestStoreRefresh();
+    } catch (e) {
+      setToast({ message: messageOf(e), tone: 'danger' });
+      // It may have been planned or removed meanwhile; show it as it is now.
+      setRecent(await api<StoreOrderDetail[]>('/store/orders/recent').catch(() => recent));
+    } finally {
+      setCancellingId(undefined);
+      setConfirmId(undefined);
+    }
+  }
+
   async function place() {
     setBusy(true);
     const body: PlaceOrderRequest = {
@@ -245,21 +267,60 @@ export default function OrderPage() {
           )}
 
           {upcoming.map((o) => (
-            <details key={o.id} className="order-2 rounded-card bg-surface p-md">
-              <summary className="cursor-pointer text-body font-semibold text-ink">
-                Already ordered for {formatDate(o.deliveryDate)} · {o.units} units
-              </summary>
-              <ul className="mt-sm space-y-xs">
-                {o.lines.map((l, i) => (
-                  <li key={i} className="flex justify-between gap-sm text-label text-muted">
-                    <span className="min-w-0 truncate">
-                      {l.name} · {l.pack}
-                    </span>
-                    <span className="shrink-0 font-semibold text-ink">× {l.qty}</span>
-                  </li>
-                ))}
-              </ul>
-            </details>
+            <div key={o.id} className="order-2 space-y-sm rounded-card bg-surface p-md">
+              <details>
+                <summary className="cursor-pointer text-body font-semibold text-ink">
+                  Already ordered for {formatDate(o.deliveryDate)} · {o.units} units
+                </summary>
+                <ul className="mt-sm space-y-xs">
+                  {o.lines.map((l, i) => (
+                    <li key={i} className="flex justify-between gap-sm text-label text-muted">
+                      <span className="min-w-0 truncate">
+                        {l.name} · {l.pack}
+                      </span>
+                      <span className="shrink-0 font-semibold text-ink">× {l.qty}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              {o.status !== 'waiting' ? (
+                <p className="text-caption text-muted">Planned. Ask dispatch to change it.</p>
+              ) : confirmId === o.id ? (
+                <div className="space-y-sm">
+                  <p className="text-label text-ink">
+                    Cancel this order of {o.units} {o.units === 1 ? 'unit' : 'units'} for{' '}
+                    {formatDate(o.deliveryDate)}?
+                    {closed ? ' Ordering is closed, so it cannot be placed again today.' : ''}
+                  </p>
+                  <div className="flex gap-sm">
+                    <button
+                      type="button"
+                      disabled={cancellingId === o.id}
+                      onClick={() => setConfirmId(undefined)}
+                      className="min-h-[36px] flex-1 rounded-pill border border-mist px-md text-label font-semibold text-ink disabled:opacity-40"
+                    >
+                      Keep order
+                    </button>
+                    <button
+                      type="button"
+                      disabled={cancellingId === o.id}
+                      onClick={() => cancelOrder(o)}
+                      className="min-h-[36px] flex-1 rounded-pill bg-danger px-md text-label font-semibold text-white disabled:opacity-40"
+                    >
+                      {cancellingId === o.id ? 'Cancelling…' : 'Yes, cancel'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmId(o.id)}
+                  className="min-h-[36px] text-label font-semibold text-danger"
+                >
+                  Cancel order
+                </button>
+              )}
+            </div>
           ))}
 
           <div className="order-5 space-y-sm rounded-card bg-surface p-md">
