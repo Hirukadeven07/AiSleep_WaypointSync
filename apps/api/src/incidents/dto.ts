@@ -1,5 +1,5 @@
 import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import type { RecoveryAction } from '@waypoint/contracts';
+import type { LogIncidentRequest, RecoveryAction } from '@waypoint/contracts';
 
 export class ResolveDto {
   @IsIn(['replacement', 'tomorrow', 'split', 'defer_one'])
@@ -19,6 +19,20 @@ export class ResolveDto {
   @IsString()
   @MaxLength(300)
   reason?: string;
+}
+
+export class LogIncidentDto implements LogIncidentRequest {
+  @IsString()
+  @MinLength(1)
+  tripId!: string;
+
+  @IsIn(['breakdown', 'delay', 'quiet_driver', 'wait_timeout'])
+  type!: LogIncidentRequest['type'];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  note?: string;
 }
 
 export class BreakdownDto {

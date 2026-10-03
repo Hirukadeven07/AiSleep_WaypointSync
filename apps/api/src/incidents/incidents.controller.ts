@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import type { IncidentDetail, IncidentList } from '@waypoint/contracts';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { BreakdownDto, ResolveDto } from './dto';
+import { BreakdownDto, LogIncidentDto, ResolveDto } from './dto';
 import { IncidentsService } from './incidents.service';
 
 @Controller('incidents')
@@ -14,6 +14,13 @@ export class IncidentsController {
   @Get()
   list(@CurrentUser() me: AuthUser): Promise<IncidentList> {
     return this.incidents.list(me);
+  }
+
+  /** Log an incident by hand on one of the depot's trips (a breakdown also stops the trip). */
+  @Post()
+  @HttpCode(200)
+  log(@CurrentUser() me: AuthUser, @Body() dto: LogIncidentDto): Promise<IncidentDetail> {
+    return this.incidents.log(me, dto);
   }
 
   /** A truck broke down: stop its trip and open a breakdown incident to recover the remaining stops. */

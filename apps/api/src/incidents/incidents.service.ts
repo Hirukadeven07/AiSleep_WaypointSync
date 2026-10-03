@@ -9,6 +9,7 @@ import type { Prisma } from '@prisma/client';
 import type {
   IncidentDetail,
   IncidentKind,
+  LogIncidentRequest,
   IncidentList,
   IncidentState,
   IncidentStop,
@@ -62,6 +63,8 @@ const dayText = (d: Date) =>
   });
 /** Trips that can break down: loaded or on the road. */
 const BREAKABLE = ['loading', 'ready', 'on_road'];
+/** Trips a delay, a quiet driver or a long wait can be logged on: sent and not finished. */
+const LOGGABLE = ['published', 'loading', 'ready', 'on_road', 'breakdown'];
 
 const KIND_TITLE: Record<IncidentKind, string> = {
   breakdown: 'broke down',
@@ -506,6 +509,45 @@ export class IncidentsService {
    * incident opens, so the remaining stops can be recovered from the incidents screen.
    * Logging the same trip twice returns the open incident.
    */
+  /**
+   * An incident the dispatcher logs by hand. A breakdown goes through reportBreakdown (it stops the
+   * trip); the others open on the trip with the note on the timeline. Logging the same open kind
+   * on a trip again returns the one already open.
+   */
+  async log(me: Me, dto: LogIncidentRequest): Promise<IncidentDetail> {
+    if (dto.type === 'breakdown') return this.reportBreakdown(me, dto.tripId, dto.note);
+    const depotId = this.depotOf(me);
+    const trip = await this.prisma.trip.findFirst({ where: { id: dto.tripId, depotId } });
+    if (!trip) throw new NotFoundException('Trip not found');
+    if (!LOGGABLE.includes(trip.status)) {
+      throw new BadRequestException(
+        `A ${trip.status.replace('_', ' ')} trip cannot have an incident logged`,
+      );
+    }
+    const open = await this.prisma.incident.findFirst({
+      where: { tripId: trip.id, type: dto.type, status: { notIn: ['resolved', 'closed'] } },
+    });
+    if (open) return this.detail(me, open.id);
+    const now = this.clock.now();
+    const note = dto.note?.trim();
+    const created = await this.prisma.incident.create({
+      data: {
+        type: dto.type,
+        tripId: trip.id,
+        status: 'open',
+        createdAt: now,
+        timeline: [
+          {
+            at: now.toISOString(),
+            text: `Dispatch logged the incident${note ? `: ${note}` : ''}`,
+            by: 'dispatcher',
+          },
+        ] as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return this.detail(me, created.id);
+  }
+
   async reportBreakdown(me: Me, tripId: string, note?: string): Promise<IncidentDetail> {
     const depotId = this.depotOf(me);
     const trip = await this.prisma.trip.findFirst({ where: { id: tripId, depotId } });

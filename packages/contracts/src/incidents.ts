@@ -4,6 +4,13 @@ export type IncidentKind =
   'breakdown' | 'delay' | 'quiet_driver' | 'wait_timeout' | 'missing_items';
 export type IncidentState = 'open' | 'acknowledged' | 'resolved';
 
+/** POST /incidents: an incident the dispatcher logs by hand on one of the depot's trips. */
+export interface LogIncidentRequest {
+  tripId: string;
+  type: 'breakdown' | 'delay' | 'quiet_driver' | 'wait_timeout';
+  note?: string;
+}
+
 export interface IncidentSummary {
   id: string;
   kind: IncidentKind;

@@ -37,6 +37,19 @@ describe('auth (e2e)', () => {
     expect(cookie).toContain('ws_session=');
     expect(cookie).toContain('HttpOnly');
     await agent.get('/api/me').expect(200);
+
+    // The account card's details.
+    const profile = (await agent.get('/api/me/profile').expect(200)).body;
+    expect(profile).toMatchObject({
+      loginId: 'nimal',
+      role: 'dispatcher',
+      depot: { id: 'Peliyagoda' },
+      store: null,
+    });
+    expect(Date.parse(profile.signedInAt)).toBeLessThanOrEqual(
+      Date.parse(profile.sessionExpiresAt),
+    );
+    await request(app.getHttpServer()).get('/api/me/profile').expect(401);
   });
 
   it('rejects a wrong password', async () => {
