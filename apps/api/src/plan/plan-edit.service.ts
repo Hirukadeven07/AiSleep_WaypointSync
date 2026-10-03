@@ -329,21 +329,32 @@ export class PlanEditService {
     const taken: Record<string, number> = {};
     for (const t of tripRows) taken[t.vehicleId] = (taken[t.vehicleId] ?? 0) + 1;
 
-    const best = rankVehiclesForOrder({
+    const ranked = rankVehiclesForOrder({
       order: toStopView(order).order,
       outlet: toOutlet(order.store),
       vehicles: vehicles.map(toVehicle),
       trips: views,
       tripsTakenToday: taken,
       lookup,
-    }).find((o) => !o.hardBlocked && o.tripId !== null && o.tripId !== stop?.tripId);
+    }).filter((o) => !o.hardBlocked && o.tripId !== null && o.tripId !== stop?.tripId);
+
+    // Suggest only a trip it really fits: no warning on the drop (other district, over weight or
+    // volume, ...) and the store reached inside its window.
+    let fit: { row: TripRow; result: ReturnType<PlanEditService['evaluate']> } | null = null;
+    for (const option of ranked) {
+      const row = tripRows.find((t) => t.id === option.tripId);
+      if (!row) continue;
+      const result = this.evaluate(order, row, lookup);
+      if (result.blocks.length > 0 || result.warnings.length > 0) continue;
+      const etas = stopEtas(result.sorted, lookup, depotId as Depot, DEPART_MIN[row.brand]) ?? [];
+      if (windowRiskIssues(etas).length > 0) continue;
+      fit = { row, result };
+      break;
+    }
 
     let suggestion: PlanOrderDetail['suggestion'] = null;
-    if (best?.tripId) {
-      const row = tripRows.find((t) => t.id === best.tripId)!;
-      const result = this.evaluate(order, row, lookup);
-      const etas = stopEtas(result.sorted, lookup, depotId as Depot, DEPART_MIN[row.brand]) ?? [];
-      const late = windowRiskIssues(etas).length > 0;
+    if (fit) {
+      const { row, result } = fit;
       const kind =
         row.vehicle.type === 'van'
           ? KIND.van
@@ -354,7 +365,7 @@ export class PlanEditService {
         tripId: row.id,
         label: `${row.vehicle.numberPlate ?? row.vehicleId} · Trip ${row.tripNumber}`,
         detail: `${kind} · ${row.brand} · ${tripAreaLabel(row)} · has room`,
-        fit: `fits as stop ${result.placedSequence}, ${late ? 'window at risk' : 'window met'}`,
+        fit: `fits as stop ${result.placedSequence}, window met`,
       };
     }
 
