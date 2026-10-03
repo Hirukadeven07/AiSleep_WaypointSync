@@ -7,6 +7,9 @@ import type {
   LoadQueueItem,
   LoadSheet,
   LoadStop,
+  OrderLine,
+  PlanLock,
+  PlanLockSlot,
 } from '@waypoint/contracts';
 import { DomainError, loadOrder } from '@waypoint/domain';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -33,6 +36,11 @@ const sheetInclude = {
 type SheetTrip = Prisma.TripGetPayload<{ include: typeof sheetInclude }>;
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
+const addDays = (iso: string, days: number) => {
+  const d = asDate(iso);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
 
 function flagView(f: SheetTrip['stops'][number]['flags'][number]): LoadFlagView {
   return {
@@ -42,6 +50,18 @@ function flagView(f: SheetTrip['stops'][number]['flags'][number]): LoadFlagView 
     type: f.type,
     qty: f.qty,
     note: f.note,
+  };
+}
+
+function lineView(l: SheetTrip['stops'][number]['order']['lines'][number]): OrderLine {
+  return {
+    id: l.id,
+    name: l.name,
+    qty: l.qty,
+    pack: l.pack,
+    chilled: l.chilled,
+    unitWeightKg: l.unitWeightKg,
+    unitVolumeM3: l.unitVolumeM3,
   };
 }
 
@@ -94,12 +114,16 @@ export class LoadsService {
     private readonly clock: ClockService,
   ) {}
 
-  /** Today's trips in the loader's depot that are waiting for, or in, loading. */
+  /**
+   * Trips in the loader's depot that are waiting for, or in, loading.
+   * Planning publishes tomorrow, so the dock sees that day as well as today.
+   */
   async queue(me: AuthUser): Promise<LoadQueueItem[]> {
+    const today = this.clock.today();
     const trips = await this.prisma.trip.findMany({
       where: {
         depotId: me.depotId ?? undefined,
-        serviceDate: asDate(this.clock.today()),
+        serviceDate: { in: [asDate(today), asDate(addDays(today, 1))] },
         status: { in: [...QUEUE_STATUSES] },
       },
       include: {
@@ -140,16 +164,9 @@ export class LoadsService {
       storeName: storeName(s),
       status: s.status,
       chilled: s.order.temp === 'chilled',
-      lines: s.order.lines.map((l) => ({
-        id: l.id,
-        name: l.name,
-        qty: l.qty,
-        pack: l.pack,
-        chilled: l.chilled,
-        unitWeightKg: l.unitWeightKg,
-        unitVolumeM3: l.unitVolumeM3,
-      })),
+      lines: s.order.lines.map(lineView),
       flags: s.flags.map(flagView),
+      isNew: session?.newOrderIds.includes(s.orderId) ?? false,
     }));
 
     return {
@@ -233,10 +250,39 @@ export class LoadsService {
     return this.sheet(me, tripId);
   }
 
+  /** The loader confirms a removed order's goods are off the truck. Repeating it changes nothing. */
+  async takenOff(me: AuthUser, tripId: string, orderId: string): Promise<LoadSheet> {
+    const trip = await this.findTrip(me, tripId);
+    const lock = await this.lockFor(trip);
+    if (!lock.locked) {
+      throw new DomainError('PLAN_NOT_CHANGED', 'There is no plan change to take goods off for.');
+    }
+    if (!lock.removed.some((r) => r.orderId === orderId)) {
+      throw new DomainError('ORDER_NOT_REMOVED', 'That order was not taken off this trip.');
+    }
+    const done = trip.loadSession!.takenOffOrderIds;
+    if (!done.includes(orderId)) {
+      await this.prisma.loadSession.update({
+        where: { tripId: trip.id },
+        data: { takenOffOrderIds: [...done, orderId] },
+      });
+    }
+    return this.sheet(me, tripId);
+  }
+
   /** The loader accepts the dispatcher's new plan; loading resumes on the new stop list. */
   async acknowledge(me: AuthUser, tripId: string): Promise<LoadSheet> {
     const trip = await this.findTrip(me, tripId);
     const lock = await this.lockFor(trip);
+    if (lock.locked && lock.removed.some((r) => !r.takenOff)) {
+      throw new DomainError(
+        'REMOVED_GOODS_NOT_TAKEN_OFF',
+        'Take the removed goods off the truck before accepting the new plan.',
+      );
+    }
+    // Stops the change added are marked NEW until the truck departs.
+    const added = new Set(lock.added);
+    const newOrderIds = trip.stops.filter((s) => added.has(s.id)).map((s) => s.orderId);
     if (lock.locked) {
       // The delivery notes follow the accepted plan: removed orders leave the truck, added ones start picking.
       await this.removedDeliveryNotes(
@@ -252,6 +298,8 @@ export class LoadsService {
         ackedPlanVersion: trip.planVersion,
         ackedStopIds: ackedOrders(trip),
         paused: false,
+        takenOffOrderIds: [],
+        ...(lock.locked ? { newOrderIds } : {}),
       },
       create: {
         tripId: trip.id,
@@ -282,7 +330,7 @@ export class LoadsService {
     await this.prisma.$transaction([
       this.prisma.loadSession.update({
         where: { tripId: trip.id },
-        data: { finishedAt: departedAt, departedAt },
+        data: { finishedAt: departedAt, departedAt, newOrderIds: [] },
       }),
       this.prisma.trip.update({
         where: { id: trip.id },
@@ -341,7 +389,7 @@ export class LoadsService {
   }
 
   /** Locked when loading has started and the dispatcher has since published a newer plan version. */
-  private async lockFor(trip: SheetTrip) {
+  private async lockFor(trip: SheetTrip): Promise<PlanLock> {
     const session = trip.loadSession;
     const acked = session?.ackedPlanVersion ?? trip.planVersion;
     const locked = !!session?.startedAt && !session.departedAt && trip.planVersion > acked;
@@ -352,6 +400,8 @@ export class LoadsService {
         ackedPlanVersion: acked,
         removed: [],
         added: [],
+        before: [],
+        after: [],
       };
     }
     // Orders, not stop rows, are compared: a stop taken off the trip is deleted, its order stays.
@@ -361,19 +411,39 @@ export class LoadsService {
     const removedOrders = removedIds.length
       ? await this.prisma.order.findMany({
           where: { id: { in: removedIds } },
-          include: { store: true },
+          include: { store: true, lines: { orderBy: { name: 'asc' } } },
         })
       : [];
-    const names = new Map(removedOrders.map((o) => [o.id, o.store.displayName ?? o.store.id]));
+    const byId = new Map(removedOrders.map((o) => [o.id, o]));
+    const names = new Map([
+      ...removedOrders.map((o) => [o.id, o.store.displayName ?? o.store.id] as const),
+      ...trip.stops.map((s) => [s.orderId, storeName(s)] as const),
+    ]);
+    const nameOf = (id: string) => names.get(id) ?? 'Removed stop';
+    // ackedStopIds were saved in delivery sequence (sheetInclude sorts stops), so reversing gives load order.
+    const before: PlanLockSlot[] = loadOrder(ackedIds).map((id) => ({
+      orderId: id,
+      storeName: nameOf(id),
+      change: current.has(id) ? 'kept' : 'removed',
+    }));
+    const after: PlanLockSlot[] = loadOrder(trip.stops).map((s) => ({
+      orderId: s.orderId,
+      storeName: storeName(s),
+      change: ackedIds.includes(s.orderId) ? 'kept' : 'added',
+    }));
     return {
       locked,
       planVersion: trip.planVersion,
       ackedPlanVersion: acked,
       removed: removedIds.map((id) => ({
         orderId: id,
-        storeName: names.get(id) ?? 'Removed stop',
+        storeName: nameOf(id),
+        lines: byId.get(id)?.lines.map(lineView) ?? [],
+        takenOff: session.takenOffOrderIds.includes(id),
       })),
       added: trip.stops.filter((s) => !ackedIds.includes(s.orderId)).map((s) => s.id),
+      before,
+      after,
     };
   }
 

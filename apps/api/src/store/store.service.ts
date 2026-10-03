@@ -12,6 +12,7 @@ import {
   type StoreDelivery,
   type StoreHome,
   type StoreNotice,
+  type StopStatus,
   type StoreOrderDetail,
   type StoreOrderView,
 } from '@waypoint/contracts';
@@ -35,11 +36,27 @@ const deliveryInclude = {
       fieldFlags: { include: { item: true }, orderBy: { raisedAt: 'asc' } },
     },
   },
-  trip: { include: { assignedDriver: true, vehicle: { include: { driver: true } } } },
+  trip: {
+    include: {
+      assignedDriver: true,
+      vehicle: { include: { driver: true } },
+      stops: { select: { id: true, sequence: true, status: true }, orderBy: { sequence: 'asc' } },
+    },
+  },
   receipt: true,
 } satisfies Prisma.TripStopInclude;
 
 type DeliveryStop = Prisma.TripStopGetPayload<{ include: typeof deliveryInclude }>;
+
+/** Stop states where the truck has finished with that stop (or will not call there). */
+const DONE: readonly StopStatus[] = ['delivered', 'partial', 'deferred', 'confirmed'];
+const COUNTING: readonly StopStatus[] = ['upcoming', 'at_risk'];
+
+/** Stops the truck still has to serve before this one; null unless the truck is out and this stop is still ahead. */
+function stopsAway(s: DeliveryStop): number | null {
+  if (s.trip.status !== 'on_road' || !COUNTING.includes(s.status)) return null;
+  return s.trip.stops.filter((o) => o.sequence < s.sequence && !DONE.includes(o.status)).length;
+}
 
 function orderView(o: Order): StoreOrderView {
   return {
@@ -53,6 +70,9 @@ function orderView(o: Order): StoreOrderView {
     deferReason: o.deferReason,
     movedFromDate: o.movedFromDate ? isoDay(o.movedFromDate) : null,
     repeatSkip: o.repeatSkip,
+    urgent: o.urgent,
+    stockLevel: o.stockLevel,
+    urgentNote: o.urgentNote,
   };
 }
 
@@ -71,6 +91,13 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
     driverAckAt: s.driverAckAt?.toISOString() ?? null,
     signaturePhotoKey: s.receipt?.signaturePhotoKey ?? null,
     signedAt: s.receipt?.signedAt?.toISOString() ?? null,
+    stopsAway: stopsAway(s),
+    // Other stores on the trip stay anonymous: only their place in the run and their status.
+    track: s.trip.stops.map((o) => ({
+      sequence: o.sequence,
+      status: o.status,
+      isYou: o.id === s.id,
+    })),
     lines: s.order.lines.map((l) => ({
       id: l.id,
       name: l.name,
@@ -136,7 +163,7 @@ export class StoreService {
       brand: store.brand,
       windowOpenMin: store.windowOpenMin,
       windowCloseMin: store.windowCloseMin,
-      cutoffMin: ORDER_CUTOFF_MIN,
+      cutoffMin: this.orderCutoffMin(),
       nowMin: this.clock.minutesNow(),
       today,
       // The open delivery first; otherwise the last one of the day.
@@ -216,10 +243,20 @@ export class StoreService {
     return rows.map((r) => r.itemId);
   }
 
+  /**
+   * TEMPORARY: local development keeps ordering open until 23:59 so work is not
+   * blocked after 16:00. Production and the test suite still close at ORDER_CUTOFF_MIN.
+   */
+  private orderCutoffMin(): number {
+    const env = process.env.NODE_ENV;
+    const devBypass = env !== 'production' && env !== 'test';
+    return devBypass ? 23 * 60 + 59 : ORDER_CUTOFF_MIN;
+  }
+
   /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */
   async placeOrder(me: AuthUser, dto: PlaceOrderDto): Promise<StoreOrderView> {
     const store = await this.store(me);
-    if (this.clock.minutesNow() >= ORDER_CUTOFF_MIN) {
+    if (this.clock.minutesNow() >= this.orderCutoffMin()) {
       throw new DomainError(
         'AFTER_CUTOFF',
         'Orders for tomorrow close at 16:00. Order again tomorrow morning.',
@@ -231,6 +268,8 @@ export class StoreService {
     } catch (e) {
       throw new BadRequestException((e as Error).message);
     }
+    // Stock level and note only mean something on an urgent order.
+    const urgent = dto.urgent === true;
     const deliveryDate = asDate(await nextOperatingDay(this.prisma, asDate(this.clock.today())));
     const order = await this.prisma.order.create({
       data: {
@@ -242,6 +281,9 @@ export class StoreService {
         units: built.units,
         weightKg: built.weightKg,
         volumeM3: built.volumeM3,
+        urgent,
+        stockLevel: urgent ? (dto.stockLevel ?? null) : null,
+        urgentNote: urgent ? dto.urgentNote || null : null,
         lines: { create: built.lines },
       },
     });

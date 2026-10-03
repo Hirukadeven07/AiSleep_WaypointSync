@@ -1,4 +1,5 @@
 import type { Brand, TripStatus } from './status';
+import type { StockLevel } from './order';
 
 /** Minutes since midnight for every *Min field. */
 
@@ -24,6 +25,10 @@ export interface PlanOrder {
   /** Moved-to-later orders only. */
   deferredTo: string | null;
   deferReason: string | null;
+  /** Marked urgent by the store; urgent orders head the waiting list. */
+  urgent: boolean;
+  stockLevel: StockLevel | null;
+  urgentNote: string | null;
 }
 
 export interface PlanStop {
@@ -95,7 +100,7 @@ export interface PlanDay {
   trips: PlanTrip[];
   districts: string[];
   summary: PlanSummary;
-  /** Set once every trip with stops has been sent to loaders and drivers. */
+  /** Last send, once every trip that currently has stops has been sent. Planning can continue after this. */
   published: { at: string; tripCount: number; storeCount: number } | null;
 }
 

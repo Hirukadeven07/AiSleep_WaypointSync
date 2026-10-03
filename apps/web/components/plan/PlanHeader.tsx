@@ -8,18 +8,21 @@ function Pill({
   onClick,
   primary = false,
   disabled = false,
+  title,
 }: {
   icon: 'sparkle' | 'plus' | 'send' | 'check';
   children: string;
   onClick?: () => void;
   primary?: boolean;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={`flex shrink-0 items-center gap-2 rounded-pill px-[18px] py-[11px] text-[14px] font-semibold leading-5 ${
         primary ? 'bg-primary text-bg' : 'border border-border bg-surface text-ink'
       } ${disabled ? 'cursor-default' : ''}`}
@@ -39,14 +42,15 @@ export function PlanHeader({
   onNewTrip,
   onPublish,
 }: {
-  plan: Pick<PlanDay, 'date' | 'depotId' | 'cutoffMin' | 'published'>;
+  plan: Pick<PlanDay, 'date' | 'depotId' | 'cutoffMin' | 'trips'>;
   view: 'list' | 'map';
   onView: (view: 'list' | 'map') => void;
   onAutoAssign: () => void;
   onNewTrip: () => void;
   onPublish: () => void;
 }) {
-  const published = plan.published !== null;
+  // The header sends every trip still being planned. Sent trips stay on the board, and more can be added.
+  const working = plan.trips.filter((t) => t.status === 'planning' && t.stops.length > 0).length;
   return (
     <header className="flex flex-wrap items-center gap-[10px]">
       <div className="flex min-w-px flex-[1_0_0] flex-col gap-1">
@@ -57,21 +61,21 @@ export function PlanHeader({
           {`${dayLabel(plan.date)}  ·  ${plan.depotId} depot  ·  orders close ${clock12(plan.cutoffMin)}`}
         </p>
       </div>
-      <Pill icon="sparkle" onClick={onAutoAssign} disabled={published}>
+      <Pill icon="sparkle" onClick={onAutoAssign}>
         Auto-assign
       </Pill>
-      <Pill icon="plus" onClick={onNewTrip} disabled={published}>
+      <Pill icon="plus" onClick={onNewTrip}>
         New trip
       </Pill>
-      {published ? (
-        <Pill icon="check" primary disabled>
-          Published
-        </Pill>
-      ) : (
-        <Pill icon="send" primary onClick={onPublish}>
-          Publish plan
-        </Pill>
-      )}
+      <Pill
+        icon="send"
+        primary
+        onClick={onPublish}
+        disabled={working === 0}
+        title={working === 0 ? 'No trips in progress to publish' : undefined}
+      >
+        Publish trips
+      </Pill>
       <div aria-hidden className="h-7 w-px shrink-0 bg-border" />
       <div className="flex shrink-0 gap-1 rounded-pill bg-border p-1">
         <button

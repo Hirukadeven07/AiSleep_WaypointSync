@@ -9,7 +9,7 @@ import { StatusChip } from '@/components/ui/StatusChip';
 import { Icon } from '@/components/ui/Icon';
 import { JobNote } from '@/components/dock/JobNote';
 
-/** L2: today's published trips for this depot, in loading order. */
+/** L2: published trips for this depot, today and tomorrow's plan, in loading order. */
 export default function DockQueuePage() {
   const { data, error, loading } = usePoll(() => api<LoadQueueItem[]>('/loads'));
 
@@ -17,7 +17,7 @@ export default function DockQueuePage() {
     <section className="space-y-md">
       <div className="flex items-end justify-between gap-sm">
         <div>
-          <p className="text-eyebrow uppercase text-muted">Today</p>
+          <p className="text-eyebrow uppercase text-muted">To load</p>
           <h1 className="text-heading font-semibold text-ink">Loading queue</h1>
         </div>
         {data && <p className="text-label text-muted">{data.length} trips</p>}
