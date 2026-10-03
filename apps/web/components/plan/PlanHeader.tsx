@@ -33,11 +33,15 @@ function Pill({
 /** Figma "Plan v2 / Default" header: title, date line, actions and the List / Map switch. */
 export function PlanHeader({
   plan,
+  view,
+  onView,
   onAutoAssign,
   onNewTrip,
   onPublish,
 }: {
   plan: Pick<PlanDay, 'date' | 'depotId' | 'cutoffMin' | 'published'>;
+  view: 'list' | 'map';
+  onView: (view: 'list' | 'map') => void;
   onAutoAssign: () => void;
   onNewTrip: () => void;
   onPublish: () => void;
@@ -70,14 +74,24 @@ export function PlanHeader({
       )}
       <div aria-hidden className="h-7 w-px shrink-0 bg-border" />
       <div className="flex shrink-0 gap-1 rounded-pill bg-border p-1">
-        <span className="flex items-center gap-[6px] rounded-pill bg-surface px-[14px] py-[9px] text-[13px] font-semibold leading-[18px] text-ink">
-          <Icon name="list" size={15} />
-          List
-        </span>
         <button
           type="button"
-          disabled
-          className="flex items-center gap-[6px] rounded-pill px-[14px] py-[9px] text-[13px] font-semibold leading-[18px] text-muted"
+          aria-pressed={view === 'list'}
+          onClick={() => onView('list')}
+          className={`flex items-center gap-[6px] rounded-pill px-[14px] py-[9px] text-[13px] font-semibold leading-[18px] ${
+            view === 'list' ? 'bg-surface text-ink' : 'text-muted'
+          }`}
+        >
+          <Icon name="list" size={15} />
+          List
+        </button>
+        <button
+          type="button"
+          aria-pressed={view === 'map'}
+          onClick={() => onView('map')}
+          className={`flex items-center gap-[6px] rounded-pill px-[14px] py-[9px] text-[13px] font-semibold leading-[18px] ${
+            view === 'map' ? 'bg-surface text-ink' : 'text-muted'
+          }`}
         >
           <Icon name="map" size={15} />
           Map

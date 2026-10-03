@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { AutoAssignProposal, PublishCheck } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { AutoAssignModal } from './AutoAssignModal';
@@ -12,6 +13,7 @@ import { PlanToast } from './PlanToast';
 import { PublishModal, publishPlan } from './PublishModal';
 import { RemoveTripModal } from './RemoveTripModal';
 import { TripList } from './TripList';
+import { PlanMap } from '@/components/map/PlanMap';
 import { usePlan } from './usePlan';
 import { usePlanEdit } from './usePlanEdit';
 
@@ -19,6 +21,7 @@ import { usePlanEdit } from './usePlanEdit';
 export function PlanBoard() {
   const { plan, error, reload } = usePlan();
   const edit = usePlanEdit(plan, reload);
+  const [view, setView] = useState<'list' | 'map'>('list');
 
   if (!plan) {
     return (
@@ -58,6 +61,8 @@ export function PlanBoard() {
     <div className="flex flex-col gap-[14px] pt-4 lg:-mb-2">
       <PlanHeader
         plan={plan}
+        view={view}
+        onView={setView}
         onAutoAssign={autoAssign}
         onNewTrip={() => edit.openModal({ kind: 'newTrip' })}
         onPublish={publish}
@@ -75,7 +80,15 @@ export function PlanBoard() {
           edit={edit}
           className="lg:w-[340px] lg:shrink-0"
         />
-        <TripList trips={plan.trips} edit={edit} className="min-w-0 lg:flex-1" />
+        {view === 'list' ? (
+          <TripList trips={plan.trips} edit={edit} className="min-w-0 lg:flex-1" />
+        ) : (
+          <PlanMap
+            date={plan.date}
+            refreshKey={`${plan.orders.length}:${plan.trips.map((t) => t.stops.length).join(',')}`}
+            onOpenOrder={(id) => edit.openDrawer(id)}
+          />
+        )}
       </div>
 
       {edit.drawerId && (

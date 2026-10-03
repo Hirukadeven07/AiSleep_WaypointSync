@@ -8,6 +8,7 @@ import type {
   DropCheck,
   NewTripOptions,
   PlanDay,
+  PlanMap,
   PlanOrderDetail,
   PlanPublishResult,
   PlanStore,
@@ -27,6 +28,8 @@ import {
   PublishDto,
   UnassignDto,
 } from './dto/drop.dto';
+import { PlaceStoreDto } from './dto/place-store.dto';
+import { MapService } from '../map/map.service';
 import { PlanAutoService } from './plan-auto.service';
 import { PlanDeferService } from './plan-defer.service';
 import { PlanEditService } from './plan-edit.service';
@@ -44,12 +47,30 @@ export class PlanController {
     private readonly trips: PlanTripsService,
     private readonly publishing: PlanPublishService,
     private readonly auto: PlanAutoService,
+    private readonly maps: MapService,
   ) {}
 
   /** The plan board for a service day (defaults to tomorrow). */
   @Get()
   day(@CurrentUser() me: AuthUser, @Query('date') date?: string): Promise<PlanDay> {
     return this.plan.day(me, date);
+  }
+
+  /** Store pins for the planning map. Same day as the board. */
+  @Get('map')
+  map(@CurrentUser() me: AuthUser, @Query('date') date?: string): Promise<PlanMap> {
+    return this.maps.plan(me, date);
+  }
+
+  /** Set the coordinates the dispatcher clicked for a store. */
+  @Post('stores/:storeId/location')
+  @HttpCode(200)
+  placeStore(
+    @CurrentUser() me: AuthUser,
+    @Param('storeId') storeId: string,
+    @Body() dto: PlaceStoreDto,
+  ) {
+    return this.maps.placeStore(me, storeId, dto.lat, dto.lng);
   }
 
   @Get('orders/:id')

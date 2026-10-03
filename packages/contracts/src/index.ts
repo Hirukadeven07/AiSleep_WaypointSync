@@ -13,3 +13,4 @@ export * from './incidents';
 export * from './fleet';
 export * from './driver-day';
 export * from './districts';
+export * from './map';
