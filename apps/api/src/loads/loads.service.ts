@@ -36,6 +36,11 @@ const sheetInclude = {
 type SheetTrip = Prisma.TripGetPayload<{ include: typeof sheetInclude }>;
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
+const addDays = (iso: string, days: number) => {
+  const d = asDate(iso);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
 
 function flagView(f: SheetTrip['stops'][number]['flags'][number]): LoadFlagView {
   return {
@@ -109,12 +114,16 @@ export class LoadsService {
     private readonly clock: ClockService,
   ) {}
 
-  /** Today's trips in the loader's depot that are waiting for, or in, loading. */
+  /**
+   * Trips in the loader's depot that are waiting for, or in, loading.
+   * Planning publishes tomorrow, so the dock sees that day as well as today.
+   */
   async queue(me: AuthUser): Promise<LoadQueueItem[]> {
+    const today = this.clock.today();
     const trips = await this.prisma.trip.findMany({
       where: {
         depotId: me.depotId ?? undefined,
-        serviceDate: asDate(this.clock.today()),
+        serviceDate: { in: [asDate(today), asDate(addDays(today, 1))] },
         status: { in: [...QUEUE_STATUSES] },
       },
       include: {
