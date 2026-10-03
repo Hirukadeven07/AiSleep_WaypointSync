@@ -61,6 +61,7 @@ enum OrderStatus {
   deferred
   delivered
   partial
+  cancelled
 }
 
 /// How short the store is when it marks an order urgent.
@@ -333,6 +334,8 @@ model Order {
   deferredById        String?
   deferredYesterday   Boolean        @default(false)
   repeatSkip          Boolean        @default(false)
+  cancelledAt         DateTime?
+  cancelledById       String?
   createdAt           DateTime       @default(now())
   lines               OrderLine[]
   stop                TripStop?
