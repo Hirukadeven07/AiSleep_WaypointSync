@@ -171,6 +171,16 @@ export class MoveStopService {
           data: { sequence: i + 1, ...(etas ? { etaMin: etaOf.get(v.order.id) ?? null } : {}) },
         });
       }
+      // The trip the stop left closes its gap: its stops are numbered 1..n again, in the same order.
+      const left = from.stops
+        .filter((s) => s.id !== stop.id)
+        .sort((a, b) => a.sequence - b.sequence);
+      for (const [i, s] of left.entries()) {
+        await tx.tripStop.update({ where: { id: s.id }, data: { sequence: TEMP_SEQUENCE + i } });
+      }
+      for (const [i, s] of left.entries()) {
+        await tx.tripStop.update({ where: { id: s.id }, data: { sequence: i + 1 } });
+      }
       // Drivers see a stale plan and the dock gets its plan-change lock on both trips.
       await tx.trip.updateMany({
         where: { id: { in: [from.id, target.id] } },
