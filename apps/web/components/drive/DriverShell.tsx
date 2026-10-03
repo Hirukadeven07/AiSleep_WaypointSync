@@ -2,6 +2,8 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AuthError, fetchDriverDay, fetchMe } from '@/lib/driver-api';
+import { subscribeOutbox } from '@/lib/outbox';
+import { flushOutbox } from '@/lib/sync-runner';
 import {
   clearCachedShell,
   pickActiveTrip,
@@ -11,6 +13,7 @@ import {
   type Me,
   type TripSummary,
 } from '@/lib/driver-cache';
+import { signOutDriver } from '@/lib/driver-sign-out';
 import { DriverSidebar } from '@/components/shell/DriverSidebar';
 import { PhoneColumn } from '@/components/shell/PhoneColumn';
 import { PhoneTabBar } from '@/components/shell/PhoneTabBar';
@@ -125,6 +128,26 @@ function ShellInner({ children }: { children: ReactNode }) {
     if (phase === 'no-access') router.replace('/no-access');
   }, [phase, router]);
 
+  // Send queued actions (I've arrived, SOS, ...) whenever there is something to send and a signal:
+  // on load, as soon as one is queued, when the phone comes back online, and every 30 s.
+  // A successful send reloads the day so stop statuses catch up with the server.
+  useEffect(() => {
+    if (isLogin || phase !== 'ready') return;
+    const sync = () =>
+      void flushOutbox().then((sent) => {
+        if (sent > 0) void refresh();
+      });
+    sync();
+    const unsubscribe = subscribeOutbox(sync);
+    window.addEventListener('online', sync);
+    const timer = setInterval(sync, 30_000);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', sync);
+      clearInterval(timer);
+    };
+  }, [isLogin, phase, refresh]);
+
   // Installable PWA. Production only, so dev hot-reload is never served from cache.
   useEffect(() => {
     if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) {
@@ -172,7 +195,7 @@ function ShellInner({ children }: { children: ReactNode }) {
         <PhoneColumn className="lg:relative lg:mx-0 lg:min-w-0 lg:max-w-none lg:flex-1">
           {me && (
             <div className="pt-[env(safe-area-inset-top)] lg:hidden">
-              <PhoneTopRow me={me} />
+              <PhoneTopRow me={me} onSignOut={signOutDriver} />
             </div>
           )}
           <main className="flex-1 px-5 pb-[130px] pt-2 lg:px-10 lg:py-8">{children}</main>

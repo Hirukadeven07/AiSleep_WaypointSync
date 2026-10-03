@@ -2,7 +2,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Prisma, SosSeverity } from '@prisma/client';
 import {
   DRIVER_EVENT_TYPES,
+  ROAD_ISSUE_KINDS,
+  ROAD_ISSUE_LABEL,
   type DriverEventInput,
+  type RoadIssuePayload,
   type DriverEventType,
   type SyncPullResponse,
   type SyncPushResponse,
@@ -24,6 +27,32 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ARRIVABLE = ['upcoming', 'arrived', 'at_risk'];
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
+
+const ROAD_ISSUE_KIND_SET = new Set<string>(ROAD_ISSUE_KINDS);
+/** About 1.5 MB of JPEG as a data URL; the phone shrinks photos well below this. */
+const ROAD_PHOTO_MAX = 2_000_000;
+const isCoord = (n: unknown, max: number) =>
+  typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= max;
+
+/** A ROAD_ISSUE payload the dispatcher can act on (see RoadIssuePayload). */
+function isRoadIssue(p: Record<string, unknown>): p is Record<string, unknown> & RoadIssuePayload {
+  if (p.status !== 'reported' && p.status !== 'resolved') return false;
+  if (typeof p.kind !== 'string' || !ROAD_ISSUE_KIND_SET.has(p.kind)) return false;
+  if (p.note != null && (typeof p.note !== 'string' || p.note.length > 500)) return false;
+  if (
+    p.photo != null &&
+    (typeof p.photo !== 'string' ||
+      !/^data:image\/(jpeg|png|webp);base64,/.test(p.photo) ||
+      p.photo.length > ROAD_PHOTO_MAX)
+  ) {
+    return false;
+  }
+  if (p.location != null) {
+    const l = p.location as Record<string, unknown>;
+    if (typeof l !== 'object' || !isCoord(l.lat, 90) || !isCoord(l.lng, 180)) return false;
+  }
+  return true;
+}
 const iso = (value: Date | null) => value?.toISOString() ?? null;
 
 class RejectedEvent extends Error {
@@ -240,7 +269,7 @@ export class SyncService {
             userId: user.id,
             title: 'Driver SOS',
             body,
-            link: '/dispatch',
+            link: '/dispatch/incidents',
           })),
         };
       }
@@ -275,6 +304,7 @@ export class SyncService {
       }
 
       case 'ROAD_ISSUE': {
+        if (!isRoadIssue(payload)) throw new RejectedEvent('INVALID_PAYLOAD');
         let tripId = event.tripId ?? null;
         if (tripId) {
           if (!(await this.lookupTripForDriver(tx, me.id, tripId))) {
@@ -287,7 +317,28 @@ export class SyncService {
         }
         const stale = await this.shouldMarkStale(tx, event, tripId);
         await this.recordEvent(tx, me, event, tripId);
-        return { stale, notifications: [] };
+        if (payload.status !== 'reported') return { stale, notifications: [] };
+        // A new report pauses the trip, so the depot's dispatchers hear about it once.
+        const vehicle = await tx.vehicle.findUnique({
+          where: { driverId: me.id },
+          select: { numberPlate: true, id: true, depotId: true },
+        });
+        const depotId = vehicle?.depotId ?? me.depotId;
+        const dispatchers = await tx.user.findMany({
+          where: { role: 'dispatcher', ...(depotId ? { depotId } : {}) },
+          select: { id: true },
+        });
+        const label = ROAD_ISSUE_LABEL[payload.kind];
+        const body = `${me.name}${vehicle ? ` (${vehicle.numberPlate ?? vehicle.id})` : ''} reported: ${label}${payload.note ? ` — ${payload.note}` : ''}. Next stop paused.`;
+        return {
+          stale,
+          notifications: dispatchers.map((user) => ({
+            userId: user.id,
+            title: 'Road issue',
+            body,
+            link: '/dispatch/incidents',
+          })),
+        };
       }
 
       case 'FUEL_READING': {
@@ -322,17 +373,11 @@ export class SyncService {
           !latest || latest.createdOnPhoneAt.getTime() <= Date.parse(event.createdOnPhoneAt);
         await this.recordEvent(tx, me, event, tripId);
 
-        if (isNewest) {
-          await tx.vehicle.update({
-            where: { id: vehicle.id },
-            data: { lastConfirmedLitres: remainingLitres },
+        if (isNewest && tripId) {
+          await tx.trip.update({
+            where: { id: tripId },
+            data: { fuelLitresAtEnd: remainingLitres },
           });
-          if (tripId) {
-            await tx.trip.update({
-              where: { id: tripId },
-              data: { fuelLitresAtEnd: remainingLitres },
-            });
-          }
         }
         return { stale, notifications: [] };
       }

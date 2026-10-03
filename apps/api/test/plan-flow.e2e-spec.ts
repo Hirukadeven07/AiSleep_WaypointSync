@@ -26,6 +26,8 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
   const o: Record<string, string> = {};
   const t: Record<string, string> = {};
   const previousDemoNow = process.env.DEMO_NOW;
+  // The multi-district trip names Colombo; if that adds the district, afterAll takes it out again.
+  let colomboExisted = true;
 
   beforeAll(async () => {
     process.env.DEMO_NOW = `${date('2031-05-14').toISOString().slice(0, 10)}T09:00:00+05:30`;
@@ -88,7 +90,7 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
       prisma.vehicle.create({
         data: {
           id,
-          plate: id,
+          numberPlate: id,
           depotId: 'Peliyagoda',
           type,
           temp,
@@ -104,7 +106,8 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
     await vehicle('BR-VAN', 'van', 'ambient', 1500, 8);
     await vehicle('BR-OOS', 'truck', 'ambient', 3000, 15, {
       status: 'out_of_service',
-      returnDate: date('2031-05-19'),
+      outOfServiceReason: 'Fridge unit repair',
+      returnDate: new Date('2031-05-19T16:00:00+05:30'),
     });
 
     const order = async (
@@ -165,6 +168,16 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
       await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
       await prisma.district.deleteMany({ where: { id: districtId } });
+      if (!colomboExisted) {
+        await prisma.district.deleteMany({
+          where: {
+            name: 'Colombo',
+            stores: { none: {} },
+            trips: { none: {} },
+            coveredBy: { none: {} },
+          },
+        });
+      }
     }
     await app?.close();
   });
@@ -310,6 +323,10 @@ describe('plan flow: defer, new trip, publish, auto-assign (e2e)', () => {
         date: DAY,
       })
       .expect(400);
+    colomboExisted =
+      (await prisma.district.count({
+        where: { name: { equals: 'Colombo', mode: 'insensitive' } },
+      })) > 0;
     const multi = await agent
       .post('/api/plan/trips')
       .send({

@@ -27,9 +27,11 @@ function stopRow(overrides: Partial<DriverDayStopRow> = {}): DriverDayStopRow {
         windowCloseMin: 480,
         lat: 6.9271,
         lng: 79.8612,
-        phone: '0112000000',
+        dockType: 'rear_dock',
+        parkingConstraint: 'normal',
+        mallWindow: null,
         district: { name: 'Colombo 07' },
-        phones: [],
+        phones: [{ label: 'shop', phoneNo: '0112000000' }],
       },
     },
     flags: [],
@@ -57,7 +59,7 @@ function tripRow(overrides: Partial<DriverDayTripRow> = {}): DriverDayTripRow {
 }
 
 function vehicleRow(overrides: Partial<DriverDayVehicleRow> = {}): DriverDayVehicleRow {
-  return { id: 'VEH-1', plate: 'WP-LB-1234', type: 'truck', trips: [], ...overrides };
+  return { id: 'VEH-1', numberPlate: 'WP-LB-1234', type: 'truck', trips: [], ...overrides };
 }
 
 function onlyStop(stop: DriverDayStopRow) {
@@ -76,7 +78,7 @@ describe('buildDriverDay', () => {
   });
 
   it('falls back to the vehicle id when the plate is missing', () => {
-    const day = buildDriverDay(DAY, vehicleRow({ plate: null, type: 'van' }));
+    const day = buildDriverDay(DAY, vehicleRow({ numberPlate: null, type: 'van' }));
     expect(day.vehicle).toEqual({ id: 'VEH-1', plate: 'VEH-1', type: 'van' });
     expect(day.trips).toEqual([]);
     expect(day.activeTripId).toBeNull();
@@ -95,12 +97,13 @@ describe('buildDriverDay', () => {
       windowEnd: 480,
       eta: 330,
       phone: '0112000000',
-      phones: [],
+      phones: [{ label: 'shop', phoneNo: '0112000000' }],
       lat: 6.9271,
       lng: 79.8612,
       navigateUrl:
         'https://www.google.com/maps/dir/?api=1&destination=6.9271,79.8612&travelmode=driving',
       urgentNote: 'Use the back gate',
+      handover: { dockType: 'rear_dock', parking: 'normal', mallWindow: null },
       arrivedAt: null,
       storeConfirmedAt: null,
       driverAckAt: null,
@@ -110,7 +113,7 @@ describe('buildDriverDay', () => {
 
   it('uses the store id as the name and no navigate URL without coordinates', () => {
     const stop = onlyStop(
-      withStore({ displayName: null, lat: null, lng: 79.8612, phone: null }, { etaMin: null }),
+      withStore({ displayName: null, lat: null, lng: 79.8612, phones: [] }, { etaMin: null }),
     );
     expect(stop.outletName).toBe('STORE-1');
     expect(stop.navigateUrl).toBeNull();
@@ -120,7 +123,7 @@ describe('buildDriverDay', () => {
     expect(onlyStop(withStore({ lat: 6.9, lng: null })).navigateUrl).toBeNull();
   });
 
-  it('picks the shop phone, then the store phone, then any outlet phone', () => {
+  it('picks the shop phone, else any outlet phone', () => {
     const manager = { label: 'manager' as const, phoneNo: '0771111111' };
     const shop = { label: 'shop' as const, phoneNo: '0772222222' };
 
@@ -128,8 +131,8 @@ describe('buildDriverDay', () => {
     expect(withShop.phone).toBe('0772222222');
     expect(withShop.phones).toEqual([manager, shop]);
 
-    expect(onlyStop(withStore({ phones: [manager] })).phone).toBe('0112000000');
-    expect(onlyStop(withStore({ phone: null, phones: [manager] })).phone).toBe('0771111111');
+    expect(onlyStop(withStore({ phones: [manager] })).phone).toBe('0771111111');
+    expect(onlyStop(withStore({ phones: [] })).phone).toBeNull();
   });
 
   it('sends timestamps as ISO strings and flags with the item name', () => {

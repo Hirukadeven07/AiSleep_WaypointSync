@@ -57,7 +57,7 @@ describe('live day (e2e)', () => {
       await prisma.vehicle.create({
         data: {
           id,
-          plate: id,
+          numberPlate: id,
           depotId: 'Peliyagoda',
           type: 'van',
           temp: 'ambient',
@@ -324,7 +324,7 @@ describe('live day (e2e)', () => {
           brand: 'Style',
           districtId,
           serviceDate: date(day),
-          tripNumber: 5,
+          tripNumber: 2,
           status,
         },
       });
@@ -350,5 +350,90 @@ describe('live day (e2e)', () => {
       [tomorrowSent.id, 'assigned'],
     ]);
     expect(body.trips.some((t: { id: string }) => t.id === tomorrowPlanned.id)).toBe(false);
+  });
+
+  it('alerts once for a driver waiting 10+ minutes, and shows an open road issue until it is resolved', async () => {
+    const agent = await dispatcher();
+    const at = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+05:30`);
+    const t = await prisma.trip.create({
+      data: {
+        vehicleId: 'DL-V3',
+        depotId: 'Peliyagoda',
+        brand: 'Fresh',
+        districtId,
+        serviceDate: date(DAY),
+        tripNumber: 2,
+        status: 'on_road',
+      },
+    });
+    const stop = async (storeId: string, sequence: number, arrived: string) => {
+      const order = await prisma.order.create({
+        data: {
+          storeId,
+          brand: 'Fresh',
+          deliveryDate: date(DAY),
+          temp: 'ambient',
+          status: 'planned',
+          units: 1,
+          weightKg: 10,
+          volumeM3: 0.1,
+        },
+      });
+      return prisma.tripStop.create({
+        data: {
+          tripId: t.id,
+          orderId: order.id,
+          sequence,
+          status: 'waiting',
+          arrivedAt: at(arrived),
+        },
+      });
+    };
+    // Now is 10:45: one driver has waited 15 minutes, the other 5.
+    const long = await stop('DL-A', 1, '10:30');
+    const short = await stop('DL-B', 2, '10:40');
+
+    const first = await agent.get('/api/dispatch/live').expect(200);
+    const mine = first.body.attention.filter((a: { tripId: string }) => a.tripId === t.id);
+    expect(mine.map((a: { id: string; kind: string }) => [a.id, a.kind])).toEqual([
+      [`waiting-${long.id}`, 'waiting'],
+    ]);
+    expect(mine[0].title).toBe('DL-V3 waiting 15 min at Store DL-A');
+    expect(mine.some((a: { id: string }) => a.id === `waiting-${short.id}`)).toBe(false);
+
+    const kasun = await prisma.user.findUniqueOrThrow({ where: { loginId: 'kasun' } });
+    const roadEvent = (clientId: string, status: string, applied: string) =>
+      prisma.driverEvent.create({
+        data: {
+          clientId,
+          driverId: kasun.id,
+          tripId: t.id,
+          type: 'ROAD_ISSUE',
+          payload: {
+            status,
+            kind: 'road_blocked',
+            note: 'Tree across the road',
+            photo: 'data:image/jpeg;base64,AAAA',
+            location: { lat: 6.9, lng: 79.95, accuracyM: 10 },
+          },
+          createdOnPhoneAt: at(applied),
+          appliedAt: at(applied),
+        },
+      });
+    await roadEvent('dl-road-1', 'reported', '10:41');
+    const paused = await agent.get('/api/dispatch/live').expect(200);
+    const road = paused.body.attention.find((a: { id: string }) => a.id === `road-${t.id}`);
+    expect(road).toMatchObject({
+      kind: 'road_issue',
+      title: 'Road blocked · DL-V3 paused',
+      photo: 'data:image/jpeg;base64,AAAA',
+      mapUrl: 'https://www.google.com/maps/search/?api=1&query=6.9,79.95',
+    });
+    expect(road.text).toMatch(/^Tree across the road · Reported 10:41/);
+    expect(paused.body.trips.find((x: { id: string }) => x.id === t.id).hasIssue).toBe(true);
+
+    await roadEvent('dl-road-2', 'resolved', '10:44');
+    const resumed = await agent.get('/api/dispatch/live').expect(200);
+    expect(resumed.body.attention.some((a: { id: string }) => a.id === `road-${t.id}`)).toBe(false);
   });
 });

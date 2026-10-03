@@ -1,5 +1,5 @@
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import { RoadIssueForm } from '@/components/drive/RoadIssueForm';
 
 export default function Page() {
-  return <PlaceholderPage title="Report" />;
+  return <RoadIssueForm />;
 }

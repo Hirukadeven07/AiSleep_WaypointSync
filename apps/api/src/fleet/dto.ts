@@ -53,8 +53,10 @@ export class OutOfServiceDto {
   @MaxLength(100)
   reason: string;
 
-  @Matches(/^\d{4}-\d{2}-\d{2}$/)
-  returnDate: string;
+  /** Date and time. Omitted when the return time is not known. A date with no clock time is rejected. */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/)
+  returnDate?: string;
 
   @IsOptional()
   @IsString()

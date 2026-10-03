@@ -99,7 +99,7 @@ describe('incidents (e2e)', () => {
       prisma.vehicle.create({
         data: {
           id,
-          plate: id,
+          numberPlate: id,
           depotId: 'Peliyagoda',
           type: 'van',
           temp: 'ambient',
@@ -111,7 +111,11 @@ describe('incidents (e2e)', () => {
       });
     await vehicle('IC-V1', { driverId });
     await vehicle('IC-V2');
-    await vehicle('IC-V3', { status: 'out_of_service', returnDate: date('2031-08-15') });
+    await vehicle('IC-V3', {
+      status: 'out_of_service',
+      outOfServiceReason: 'Engine repair',
+      returnDate: new Date('2031-08-15T09:00:00+05:30'),
+    });
     await vehicle('IC-V4', { weightCapKg: 50 });
     await vehicle('IC-V5');
     await vehicle('IC-V6');

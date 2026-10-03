@@ -70,7 +70,7 @@ describe('fleet (e2e)', () => {
       prisma.vehicle.create({
         data: {
           id,
-          plate: id,
+          numberPlate: id,
           depotId: 'Peliyagoda',
           type: 'van',
           temp: 'ambient',
@@ -88,7 +88,7 @@ describe('fleet (e2e)', () => {
     await vehicle('FL-V4', {
       status: 'out_of_service',
       outOfServiceReason: 'Brake service — rear pads',
-      returnDate: date('2031-07-10'),
+      returnDate: new Date('2031-07-10T14:30:00+05:30'),
     });
 
     const trip = async (
@@ -197,9 +197,9 @@ describe('fleet (e2e)', () => {
     expect(v['FL-V3'].plannedTrips).toEqual([{ tripNumber: 1, stops: 2 }]);
     expect(v['FL-V4']).toMatchObject({
       status: 'out_of_service',
-      today: 'Brake service · back Thu',
+      today: 'Brake service · back Thu 14:30',
       outOfServiceReason: 'Brake service — rear pads',
-      returnDate: '2031-07-10',
+      returnDate: '2031-07-10T09:00:00.000Z',
     });
     expect(body.counts.all).toBe(body.vehicles.length);
     expect(body.counts.outOfService).toBeGreaterThanOrEqual(1);
@@ -210,14 +210,14 @@ describe('fleet (e2e)', () => {
     const agent = await dispatcher();
     const res = await agent
       .post('/api/fleet/FL-V3/out-of-service')
-      .send({ reason: 'Brake service', returnDate: '2031-07-11', note: 'Front pads' })
+      .send({ reason: 'Brake service', returnDate: '2031-07-11T14:30:00+05:30', note: 'Front pads' })
       .expect(200);
     expect(res.body).toMatchObject({ tripsReturned: 1, ordersReturned: 2 });
     expect(res.body.vehicle).toMatchObject({
       status: 'out_of_service',
       outOfServiceReason: 'Brake service — Front pads',
-      returnDate: '2031-07-11',
-      today: 'Brake service · back Fri',
+      returnDate: '2031-07-11T09:00:00.000Z',
+      today: 'Brake service · back Fri 14:30',
     });
 
     expect(await prisma.trip.count({ where: { id: ids.planned } })).toBe(0);
@@ -228,12 +228,12 @@ describe('fleet (e2e)', () => {
 
     await agent
       .post('/api/fleet/FL-V3/out-of-service')
-      .send({ reason: 'Brake service', returnDate: '2031-07-11' })
+      .send({ reason: 'Brake service', returnDate: '2031-07-11T14:30:00+05:30' })
       .expect(400);
     await agent.post('/api/fleet/FL-V3/out-of-service').send({ reason: 'x' }).expect(400);
     await agent
       .post('/api/fleet/NOPE/out-of-service')
-      .send({ reason: 'x', returnDate: '2031-07-11' })
+      .send({ reason: 'x', returnDate: '2031-07-11T14:30:00+05:30' })
       .expect(404);
   });
 
@@ -247,11 +247,29 @@ describe('fleet (e2e)', () => {
     });
   });
 
+  it('accepts a reason with no return time and rejects a date that has no time', async () => {
+    const agent = await dispatcher();
+    await agent
+      .post('/api/fleet/FL-V2/out-of-service')
+      .send({ reason: 'Tyre replacement', returnDate: '2031-07-11' })
+      .expect(400);
+    const res = await agent
+      .post('/api/fleet/FL-V2/out-of-service')
+      .send({ reason: 'Tyre replacement' })
+      .expect(200);
+    expect(res.body.vehicle).toMatchObject({
+      status: 'out_of_service',
+      outOfServiceReason: 'Tyre replacement',
+      returnDate: null,
+      today: 'Tyre replacement',
+    });
+  });
+
   it('leaves a trip that is already on the road alone when its vehicle is marked out', async () => {
     const agent = await dispatcher();
     const res = await agent
       .post('/api/fleet/FL-V1/out-of-service')
-      .send({ reason: 'Engine repair', returnDate: '2031-07-12' })
+      .send({ reason: 'Engine repair', returnDate: '2031-07-12T08:00:00+05:30' })
       .expect(200);
     expect(res.body).toMatchObject({ tripsReturned: 0, ordersReturned: 0 });
     expect(await prisma.trip.findUniqueOrThrow({ where: { id: ids.road } })).toMatchObject({

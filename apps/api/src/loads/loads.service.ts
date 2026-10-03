@@ -61,7 +61,7 @@ function lineView(l: SheetTrip['stops'][number]['order']['lines'][number]): Orde
 }
 
 function vehicleView(v: SheetTrip['vehicle']) {
-  return { id: v.id, plate: v.plate, type: v.type, temp: v.temp };
+  return { id: v.id, plate: v.numberPlate, type: v.type, temp: v.temp };
 }
 
 function jobView(j: SheetTrip['loadingJob']): LoadJob | null {

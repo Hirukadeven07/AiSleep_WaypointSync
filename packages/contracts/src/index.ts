@@ -14,3 +14,4 @@ export * from './fleet';
 export * from './driver-day';
 export * from './profile';
 export * from './districts';
+export * from './map';

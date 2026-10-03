@@ -206,11 +206,13 @@ function TripRow({
   open,
   onToggle,
   edit,
+  onPublish,
 }: {
   trip: PlanTrip;
   open: boolean;
   onToggle: () => void;
   edit: PlanEdit;
+  onPublish: (tripId: string) => void;
 }) {
   const hover = edit.hover?.tripId === trip.id ? edit.hover : null;
   const check = hover?.check ?? null;
@@ -272,11 +274,12 @@ function TripRow({
       {...dropProps}
       className={`relative flex flex-col rounded-note ${frame}`}
     >
+      <div className="flex w-full items-center gap-3 px-3 py-[10px]">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-3 px-3 py-[10px] text-left"
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
         <span
           className={`flex size-9 shrink-0 items-center justify-center rounded-[12px] ${TILE[trip.brand]}`}
@@ -309,7 +312,7 @@ function TripRow({
           cap={trip.budgetMin}
           text={`${minutes ?? '–'}/${trip.budgetMin}`}
         />
-        <span className="flex w-[196px] shrink-0 items-center justify-end">
+        <span className="flex w-[120px] shrink-0 items-center justify-end">
           <span
             className={`flex shrink-0 items-center gap-[6px] rounded-pill px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] ${chip.chip}`}
           >
@@ -317,8 +320,26 @@ function TripRow({
             {chip.label}
           </span>
         </span>
-        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} className="text-muted" />
       </button>
+        {trip.status === 'planning' && trip.stops.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onPublish(trip.id)}
+            className="flex shrink-0 items-center gap-[6px] whitespace-nowrap rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[15px] text-bg"
+          >
+            <Icon name="send" size={12} />
+            Publish
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={open ? 'Hide stops' : 'Show stops'}
+          className="shrink-0 text-muted"
+        >
+          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} />
+        </button>
+      </div>
 
       {open && (
         <div className="flex flex-col gap-1 px-3">
@@ -371,10 +392,12 @@ function TripRow({
 export function TripList({
   trips,
   edit,
+  onPublish,
   className = '',
 }: {
   trips: PlanTrip[];
   edit: PlanEdit;
+  onPublish: (tripId: string) => void;
   className?: string;
 }) {
   const [openId, setOpenId] = useState<string | null>(trips[0]?.id ?? null);
@@ -444,6 +467,7 @@ export function TripList({
           open={openId === t.id}
           onToggle={() => setOpenId(openId === t.id ? null : t.id)}
           edit={edit}
+          onPublish={onPublish}
         />
       ))}
 

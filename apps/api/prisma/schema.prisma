@@ -248,11 +248,13 @@ model Store {
   windowCloseMin    Int
   lat               Float?
   lng               Float?
-  phone             String?
+  /// Days since this outlet last received a delivery. Null when it has never been served.
+  daysSinceLastServed Int?
   orders            Order[]
   users             User[]
   phones            OutletPhone[]
   fieldFlags        FieldFlag[]
+  savedItems        StoreSavedItem[]
 }
 
 model User {
@@ -290,7 +292,7 @@ model Session {
 
 model Vehicle {
   id                 String           @id
-  plate              String?          @unique
+  numberPlate        String?          @unique
   depotId            String
   depot              Depot            @relation(fields: [depotId], references: [id])
   type               VehicleType
@@ -301,9 +303,10 @@ model Vehicle {
   kmPerL             Float?
   weeklyFuelQuotaL   Float?
   status             VehicleStatus    @default(available)
+  /// Required when status is out_of_service (database check). Cleared when the vehicle is back.
   outOfServiceReason String?
-  returnDate         DateTime?        @db.Date
-  lastConfirmedLitres Float?
+  /// Optional expected return. Stores the date and the time. Null when no return time is known.
+  returnDate         DateTime?
   driverId           String?          @unique
   driver             User?            @relation(fields: [driverId], references: [id])
   trips              Trip[]
@@ -329,7 +332,6 @@ model Order {
   deferReason         String?
   deferredById        String?
   deferredYesterday   Boolean        @default(false)
-  daysSinceLastServed Int?
   repeatSkip          Boolean        @default(false)
   createdAt           DateTime       @default(now())
   lines               OrderLine[]
@@ -369,6 +371,7 @@ model Trip {
   /// More districts the dispatcher set this trip up for, besides the main one.
   extraDistricts        District[]       @relation("TripExtraDistricts")
   serviceDate           DateTime         @db.Date
+  /// 1 or 2. Database check Trip_tripNumber_max_2.
   tripNumber            Int
   csvRouteId            String?
   status                TripStatus       @default(planning)
@@ -512,6 +515,8 @@ model Notification {
 // Store = Outlet. User.role + Driver/Loader/Dispatcher profiles = login people.
 // LoadSession stays as the live dock; LoadingJob is the dispatcher handoff row.
 
+/// Store phones live here, not on Store. phoneNo is not unique: the same
+/// number can appear twice on one store or on two stores.
 model OutletPhone {
   id      String     @id @default(cuid())
   storeId String
@@ -523,7 +528,6 @@ model OutletPhone {
 model Item {
   id           String           @id
   itemName     String
-  brand        Brand            @default(Fresh)
   type         ItemType         @default(fresh)
   isChilled    Boolean          @default(false)
   packLabel    String?
@@ -533,8 +537,9 @@ model Item {
   dnLines      DeliveryNoteLine[]
   fieldFlags   FieldFlag[]
   loaderFlags  LoaderFlag[]
+  savedBy      StoreSavedItem[]
 
-  @@index([brand, type])
+  @@index([type])
 }
 
 model InventoryBatch {
@@ -546,6 +551,17 @@ model InventoryBatch {
   expiryDate        DateTime?          @db.Date
   qty               Float              @default(0)
   picks             DeliveryNotePick[]
+}
+
+/// Items a store manager starred on the order screen, kept per store so every phone shows the same list.
+model StoreSavedItem {
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([storeId, itemId])
 }
 
 /// 1:1 with User where role = driver. Vehicle assignment stays on Vehicle.driverId.

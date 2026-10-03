@@ -10,6 +10,7 @@ export default tseslint.config(
       '**/.next/**',
       '**/next-env.d.ts',
       'apps/api/prisma/migrations/**',
+      'apps/web/public/maps/**',
       '**/*.config.js',
       '**/*.config.mjs',
     ],
@@ -17,6 +18,15 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+      },
+    },
+  },
   {
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],

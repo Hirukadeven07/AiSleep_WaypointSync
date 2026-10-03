@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Me, PlanPublishResult, PublishCheck, PublishProblem } from '@waypoint/contracts';
 import { DomainError, evaluatePublish, measureCapacity, type RuleIssue } from '@waypoint/domain';
 import { ClockService } from '../common/clock/clock.service';
@@ -34,18 +34,30 @@ export class PlanPublishService {
     return d.toISOString().slice(0, 10);
   }
 
-  private async planningTrips(me: Me, date?: string): Promise<TripRow[]> {
+  private async planningTrips(me: Me, date?: string, tripId?: string): Promise<TripRow[]> {
+    const day = this.serviceDate(date);
     const trips = await this.prisma.trip.findMany({
       where: {
         depotId: this.edit.depotOf(me),
-        serviceDate: dateOnly(this.serviceDate(date)),
+        serviceDate: dateOnly(day),
         status: 'planning',
       },
       include: tripInclude,
       orderBy: [{ vehicleId: 'asc' }, { tripNumber: 'asc' }],
     });
     // A trip with no stops has nothing to send.
-    return trips.filter((t) => t.stops.length > 0);
+    const ready = trips.filter((t) => t.stops.length > 0);
+    if (!tripId) return ready;
+
+    const trip = await this.edit.loadTrip(me, tripId);
+    if (trip.serviceDate.toISOString().slice(0, 10) !== day) throw new NotFoundException('Trip not found');
+    if (trip.status !== 'planning') {
+      throw new DomainError('PLAN_LOCKED', 'This trip is already published.');
+    }
+    if (trip.stops.length === 0) {
+      throw new DomainError('PLAN_LOCKED', 'Add stops before publishing this trip.');
+    }
+    return ready.filter((t) => t.id === tripId);
   }
 
   private problems(
@@ -56,7 +68,7 @@ export class PlanPublishService {
     for (const trip of trips) {
       const vehicle = toVehicle(trip.vehicle);
       const stops = trip.stops.map((s) => toStopView(s.order));
-      const plate = trip.vehicle.plate ?? trip.vehicleId;
+      const plate = trip.vehicle.numberPlate ?? trip.vehicleId;
       const name = `${plate} · Trip ${trip.tripNumber}`;
       const cap = measureCapacity(
         vehicle,
@@ -101,9 +113,9 @@ export class PlanPublishService {
     return out;
   }
 
-  async check(me: Me, date?: string): Promise<PublishCheck> {
+  async check(me: Me, date?: string, tripId?: string): Promise<PublishCheck> {
     const [trips, lookup] = await Promise.all([
-      this.planningTrips(me, date),
+      this.planningTrips(me, date, tripId),
       this.plan.loadLookup(),
     ]);
     const problems = this.problems(trips, lookup);
@@ -115,10 +127,13 @@ export class PlanPublishService {
     };
   }
 
-  /** Sends every trip with stops to loaders and drivers and tells each store its delivery window. */
-  async publish(me: Me, anyway: boolean, date?: string): Promise<PlanPublishResult> {
+  /**
+   * Sends trips to loaders and drivers and tells each store its delivery window.
+   * `tripId` sends that trip only. Without it, every trip that still has stops is sent.
+   */
+  async publish(me: Me, anyway: boolean, date?: string, tripId?: string): Promise<PlanPublishResult> {
     const [trips, lookup] = await Promise.all([
-      this.planningTrips(me, date),
+      this.planningTrips(me, date, tripId),
       this.plan.loadLookup(),
     ]);
     const problems = this.problems(trips, lookup);
@@ -126,8 +141,12 @@ export class PlanPublishService {
     if (block) throw new DomainError(block.code as never, block.message);
     const warn = problems.find((p) => p.severity === 'warn');
     if (warn && !anyway) throw new DomainError(warn.code as never, warn.message);
-    if (trips.length === 0)
-      throw new DomainError('PLAN_LOCKED', 'There are no trips with stops to publish.');
+    if (trips.length === 0) {
+      throw new DomainError(
+        'PLAN_LOCKED',
+        tripId ? 'This trip cannot be published.' : 'There are no trips with stops to publish.',
+      );
+    }
 
     // Stops placed outside the board (seed fixtures) have no ETAs yet; sort and time every trip once more.
     const depot = this.edit.depotOf(me) as Parameters<PlanEditService['resequence']>[3];

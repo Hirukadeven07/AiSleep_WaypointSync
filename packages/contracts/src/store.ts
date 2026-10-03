@@ -31,6 +31,19 @@ export interface StoreOrderView {
   urgentNote: string | null;
 }
 
+/** A line of an order the store placed. catalogueId is null when the line is not a catalogue item. */
+export interface StoreOrderLineView {
+  catalogueId: string | null;
+  name: string;
+  qty: number;
+  pack: string;
+}
+
+/** An order with its lines: what is already placed, and the source for "order again". */
+export interface StoreOrderDetail extends StoreOrderView {
+  lines: StoreOrderLineView[];
+}
+
 /** A line the store flagged at receipt (ERD FieldFlag). The driver accepts or disputes it. */
 export interface StoreIssue {
   id: string;

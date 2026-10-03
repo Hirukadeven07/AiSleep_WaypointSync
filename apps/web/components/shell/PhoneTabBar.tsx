@@ -12,6 +12,8 @@ export interface PhoneTab {
   exact?: boolean;
   /** The raised centre action: a 60px navy circle with the label underneath. */
   fab?: boolean;
+  /** A count shown on the icon, e.g. unread messages. Hidden when 0 or unset. */
+  badge?: number;
 }
 
 /** Bottom tab bar for the phone shells: four tabs around one raised centre action. */
@@ -43,7 +45,17 @@ export function PhoneTabBar({ tabs }: { tabs: PhoneTab[] }) {
             aria-current={active ? 'page' : undefined}
             className="flex min-w-0 flex-1 flex-col items-center gap-[6px] py-[6px]"
           >
-            <Icon name={t.icon} size={24} className={active ? 'text-ink' : 'text-slate'} />
+            <span className="relative">
+              <Icon name={t.icon} size={24} className={active ? 'text-ink' : 'text-slate'} />
+              {t.badge ? (
+                <span
+                  aria-label={`${t.badge} unread`}
+                  className="absolute -right-2 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold leading-none text-white"
+                >
+                  {t.badge > 9 ? '9+' : t.badge}
+                </span>
+              ) : null}
+            </span>
             <span className={`text-caption ${active ? 'font-bold text-ink' : 'font-medium text-muted'}`}>
               {t.label}
             </span>

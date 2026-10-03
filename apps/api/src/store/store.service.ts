@@ -13,6 +13,7 @@ import {
   type StoreHome,
   type StoreNotice,
   type StopStatus,
+  type StoreOrderDetail,
   type StoreOrderView,
 } from '@waypoint/contracts';
 import { DomainError } from '@waypoint/domain';
@@ -21,7 +22,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { nextOperatingDay } from '../common/clock/operating-day';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
-import { CATALOGUE, buildLines } from './catalogue';
+import { CATALOGUE, buildLines, catalogueItem } from './catalogue';
 import type { PlaceOrderDto, ReceiptDto } from './dto/store.dto';
 import { PhotosService } from '../photos/photos.service';
 
@@ -82,7 +83,7 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
     serviceDate: isoDay(s.trip.serviceDate),
     status: s.status,
     etaMin: s.etaMin,
-    plate: s.trip.vehicle.plate ?? s.trip.vehicle.id,
+    plate: s.trip.vehicle.numberPlate ?? s.trip.vehicle.id,
     driverName: (s.trip.assignedDriver ?? s.trip.vehicle.driver)?.name ?? null,
     chilled: s.order.temp === 'chilled',
     arrivedAt: s.arrivedAt?.toISOString() ?? null,
@@ -118,6 +119,15 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
       })),
   };
 }
+
+/** "Sat 3 Oct" for a service date. */
+const dayText = (d: Date) =>
+  d.toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
 
 @Injectable()
 export class StoreService {
@@ -179,6 +189,60 @@ export class StoreService {
     return orders.map(orderView);
   }
 
+  /** The store's latest orders with their lines, newest first: what is already placed, and "order again". */
+  async recentOrders(me: AuthUser): Promise<StoreOrderDetail[]> {
+    const store = await this.store(me);
+    const orders = await this.prisma.order.findMany({
+      where: { storeId: store.id },
+      include: { lines: { orderBy: { name: 'asc' } } },
+      orderBy: [{ createdAt: 'desc' }, { deliveryDate: 'desc' }],
+      take: 5,
+    });
+    return orders.map((o) => ({
+      ...orderView(o),
+      lines: o.lines.map((l) => ({
+        catalogueId: l.itemId,
+        name: l.name,
+        qty: l.qty,
+        pack: l.pack,
+      })),
+    }));
+  }
+
+  /** Catalogue ids this store has starred, oldest first. */
+  async saved(me: AuthUser): Promise<string[]> {
+    const store = await this.store(me);
+    return this.savedIds(store.id);
+  }
+
+  async saveItem(me: AuthUser, itemId: string): Promise<string[]> {
+    const store = await this.store(me);
+    if (!catalogueItem(store.brand, itemId)) {
+      throw new NotFoundException('That item is not in this store’s catalogue');
+    }
+    await this.prisma.storeSavedItem.upsert({
+      where: { storeId_itemId: { storeId: store.id, itemId } },
+      update: {},
+      create: { storeId: store.id, itemId },
+    });
+    return this.savedIds(store.id);
+  }
+
+  async unsaveItem(me: AuthUser, itemId: string): Promise<string[]> {
+    const store = await this.store(me);
+    await this.prisma.storeSavedItem.deleteMany({ where: { storeId: store.id, itemId } });
+    return this.savedIds(store.id);
+  }
+
+  private async savedIds(storeId: string): Promise<string[]> {
+    const rows = await this.prisma.storeSavedItem.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'asc' },
+      select: { itemId: true },
+    });
+    return rows.map((r) => r.itemId);
+  }
+
   /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */
   async placeOrder(me: AuthUser, dto: PlaceOrderDto): Promise<StoreOrderView> {
     const store = await this.store(me);
@@ -196,11 +260,12 @@ export class StoreService {
     }
     // Stock level and note only mean something on an urgent order.
     const urgent = dto.urgent === true;
+    const deliveryDate = asDate(await nextOperatingDay(this.prisma, asDate(this.clock.today())));
     const order = await this.prisma.order.create({
       data: {
         storeId: store.id,
         brand: store.brand,
-        deliveryDate: asDate(await nextOperatingDay(this.prisma, asDate(this.clock.today()))),
+        deliveryDate,
         temp: built.chilled ? 'chilled' : 'ambient',
         status: 'waiting',
         units: built.units,
@@ -211,6 +276,11 @@ export class StoreService {
         urgentNote: urgent ? dto.urgentNote || null : null,
         lines: { create: built.lines },
       },
+    });
+    await this.notifyDispatchers(store.depotId, {
+      title: 'New order',
+      body: `${store.displayName ?? store.id} ordered ${built.units} ${built.units === 1 ? 'item' : 'items'} (${Math.round(built.weightKg)} kg) for ${dayText(deliveryDate)}.`,
+      link: '/dispatch/plan',
     });
     return orderView(order);
   }
@@ -320,6 +390,20 @@ export class StoreService {
       });
     });
 
+    // A receipt with problems is the store's report to dispatch.
+    const problems = results.filter((r) => r.issue);
+    if (problems.length > 0) {
+      const store = await this.store(me);
+      await this.notifyDispatchers(store.depotId, {
+        title: 'Store report',
+        body: `${store.displayName ?? store.id}: ${problems.length} ${problems.length === 1 ? 'line' : 'lines'} with issues on ${stop.trip.vehicle.numberPlate ?? stop.trip.vehicleId} (${problems
+          .slice(0, 2)
+          .map((r) => `${r.name} ${r.issue}`)
+          .join(', ')}${problems.length > 2 ? ', …' : ''}).`,
+        link: '/dispatch/board',
+      });
+    }
+
     // The trip's own driver; the vehicle's usual driver when the dispatcher assigned nobody.
     const driverId = stop.trip.assignedDriverId ?? stop.trip.vehicle.driverId;
     if (driverId) {
@@ -363,6 +447,18 @@ export class StoreService {
         link: '/store',
       });
     }
+  }
+
+  /** One notice per dispatcher at the store's depot (the bell on their live day). */
+  private async notifyDispatchers(
+    depotId: string,
+    notice: { title: string; body: string; link: string },
+  ): Promise<void> {
+    const dispatchers = await this.prisma.user.findMany({
+      where: { role: 'dispatcher', depotId },
+      select: { id: true },
+    });
+    for (const d of dispatchers) await this.notifier.notify({ userId: d.id, ...notice });
   }
 
   async notices(me: AuthUser): Promise<StoreNotice[]> {
