@@ -12,6 +12,7 @@ import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
 import { messageOf } from '@/lib/api-error';
 import { DEPOTS } from '@/lib/depots';
+import { ThemeSwitch } from './ThemeSwitch';
 
 const inputClass =
   'w-full rounded-input border border-mist bg-surface px-3 py-2 text-body text-ink outline-none focus:border-slate';
@@ -185,6 +186,10 @@ export function AccountSettings({ me, onClose }: { me: Me; onClose: () => void }
           <button type="button" aria-label="Close" onClick={onClose} className="text-muted">
             <Icon name="x" size={18} />
           </button>
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className="text-body font-semibold text-ink">Appearance</p>
+          <ThemeSwitch />
         </div>
         {(me.role === 'dispatcher' || me.role === 'loader') && <DepotForm me={me} />}
         <SecretForm me={me} />
