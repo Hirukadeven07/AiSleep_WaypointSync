@@ -59,8 +59,8 @@ Order → DeliveryNote (versioned) → DeliveryNoteLine → DeliveryNotePick →
 
 | Table | Role |
 | --- | --- |
-| `Store` | Outlet. `id` from `outlets.csv`. Brand, district, depot, dock, windows, lat/lng. |
-| `OutletPhone` | Shop / manager / warehouse numbers. |
+| `Store` | Outlet. `id` from `outlets.csv`. Brand, district, depot, dock, windows, lat/lng. `daysSinceLastServed` is days since the latest served trip. Phones are `OutletPhone` rows, not a column. |
+| `OutletPhone` | Shop / manager / warehouse numbers. `phoneNo` is not unique — the same number can sit on one store twice or on two stores. |
 | `Order` | One delivery for one store on one date. Optional `TripStop`. |
 | `OrderLine` | Named qty + optional `itemId`. Cascades off `Order`. |
 | `Vehicle` | Caps, fuel, `depotId`. Optional unique `driverId`. |
@@ -98,7 +98,7 @@ Order → DeliveryNote (versioned) → DeliveryNoteLine → DeliveryNotePick →
 
 - **One stop per order:** `TripStop.orderId` is unique. An order is on at most one trip.
 - **Stop order on a trip:** `@@unique([tripId, sequence])`.
-- **Two trips a day (schema):** `@@unique([vehicleId, serviceDate, tripNumber])`. The app also caps trip number at 2.
+- **Two trips a day:** `tripNumber` is 1 or 2 (`Trip_tripNumber_max_2`). `@@unique([vehicleId, serviceDate, tripNumber])`.
 - **One load session / one loading job per trip:** unique `tripId` on both.
 - **One receipt per stop:** unique `StoreReceipt.stopId`. Confirm is claimed with an update of `arrived`/`waiting` → `confirmed`.
 - **One vehicle driver:** `Vehicle.driverId` is unique (at most one truck per driver).
@@ -121,7 +121,7 @@ These are booklet / app rules. They are enforced in Nest services, not only by u
 | Plan-change lock | `LoadSession.ackedPlanVersion` / `ackedStopIds` vs live `Trip.planVersion` and stop ids |
 | Stale actions | `DriverEvent.seenPlanVersion` vs `Trip.planVersion` |
 | Trip minutes | `District.depotToDistrictMin` + `interStopMin × (stops − 1)` + sum of `ServiceAllowance.minutes` for each stop’s brand + dock |
-| Fuel | `trip km / Vehicle.kmPerL`; latest `FUEL_READING` on `Vehicle.lastConfirmedLitres` and `Trip.fuelLitresAtEnd` |
+| Fuel | `trip km / Vehicle.kmPerL`; latest `FUEL_READING` on `Trip.fuelLitresAtEnd` |
 | Capacity | `Order.weightKg` / `volumeM3` vs `Vehicle` caps; publish blocked if over |
 | Repeat skip | `Order.repeatSkip` / `deferredYesterday` |
 | Photos | keys on the flag/receipt row; bytes in MinIO |
@@ -156,7 +156,7 @@ Each event is stored as `DriverEvent` (`clientId` unique). Then:
 | --- | --- |
 | `ARRIVED` | `TripStop.status` waiting, `arrivedAt` |
 | `ACKNOWLEDGEMENT` | `driverAckAt` (only if `storeConfirmedAt` is set) |
-| `FUEL_READING` | `Vehicle.lastConfirmedLitres`, `Trip.fuelLitresAtEnd` if newest |
+| `FUEL_READING` | `Trip.fuelLitresAtEnd` if newest |
 | `SOS_ALERT` | `DriverIncident` |
 | `location` pings | `LocationPing` (`clientUuid`) |
 

@@ -107,6 +107,17 @@ export function VehicleDrawer({
       {outOfService && v.outOfServiceReason && (
         <p className="shrink-0 rounded-note bg-warning-tint p-3 text-[12px] font-medium leading-[18px] text-ink">
           {v.outOfServiceReason}
+          {v.returnDate
+            ? ` · back ${new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Asia/Colombo',
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+              }).format(new Date(v.returnDate))}`
+            : ''}
         </p>
       )}
 

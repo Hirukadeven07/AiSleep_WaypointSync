@@ -11,6 +11,7 @@ import type {
 } from '@waypoint/contracts';
 import { allDistricts, districtKey } from '@waypoint/contracts';
 import { DomainError, evaluateNewTrip, formatMinutes, type Depot } from '@waypoint/domain';
+import { backAtLabel } from '../common/back-at';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { PlanEditService } from './plan-edit.service';
@@ -46,7 +47,7 @@ export class PlanTripsService {
     const depotId = this.edit.depotOf(me);
     const day = dateOnly(this.serviceDate(date));
     const [vehicles, trips, districts] = await Promise.all([
-      this.prisma.vehicle.findMany({ where: { depotId }, orderBy: { plate: 'asc' } }),
+      this.prisma.vehicle.findMany({ where: { depotId }, orderBy: { numberPlate: 'asc' } }),
       this.prisma.trip.findMany({ where: { depotId, serviceDate: day } }),
       this.prisma.district.findMany({ where: { depotId, served: true }, orderBy: { name: 'asc' } }),
     ]);
@@ -64,7 +65,7 @@ export class PlanTripsService {
         let unavailable: string | null = null;
         if (v.status === 'out_of_service') {
           unavailable = v.returnDate
-            ? `Out of service until ${v.returnDate.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' })}`
+            ? `Out of service until ${backAtLabel(v.returnDate)}`
             : 'Out of service';
         } else if (taken) {
           unavailable = `Already has trip ${run}`;
@@ -73,7 +74,7 @@ export class PlanTripsService {
         }
         return {
           id: v.id,
-          label: `${v.plate ?? v.id} · ${kind(v)}`,
+          label: `${v.numberPlate ?? v.id} · ${kind(v)}`,
           detail: `${kg(v.weightCapKg)} kg · ${v.volumeCapM3} m³${back}`,
           tag: unavailable ? 'Unavailable' : v.temp === 'reefer' ? 'Best for Fresh' : null,
           available: unavailable === null,
@@ -100,7 +101,7 @@ export class PlanTripsService {
     if (vehicle.status !== 'available') {
       throw new DomainError(
         'VEHICLE_UNAVAILABLE',
-        `${vehicle.plate ?? vehicle.id} is not available.`,
+        `${vehicle.numberPlate ?? vehicle.id} is not available.`,
       );
     }
     const districts = await this.resolveDistricts(dto.districts);
@@ -113,7 +114,7 @@ export class PlanTripsService {
     if (already.some((t) => t.tripNumber === dto.tripNumber)) {
       throw new DomainError(
         'VEHICLE_UNAVAILABLE',
-        `${vehicle.plate ?? vehicle.id} already has trip ${dto.tripNumber}.`,
+        `${vehicle.numberPlate ?? vehicle.id} already has trip ${dto.tripNumber}.`,
       );
     }
 
@@ -142,7 +143,7 @@ export class PlanTripsService {
     if (trip.status !== 'planning') {
       throw new DomainError(
         'PLAN_LOCKED',
-        `${trip.vehicle.plate ?? trip.vehicleId} · Trip ${trip.tripNumber} has been sent to the dock and driver, so it cannot be removed.`,
+        `${trip.vehicle.numberPlate ?? trip.vehicleId} · Trip ${trip.tripNumber} has been sent to the dock and driver, so it cannot be removed.`,
       );
     }
     const orderIds = trip.stops.map((s) => s.orderId);

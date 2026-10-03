@@ -62,7 +62,7 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
     serviceDate: isoDay(s.trip.serviceDate),
     status: s.status,
     etaMin: s.etaMin,
-    plate: s.trip.vehicle.plate ?? s.trip.vehicle.id,
+    plate: s.trip.vehicle.numberPlate ?? s.trip.vehicle.id,
     driverName: (s.trip.assignedDriver ?? s.trip.vehicle.driver)?.name ?? null,
     chilled: s.order.temp === 'chilled',
     arrivedAt: s.arrivedAt?.toISOString() ?? null,
@@ -309,7 +309,7 @@ export class StoreService {
       const store = await this.store(me);
       await this.notifyDispatchers(store.depotId, {
         title: 'Store report',
-        body: `${store.displayName ?? store.id}: ${problems.length} ${problems.length === 1 ? 'line' : 'lines'} with issues on ${stop.trip.vehicle.plate ?? stop.trip.vehicleId} (${problems
+        body: `${store.displayName ?? store.id}: ${problems.length} ${problems.length === 1 ? 'line' : 'lines'} with issues on ${stop.trip.vehicle.numberPlate ?? stop.trip.vehicleId} (${problems
           .slice(0, 2)
           .map((r) => `${r.name} ${r.issue}`)
           .join(', ')}${problems.length > 2 ? ', …' : ''}).`,

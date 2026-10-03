@@ -187,7 +187,11 @@ export class DispatchService {
           extraDistricts: { orderBy: { name: 'asc' } },
           stops: {
             orderBy: { sequence: 'asc' },
-            include: { order: { include: { store: true } }, receipt: true, flags: true },
+            include: {
+              order: { include: { store: { include: { phones: true } } } },
+              receipt: true,
+              flags: true,
+            },
           },
           loadingJob: true,
           loadSession: true,
@@ -259,7 +263,7 @@ export class DispatchService {
     const trips: LiveTrip[] = rows.map((t) => {
       const driver = t.assignedDriver ?? t.vehicle.driver;
       const phone = driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null;
-      const plate = t.vehicle.plate ?? t.vehicleId;
+      const plate = t.vehicle.numberPlate ?? t.vehicleId;
 
       const onRoad = t.status === 'on_road';
 
@@ -379,11 +383,13 @@ export class DispatchService {
         const waited = Math.floor((now.getTime() - s.arrivedAt.getTime()) / 60000);
         if (waited < WAIT_ALERT_MIN) continue;
         const store = s.order.store.displayName ?? s.order.store.id;
+        const outletPhone =
+          s.order.store.phones.find((p) => p.label === 'shop') ?? s.order.store.phones[0];
         attention.push({
           id: `waiting-${s.id}`,
           kind: 'waiting',
           title: `${plate} waiting ${waited} min at ${store}`,
-          text: `Arrived ${clockText(s.arrivedAt)}. The store has not checked the goods yet; the driver was asked to call them${s.order.store.phone ? ` on ${s.order.store.phone}` : ''}.`,
+          text: `Arrived ${clockText(s.arrivedAt)}. The store has not checked the goods yet; the driver was asked to call them${outletPhone ? ` on ${outletPhone.phoneNo}` : ''}.`,
           tripId: t.id,
           phone,
         });
@@ -418,7 +424,7 @@ export class DispatchService {
       return {
         id: t.id,
         vehicleId: t.vehicleId,
-        plate: t.vehicle.plate,
+        plate: t.vehicle.numberPlate,
         tripNumber: t.tripNumber,
         tripsToday: perVehicle.get(t.vehicleId) ?? 1,
         brand: t.brand,
@@ -473,7 +479,7 @@ export class DispatchService {
       attention.push({
         id: `sos-${d.id}`,
         kind: 'sos',
-        title: `SOS from ${person(d.driver.user.name)}${d.vehicle ? ` on ${d.vehicle.plate ?? d.vehicle.id}` : ''}`,
+        title: `SOS from ${person(d.driver.user.name)}${d.vehicle ? ` on ${d.vehicle.numberPlate ?? d.vehicle.id}` : ''}`,
         text: `${d.message ?? 'No message'} · raised ${clockText(d.raisedAt)}.`,
         tripId: d.tripId ?? '',
         phone: d.driver.user.phone ?? null,
@@ -557,7 +563,7 @@ export class DispatchService {
       return {
         id: t.id,
         vehicleId: t.vehicleId,
-        plate: t.vehicle.plate,
+        plate: t.vehicle.numberPlate,
         tripNumber: t.tripNumber,
         tripsToday: perVehicle.get(t.vehicleId) ?? 1,
         brand: t.brand,

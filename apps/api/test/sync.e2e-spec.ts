@@ -411,7 +411,7 @@ describe('driver sync (e2e)', () => {
     expect(stale.body.applied).toContain('88888888-8888-4888-8888-888888888888');
   });
 
-  it('rejects invalid fuel readings, updates the vehicle and trip, and ignores older one-write wins', async () => {
+  it('rejects invalid fuel readings, updates the trip, and ignores older one-write wins', async () => {
     const bad = await driverAgent
       .post('/api/sync')
       .send({
@@ -448,8 +448,6 @@ describe('driver sync (e2e)', () => {
       .expect(200);
     expect(good.body.applied).toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 
-    const vehicle = await prisma.vehicle.findUniqueOrThrow({ where: { id: vehicleId } });
-    expect(vehicle.lastConfirmedLitres).toBe(42.5);
     const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId } });
     expect(trip.fuelLitresAtEnd).toBe(42.5);
 

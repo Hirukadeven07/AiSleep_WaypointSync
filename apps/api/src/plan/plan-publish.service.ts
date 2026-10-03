@@ -56,7 +56,7 @@ export class PlanPublishService {
     for (const trip of trips) {
       const vehicle = toVehicle(trip.vehicle);
       const stops = trip.stops.map((s) => toStopView(s.order));
-      const plate = trip.vehicle.plate ?? trip.vehicleId;
+      const plate = trip.vehicle.numberPlate ?? trip.vehicleId;
       const name = `${plate} · Trip ${trip.tripNumber}`;
       const cap = measureCapacity(
         vehicle,

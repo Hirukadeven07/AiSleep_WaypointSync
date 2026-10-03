@@ -89,7 +89,7 @@ export class PlanAutoService {
 
     // The first order on a brand-new trip comes back with no trip id; later ones name it `proposal-…`.
     const opening = placed.filter((a: Assignment) => a.tripId === null);
-    const plateOf = new Map(vehicles.map((v) => [v.id, v.plate ?? v.id]));
+    const plateOf = new Map(vehicles.map((v) => [v.id, v.numberPlate ?? v.id]));
     const taken = new Map<string, number>();
     for (const t of trips) taken.set(t.vehicleId, (taken.get(t.vehicleId) ?? 0) + 1);
     const newTrips = opening.map((a) => {

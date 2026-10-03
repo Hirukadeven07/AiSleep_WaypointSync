@@ -49,7 +49,7 @@ export interface DriverDayStop {
   windowEnd: number;
   /** Planned arrival, minutes since midnight. */
   eta: number | null;
-  /** Best number to call: the shop phone, else the store phone, else any outlet phone. */
+  /** Best number to call: the shop OutletPhone, else any outlet phone. */
   phone: string | null;
   phones: DriverDayPhone[];
   lat: number | null;

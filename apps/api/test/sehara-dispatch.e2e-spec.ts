@@ -85,7 +85,7 @@ describe("Sehara's dispatch work (e2e)", () => {
       await prisma.vehicle.create({
         data: {
           id,
-          plate: id,
+          numberPlate: id,
           depotId: 'Peliyagoda',
           type: 'truck',
           temp: 'ambient',

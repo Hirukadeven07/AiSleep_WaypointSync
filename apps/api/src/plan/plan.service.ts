@@ -189,7 +189,7 @@ export class PlanService {
     return {
       id: row.id,
       vehicleId: row.vehicleId,
-      plate: row.vehicle.plate,
+      plate: row.vehicle.numberPlate,
       vehicleType: row.vehicle.type,
       vehicleTemp: row.vehicle.temp,
       brand: row.brand,
