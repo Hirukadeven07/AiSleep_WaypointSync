@@ -122,7 +122,7 @@ export function Incidents() {
               aria-pressed={filter === f.id}
               onClick={() => setFilter(f.id)}
               className={`rounded-pill px-4 py-[10px] text-[13px] font-semibold leading-[18px] ${
-                filter === f.id ? 'bg-primary text-bg' : 'bg-surface text-ink'
+                filter === f.id ? 'bg-primary text-on-primary' : 'bg-surface text-ink'
               }`}
             >
               {f.label}
@@ -187,7 +187,7 @@ export function Incidents() {
           role="status"
           className="fixed right-6 top-6 z-40 flex max-w-[320px] flex-col gap-[2px] rounded-[16px] bg-primary px-4 py-3"
         >
-          <span className="text-[13px] font-bold leading-[18px] text-bg">{toast.title}</span>
+          <span className="text-[13px] font-bold leading-[18px] text-on-primary">{toast.title}</span>
           <span className="text-[12px] leading-[17px] text-sand">{toast.sub}</span>
         </div>
       )}

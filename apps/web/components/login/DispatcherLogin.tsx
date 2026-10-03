@@ -38,10 +38,10 @@ export function DispatcherLogin() {
         <SkylinePhoto variant="panel" />
         <div className="relative flex items-center gap-3">
           <img alt="" src="/landing/logo-mark.svg" className="size-[39.6px]" />
-          <p className="text-[20px] font-semibold text-bg">Waypoint Sync</p>
+          <p className="text-[20px] font-semibold text-on-primary">Waypoint Sync</p>
         </div>
         <div className="flex-1" />
-        <h2 className="relative text-[36px] font-medium leading-[1.1] text-bg sm:text-[44px] lg:text-[56px] lg:leading-[62px]">
+        <h2 className="relative text-[36px] font-medium leading-[1.1] text-on-primary sm:text-[44px] lg:text-[56px] lg:leading-[62px]">
           One plan.
           <br />
           Every role in sync.
@@ -54,7 +54,7 @@ export function DispatcherLogin() {
           {CHIPS.map((c) => (
             <span
               key={c}
-              className="rounded-pill border border-slate px-[14px] py-[7px] text-[13px] font-medium text-bg"
+              className="rounded-pill border border-slate px-[14px] py-[7px] text-[13px] font-medium text-on-primary"
             >
               {c}
             </span>

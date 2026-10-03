@@ -81,7 +81,7 @@ export function PublishModal({
         >
           Publish anyway
         </button>
-        <SolidButton onClick={edit.closeModal} className="min-w-px flex-1 bg-primary text-bg">
+        <SolidButton onClick={edit.closeModal} className="min-w-px flex-1 bg-primary text-on-primary">
           Back to plan
         </SolidButton>
       </div>

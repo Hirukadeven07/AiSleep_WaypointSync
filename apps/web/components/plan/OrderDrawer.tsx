@@ -78,7 +78,7 @@ export function OrderDrawer({
         type="button"
         aria-label="Close order details"
         onClick={onClose}
-        className="absolute inset-0 bg-ink/35"
+        className="absolute inset-0 bg-scrim/35"
       />
       <aside
         role="dialog"
@@ -196,7 +196,7 @@ export function OrderDrawer({
                 <button
                   type="button"
                   onClick={() => onAdd(detail, detail.suggestion!.tripId)}
-                  className="flex items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-bg"
+                  className="flex items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-on-primary"
                 >
                   Add to {plate}
                 </button>

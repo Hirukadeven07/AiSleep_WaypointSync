@@ -205,7 +205,7 @@ export function TruckTracker({ delivery }: { delivery: StoreDelivery }) {
               aria-label={`Stop ${t.sequence}${t.isYou ? ', your store' : ''}${done ? ', done' : ''}`}
               className={`flex h-8 min-w-[32px] items-center justify-center rounded-full px-sm text-caption font-semibold ${
                 t.isYou
-                  ? 'bg-primary text-bg'
+                  ? 'bg-primary text-on-primary'
                   : done
                     ? 'bg-olive-ink text-white'
                     : 'bg-surface text-muted'

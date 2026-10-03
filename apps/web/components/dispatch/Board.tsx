@@ -43,7 +43,7 @@ const COLUMNS: { id: ColumnId; title: string; dot: string; test: (t: LiveTrip) =
 ];
 
 const FILTERS: { id: Filter; label: string; icon: IconName; circle: string; ink: string }[] = [
-  { id: 'all', label: 'All trips', icon: 'grid', circle: 'bg-white/15', ink: 'text-bg' },
+  { id: 'all', label: 'All trips', icon: 'grid', circle: 'bg-white/15', ink: 'text-on-primary' },
   { id: 'Fresh', label: 'Fresh', icon: 'pkg', circle: 'bg-fresh-tint', ink: 'text-fresh' },
   { id: 'Style', label: 'Style', icon: 'pkg', circle: 'bg-style-tint', ink: 'text-style' },
   { id: 'Tech', label: 'Tech', icon: 'pkg', circle: 'bg-tech-tint', ink: 'text-tech' },
@@ -241,7 +241,7 @@ export function Board() {
               aria-selected={when === id}
               onClick={() => setWhen(id)}
               className={`whitespace-nowrap rounded-pill px-4 py-2 text-[13px] font-semibold leading-[18px] ${
-                when === id ? 'bg-primary text-bg' : 'text-muted'
+                when === id ? 'bg-primary text-on-primary' : 'text-muted'
               }`}
             >
               {label}
@@ -260,11 +260,11 @@ export function Board() {
               onClick={() => setFilter(f.id)}
               aria-pressed={on}
               className={`flex items-center gap-2 rounded-pill py-[6px] pl-[6px] pr-4 text-[13px] font-semibold leading-[18px] ${
-                on ? 'bg-primary text-bg' : 'bg-surface text-ink'
+                on ? 'bg-primary text-on-primary' : 'bg-surface text-ink'
               }`}
             >
               <span
-                className={`flex size-[30px] items-center justify-center rounded-full ${on ? 'bg-white/15 text-bg' : `${f.circle} ${f.ink}`}`}
+                className={`flex size-[30px] items-center justify-center rounded-full ${on ? 'bg-white/15 text-on-primary' : `${f.circle} ${f.ink}`}`}
               >
                 <Icon name={f.icon} size={15} />
               </span>

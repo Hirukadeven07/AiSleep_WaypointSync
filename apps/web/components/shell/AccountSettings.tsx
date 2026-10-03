@@ -101,7 +101,7 @@ function SecretForm({ me }: { me: Me }) {
       <button
         type="submit"
         disabled={busy || (!pin && !current) || !next || !again}
-        className="rounded-pill bg-primary px-4 py-2 text-label font-semibold text-bg disabled:opacity-50"
+        className="rounded-pill bg-primary px-4 py-2 text-label font-semibold text-on-primary disabled:opacity-50"
       >
         {busy ? 'Saving…' : `Change ${word}`}
       </button>
@@ -167,7 +167,7 @@ function DepotForm({ me }: { me: Me }) {
 export function AccountSettings({ me, onClose }: { me: Me; onClose: () => void }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-scrim/40 p-4">
       <button
         type="button"
         aria-label="Close settings"

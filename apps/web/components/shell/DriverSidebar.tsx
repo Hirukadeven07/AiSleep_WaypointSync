@@ -70,7 +70,7 @@ export function DriverSidebar({ me }: { me: Me }) {
         onSignOut={signOutDriver}
         className="flex w-full items-center gap-3 rounded-[16px] bg-bg p-3 text-left"
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-[14px] font-bold text-bg">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-[14px] font-bold text-on-primary">
           {initials(me.name)}
         </span>
         <span className="min-w-0">

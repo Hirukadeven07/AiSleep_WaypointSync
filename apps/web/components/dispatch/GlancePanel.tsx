@@ -10,7 +10,7 @@ import { clock12 } from '@/components/plan/format';
 import { untilText } from './live-format';
 import { NoticesBell } from './NoticesPanel';
 
-const BUTTON = 'rounded-pill bg-primary text-bg';
+const BUTTON = 'rounded-pill bg-primary text-on-primary';
 
 /** A driver's SOS: call them, log it as a breakdown, or mark it handled (clears it on their phone). */
 function SosCard({ item }: { item: AttentionItem }) {
@@ -279,7 +279,7 @@ export function GlancePanel({ day, className = '' }: { day: LiveDay; className?:
 
       <section className="flex shrink-0 flex-col gap-2 rounded-card bg-primary p-5">
         <p className="text-[12px] font-bold leading-[15px] text-sand">TOMORROW&apos;S PLANNING</p>
-        <p className="whitespace-nowrap text-[26px] font-semibold leading-8 text-bg">
+        <p className="whitespace-nowrap text-[26px] font-semibold leading-8 text-on-primary">
           {t.minutesToCutoff > 0
             ? `Cut-off in ${untilText(t.minutesToCutoff)}`
             : 'Orders are closed'}

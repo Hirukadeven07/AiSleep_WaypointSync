@@ -111,6 +111,7 @@ The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, th
 
 ### Shells
 
+- **Dark mode** is not in the Figma. Every app's account menu has a Dark mode switch; the choice is kept on the device, and with no choice the app follows the phone or computer setting. Dark colours keep the Figma's roles (canvas, surface, text, status tints); navy fills, the SOS red and the signature pad stay as designed, and the maps keep their light style.
 - The Figma has no sign-out, so it lives in an account menu: the rail avatar on the console, the account pill on the dock, and a slim avatar row at the top of phone screens (the Figma `Driver / Profile` frame should replace that row).
 - The console's Settings button and the Incidents red dot are drawn but not wired.
 - The driver sidebar card shows the name and depot, not "DRV-2031", because the session has no driver number.

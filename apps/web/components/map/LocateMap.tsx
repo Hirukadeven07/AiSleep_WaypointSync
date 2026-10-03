@@ -11,7 +11,7 @@ import { IslandMap, type IslandMapHandle, type IslandMarker, type MapView } from
 import { MapControls } from './MapControls';
 
 const BRANDS: { id: 'all' | Brand; label: string; className: string }[] = [
-  { id: 'all', label: 'All', className: 'bg-ink text-bg' },
+  { id: 'all', label: 'All', className: 'bg-scrim text-on-primary' },
   { id: 'Fresh', label: 'Fresh', className: 'bg-fresh-tint text-fresh' },
   { id: 'Style', label: 'Style', className: 'bg-style-tint text-style' },
   { id: 'Tech', label: 'Tech', className: 'bg-tech-tint text-tech' },
@@ -25,7 +25,7 @@ const ORDER_DOT: Record<Brand, string> = {
 
 const STOP_DOT: Record<LocateStop['kind'], string> = {
   delivered: 'bg-success',
-  next: 'bg-ink',
+  next: 'bg-scrim',
   upcoming: 'border-2 border-ink bg-surface',
   at_risk: 'bg-warning',
 };
@@ -112,7 +112,7 @@ export function LocateMap() {
         id: `depot:${depot.id}`,
         lat: depot.lat,
         lng: depot.lng,
-        dotClass: 'bg-ink',
+        dotClass: 'bg-scrim',
         title: `${depot.name} depot`,
         size: 'depot',
       });
@@ -136,7 +136,7 @@ export function LocateMap() {
         id: last.stopId,
         lat: last.lat,
         lng: last.lng,
-        dotClass: 'bg-ink',
+        dotClass: 'bg-scrim',
         title: last.storeName,
         caption: 'Last confirmed stop',
         size: 'vehicle',
@@ -349,17 +349,17 @@ function LocateLegend() {
           <span className="size-2.5 rounded-full bg-faint" /> Store with no order
         </li>
         <li className={row}>
-          <span className="size-3 rounded-[4px] bg-ink" /> Depot
+          <span className="size-3 rounded-[4px] bg-scrim" /> Depot
         </li>
         <li className={row}>
-          <span className="size-3 rounded-full bg-ink ring-2 ring-ink ring-offset-1" /> Vehicle (last
+          <span className="size-3 rounded-full bg-scrim ring-2 ring-ink ring-offset-1" /> Vehicle (last
           confirmed stop)
         </li>
         <li className={row}>
           <span className="size-2.5 rounded-full bg-success" /> Delivered stop
         </li>
         <li className={row}>
-          <span className="size-2.5 rounded-full bg-ink" /> Next stop
+          <span className="size-2.5 rounded-full bg-scrim" /> Next stop
         </li>
         <li className={row}>
           <span className="size-2.5 rounded-full border-2 border-ink bg-surface" /> Upcoming stop

@@ -107,7 +107,7 @@ export function Fleet() {
               onClick={() => setFilter(f.id)}
               aria-pressed={filter === f.id}
               className={`rounded-pill px-4 py-[10px] text-[13px] font-semibold leading-[18px] ${
-                filter === f.id ? 'bg-primary text-bg' : 'bg-surface text-ink'
+                filter === f.id ? 'bg-primary text-on-primary' : 'bg-surface text-ink'
               }`}
             >
               {f.label} · {f.count(day)}

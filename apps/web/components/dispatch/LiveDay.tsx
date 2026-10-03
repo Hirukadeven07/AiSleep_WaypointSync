@@ -240,7 +240,7 @@ export function LiveDay() {
                   onClick={() => setFilter(f.id)}
                   aria-pressed={filter === f.id}
                   className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${
-                    filter === f.id ? 'bg-primary text-bg' : 'bg-bg text-ink'
+                    filter === f.id ? 'bg-primary text-on-primary' : 'bg-bg text-ink'
                   }`}
                 >
                   {f.label} {f.count(day)}

@@ -50,7 +50,7 @@ function PhotoShade({ top }: { top: number }) {
         className="pointer-events-none absolute inset-0 size-full max-w-none object-cover blur-[7px] lg:inset-auto lg:left-[-36px] lg:top-[var(--t)] lg:h-[720px] lg:w-[1480px]"
         style={{ '--t': `${top}px` } as React.CSSProperties}
       />
-      <div className="absolute inset-0 bg-gradient-to-r from-ink/[0.94] via-ink/70 via-[55%] to-ink/45" />
+      <div className="absolute inset-0 bg-gradient-to-r from-scrim/[0.94] via-scrim/70 via-[55%] to-scrim/45" />
     </>
   );
 }
@@ -182,9 +182,9 @@ export default function LandingPage() {
       <SignedInRedirect />
 
       {/* Hero */}
-      <section className="relative overflow-hidden rounded-hero bg-ink lg:h-[640px]">
+      <section className="relative overflow-hidden rounded-hero bg-scrim lg:h-[640px]">
         <PhotoShade top={-40} />
-        <div className="absolute inset-0 bg-gradient-to-b from-ink/0 to-ink/60" />
+        <div className="absolute inset-0 bg-gradient-to-b from-scrim/0 to-scrim/60" />
 
         <div className="relative flex flex-col gap-10 px-5 pb-10 pt-6 sm:px-10 lg:contents">
           <nav className="flex h-11 items-center gap-8 lg:absolute lg:inset-x-10 lg:top-7">
@@ -330,7 +330,7 @@ export default function LandingPage() {
       {/* How it works */}
       <section
         id="how-it-works"
-        className="flex flex-col gap-9 rounded-hero bg-ink px-5 py-16 sm:px-10 lg:py-24"
+        className="flex flex-col gap-9 rounded-hero bg-scrim px-5 py-16 sm:px-10 lg:py-24"
       >
         <Eyebrow dark>How a delivery moves</Eyebrow>
         <div className="flex flex-wrap items-end justify-between gap-10">
@@ -419,7 +419,7 @@ export default function LandingPage() {
       <div className="h-16 lg:h-[104px]" />
 
       {/* Closing */}
-      <section className="relative overflow-hidden rounded-hero bg-ink lg:h-[360px]">
+      <section className="relative overflow-hidden rounded-hero bg-scrim lg:h-[360px]">
         <PhotoShade top={-200} />
         <div className="relative flex flex-col items-start gap-5 px-6 py-14 sm:px-10 lg:contents">
           <div className="lg:absolute lg:left-14 lg:top-16">
