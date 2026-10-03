@@ -284,6 +284,7 @@ export const IslandMap = forwardRef<IslandMapHandle, Props>(function IslandMap(
 ) {
   const host = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
+  const [visible, setVisible] = useState(false);
   const mapRef = useRef<MlMap | null>(null);
   const featuresRef = useRef<Feature[]>([]);
   const markerRefs = useRef<Marker[]>([]);
@@ -483,6 +484,9 @@ export const IslandMap = forwardRef<IslandMapHandle, Props>(function IslandMap(
       else created.fitBounds(focusBounds(featuresRef.current, current.names), { padding: 36, duration: 0 });
 
       if (!cancelled) setReady(true);
+      created.once('idle', () => {
+        if (!cancelled) setVisible(true);
+      });
     })();
 
     return () => {
@@ -546,8 +550,22 @@ export const IslandMap = forwardRef<IslandMapHandle, Props>(function IslandMap(
   }, [picking, ready]);
 
   return (
-    <div className="absolute inset-0 min-h-[420px] overflow-hidden">
-      <div ref={host} className="h-full w-full overflow-hidden" />
+    <div className="absolute inset-0 min-h-[420px] overflow-hidden bg-white">
+      <div
+        ref={host}
+        className={`h-full w-full overflow-hidden transition-opacity duration-700 ease-out ${
+          visible ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      />
+      {!visible && (
+        <div className="absolute inset-0 flex items-center justify-center" role="status">
+          <span className="sr-only">Loading the map</span>
+          <span
+            aria-hidden
+            className="size-8 animate-spin rounded-full border-2 border-ink/15 border-t-ink"
+          />
+        </div>
+      )}
     </div>
   );
 });

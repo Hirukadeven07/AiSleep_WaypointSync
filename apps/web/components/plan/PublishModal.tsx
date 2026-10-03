@@ -18,7 +18,7 @@ export async function publishPlan(edit: PlanEdit, anyway: boolean, tripId?: stri
     const one = Boolean(tripId);
     edit.showToast({
       kind: 'ok',
-      title: one ? 'Trip published' : 'Plan published',
+      title: one ? 'Trip published' : 'Trips published',
       sub: `${res.tripCount} ${res.tripCount === 1 ? 'trip' : 'trips'} sent to loaders and drivers · ${res.storeCount} ${
         res.storeCount === 1 ? 'store' : 'stores'
       } notified`,
