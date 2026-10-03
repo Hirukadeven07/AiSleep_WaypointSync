@@ -6,6 +6,7 @@ import type { FlagType, ReceiptRequest, StoreDelivery } from '@waypoint/contract
 import { api } from '@/lib/api';
 import { messageOf } from '@/lib/api-error';
 import { usePoll } from '@/lib/poll';
+import { useOnStoreRefresh } from '@/components/store/settings';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Toast } from '@/components/ui/Toast';
@@ -23,6 +24,7 @@ const ISSUES: { value: FlagType; label: string }[] = [
 /** S4: the store checks each line, marks issues, and confirms receipt. The driver acknowledges after. */
 export default function ReceivePage() {
   const { data, error, refresh } = usePoll(() => api<StoreDelivery[]>('/store/deliveries'));
+  useOnStoreRefresh(refresh);
   const [selectedId, setSelectedId] = useState<string>();
 
   const waiting = data?.filter((d) => d.status === 'arrived' || d.status === 'waiting') ?? [];

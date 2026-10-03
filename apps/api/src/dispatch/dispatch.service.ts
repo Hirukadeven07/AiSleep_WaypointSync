@@ -25,6 +25,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { BREAK_EVENT_TYPES, foldBreaks } from '../driver/driver-breaks';
 import { alertLongWaits } from '../driver/driver-notices';
+import { NoticeHub } from '../notifications/notice-hub';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { tripAreaLabel } from '../plan/plan.mapper';
 
@@ -50,6 +51,7 @@ export class DispatchService {
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
     @Inject(NOTIFIER) private readonly notifier: Notifier,
+    private readonly hub: NoticeHub,
   ) {}
 
   /** The stores a delay would reach (their ETA misses the window or is within 15 minutes of it) and the message they would get. */
@@ -235,10 +237,12 @@ export class DispatchService {
     ]);
 
     // Dispatch is alerted once per long wait, whether the board or the driver's phone notices first.
-    await alertLongWaits(
-      this.prisma,
-      now,
-      rows.map((t) => t.id),
+    this.hub.publishAll(
+      await alertLongWaits(
+        this.prisma,
+        now,
+        rows.map((t) => t.id),
+      ),
     );
 
     // A driver on a break shows on their trip's card.

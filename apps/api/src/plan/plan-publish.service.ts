@@ -5,6 +5,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { tripDriverId } from '../driver/driver-trips';
+import type { RaisedNotice } from '../notifications/notice-hub';
 import { PlanEditService } from './plan-edit.service';
 import { clockText, dayLabel } from './plan-labels';
 import { DEPART_MIN, PlanService } from './plan.service';
@@ -151,9 +152,12 @@ export class PlanPublishService {
 
     // Stops placed outside the board (seed fixtures) have no ETAs yet; sort and time every trip once more.
     const depot = this.edit.depotOf(me) as Parameters<PlanEditService['resequence']>[3];
-    await this.prisma.$transaction(async (tx) => {
-      for (const t of trips) await this.edit.resequence(tx, t.id, lookup, depot);
+    const raised = await this.prisma.$transaction(async (tx) => {
+      const notices: RaisedNotice[] = [];
+      for (const t of trips) notices.push(...(await this.edit.resequence(tx, t.id, lookup, depot)));
+      return notices;
     });
+    this.edit.publishRaised(raised);
 
     const now = this.clock.now();
     await this.prisma.trip.updateMany({

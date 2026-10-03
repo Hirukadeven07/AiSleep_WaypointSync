@@ -4,13 +4,15 @@ import Link from 'next/link';
 import type { StoreDelivery } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { usePoll } from '@/lib/poll';
+import { useOnStoreRefresh } from '@/components/store/settings';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { HandoffTimeline, IssueList, PageTitle } from '@/components/store/parts';
 
 /** S5: where each of today's deliveries is in the handoff, polled every 5 seconds. */
 export default function DeliveryPage() {
-  const { data, error } = usePoll(() => api<StoreDelivery[]>('/store/deliveries'));
+  const { data, error, refresh } = usePoll(() => api<StoreDelivery[]>('/store/deliveries'));
+  useOnStoreRefresh(refresh);
 
   return (
     <section className="space-y-md">

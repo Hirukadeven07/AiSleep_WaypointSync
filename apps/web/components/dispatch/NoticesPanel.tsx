@@ -9,9 +9,10 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import type { DispatcherNotice, DispatcherNotices, NoticeCategory } from '@waypoint/contracts';
+import type { DispatcherNotice, DispatcherNotices, LiveNotice, NoticeCategory } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
+import { LIVE_NOTICE } from '@/lib/live-notices';
 
 type Tab = NoticeCategory | 'all';
 const TABS: { id: Tab; label: string }[] = [
@@ -25,6 +26,44 @@ const DOT: Record<NoticeCategory, string> = {
   stores: 'bg-warning',
   planning: 'bg-info',
 };
+
+function noticeCategory(link: string | null): NoticeCategory {
+  if (link?.startsWith('/dispatch/plan')) return 'planning';
+  if (link?.startsWith('/dispatch/board')) return 'stores';
+  return 'incidents';
+}
+
+function withNotice(data: DispatcherNotices | null, live: LiveNotice): DispatcherNotices {
+  const category = noticeCategory(live.link);
+  const notice: DispatcherNotice = {
+    id: live.id,
+    category,
+    title: live.title,
+    body: live.body,
+    link: live.link,
+    createdAt: live.createdAt,
+  };
+  if (!data) {
+    return {
+      notices: [notice],
+      counts: {
+        all: 1,
+        incidents: category === 'incidents' ? 1 : 0,
+        stores: category === 'stores' ? 1 : 0,
+        planning: category === 'planning' ? 1 : 0,
+      },
+    };
+  }
+  if (data.notices.some((n) => n.id === notice.id)) return data;
+  return {
+    notices: [notice, ...data.notices],
+    counts: {
+      ...data.counts,
+      all: data.counts.all + 1,
+      [category]: data.counts[category] + 1,
+    },
+  };
+}
 const SIZE = 380;
 
 function ago(iso: string, now: number) {
@@ -35,7 +74,7 @@ function ago(iso: string, now: number) {
   return h < 24 ? `${h} h ago` : `${Math.floor(h / 24)} d ago`;
 }
 
-/** Unseen notices for the dispatcher, refreshed every 15 s. */
+/** Unseen notices for the dispatcher. The live stream adds one the moment it is saved; the 15 s poll fills any gap. */
 function useNotices() {
   const [data, setData] = useState<DispatcherNotices | null>(null);
   const load = useCallback(
@@ -65,6 +104,16 @@ export function NoticesBell() {
   const bell = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const now = Date.now();
+
+  useEffect(() => {
+    const onNotice = (event: Event) => {
+      const live = (event as CustomEvent<LiveNotice>).detail;
+      if (!live?.id) return;
+      setData((current) => withNotice(current, live));
+    };
+    window.addEventListener(LIVE_NOTICE, onNotice);
+    return () => window.removeEventListener(LIVE_NOTICE, onNotice);
+  }, [setData]);
 
   // Pin the square under the bell, kept on screen.
   useLayoutEffect(() => {
