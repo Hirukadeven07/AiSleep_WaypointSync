@@ -3,7 +3,7 @@ export type Brand = 'Fresh' | 'Style' | 'Tech';
 /** Catalogue class from the booklet: chilled food, ambient fresh, style, tech. */
 export type ItemType = 'chilled_food' | 'fresh' | 'style' | 'tech';
 export type Temp = 'chilled' | 'ambient';
-export type OrderStatus = 'waiting' | 'planned' | 'deferred' | 'delivered' | 'partial';
+export type OrderStatus = 'waiting' | 'planned' | 'deferred' | 'delivered' | 'partial' | 'cancelled';
 export type TripStatus =
   | 'planning'
   | 'published'
