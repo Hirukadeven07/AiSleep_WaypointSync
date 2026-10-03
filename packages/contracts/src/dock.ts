@@ -51,16 +51,37 @@ export interface LoadStop {
   chilled: boolean;
   lines: OrderLine[];
   flags: LoadFlagView[];
+  /** Added by the last acknowledged plan change; cleared when the truck departs. */
+  isNew: boolean;
+}
+
+/** One order in a before/after view of a plan change. */
+export interface PlanLockSlot {
+  orderId: string;
+  storeName: string;
+  change: 'kept' | 'removed' | 'added';
 }
 
 export interface PlanLock {
   locked: boolean;
   planVersion: number;
   ackedPlanVersion: number;
-  /** Orders on the acknowledged plan that the dispatcher took off this trip. */
-  removed: { orderId: string; storeName: string }[];
+  /** Orders on the acknowledged plan that the dispatcher took off this trip, with the goods to take off. */
+  removed: {
+    orderId: string;
+    storeName: string;
+    lines: OrderLine[];
+    /** The loader confirmed these goods are off the truck (POST /loads/:tripId/taken-off). */
+    takenOff: boolean;
+  }[];
   /** Stop ids added since the acknowledged plan. */
   added: string[];
+  /**
+   * The acknowledged plan and the new one, both in load order (index 0 = first crate onto the
+   * truck, at the back; last = nearest the door). Empty when not locked.
+   */
+  before: PlanLockSlot[];
+  after: PlanLockSlot[];
 }
 
 /** The loader's checklist for one trip. `loadOrder[0]` is the first crate onto the truck (LIFO). */
@@ -88,6 +109,10 @@ export interface FlagRequest {
   type: FlagType;
   qty?: number;
   note?: string;
+}
+
+export interface TakenOffRequest {
+  orderId: string;
 }
 
 export interface DepartRequest {
