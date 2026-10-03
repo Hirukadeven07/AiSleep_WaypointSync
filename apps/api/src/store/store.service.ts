@@ -244,11 +244,13 @@ export class StoreService {
   }
 
   /**
-   * TEMPORARY: outside production, ordering stays open until 23:59 so development
-   * is not blocked after 16:00. Production still closes at ORDER_CUTOFF_MIN.
+   * TEMPORARY: local development keeps ordering open until 23:59 so work is not
+   * blocked after 16:00. Production and the test suite still close at ORDER_CUTOFF_MIN.
    */
   private orderCutoffMin(): number {
-    return process.env.NODE_ENV === 'production' ? ORDER_CUTOFF_MIN : 23 * 60 + 59;
+    const env = process.env.NODE_ENV;
+    const devBypass = env !== 'production' && env !== 'test';
+    return devBypass ? 23 * 60 + 59 : ORDER_CUTOFF_MIN;
   }
 
   /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */
