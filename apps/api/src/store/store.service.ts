@@ -163,7 +163,7 @@ export class StoreService {
       brand: store.brand,
       windowOpenMin: store.windowOpenMin,
       windowCloseMin: store.windowCloseMin,
-      cutoffMin: ORDER_CUTOFF_MIN,
+      cutoffMin: this.orderCutoffMin(),
       nowMin: this.clock.minutesNow(),
       today,
       // The open delivery first; otherwise the last one of the day.
@@ -243,10 +243,20 @@ export class StoreService {
     return rows.map((r) => r.itemId);
   }
 
+  /**
+   * TEMPORARY: local development keeps ordering open until 23:59 so work is not
+   * blocked after 16:00. Production and the test suite still close at ORDER_CUTOFF_MIN.
+   */
+  private orderCutoffMin(): number {
+    const env = process.env.NODE_ENV;
+    const devBypass = env !== 'production' && env !== 'test';
+    return devBypass ? 23 * 60 + 59 : ORDER_CUTOFF_MIN;
+  }
+
   /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */
   async placeOrder(me: AuthUser, dto: PlaceOrderDto): Promise<StoreOrderView> {
     const store = await this.store(me);
-    if (this.clock.minutesNow() >= ORDER_CUTOFF_MIN) {
+    if (this.clock.minutesNow() >= this.orderCutoffMin()) {
       throw new DomainError(
         'AFTER_CUTOFF',
         'Orders for tomorrow close at 16:00. Order again tomorrow morning.',
