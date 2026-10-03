@@ -14,6 +14,7 @@ import {
   type TripSummary,
 } from '@/lib/driver-cache';
 import { signOutDriver } from '@/lib/driver-sign-out';
+import { useRoadPings } from '@/lib/use-road-pings';
 import { DriverSidebar } from '@/components/shell/DriverSidebar';
 import { PhoneColumn } from '@/components/shell/PhoneColumn';
 import { PhoneTabBar } from '@/components/shell/PhoneTabBar';
@@ -21,6 +22,7 @@ import { PhoneTopRow } from '@/components/shell/PhoneTopRow';
 import { DRIVER_TABS } from '@/components/shell/driverTabs';
 import { SosControl } from './SosControl';
 import { OfflineBanner } from './OfflineBanner';
+import { RejectedBanner } from './RejectedBanner';
 
 interface DriverContextValue {
   me: Me | null;
@@ -157,14 +159,18 @@ function ShellInner({ children }: { children: ReactNode }) {
 
   const trip = useMemo(() => pickActiveTrip(day), [day]);
 
-  // While the truck is still at the depot, keep asking for the day. Confirming the load
-  // moves the trip to on_road, and that is what lets the driver mark arrival.
+  // Keep asking for the day. At the depot every 15 s: confirming the load moves the trip to
+  // on_road, which lets the driver mark arrival. On the road every 30 s, so plan changes, store
+  // receipts and messages arrive without a tap. With no trip, every minute for a newly sent trip.
+  const atDepot = !!trip && ['published', 'loading', 'ready'].includes(trip.status);
   useEffect(() => {
     if (isLogin || phase !== 'ready') return;
-    if (!trip || !['published', 'loading', 'ready'].includes(trip.status)) return;
-    const timer = setInterval(() => void refresh(), 15_000);
+    const timer = setInterval(() => void refresh(), atDepot ? 15_000 : trip ? 30_000 : 60_000);
     return () => clearInterval(timer);
-  }, [isLogin, phase, trip, refresh]);
+  }, [isLogin, phase, atDepot, trip, refresh]);
+
+  // GPS pings for the dispatch board while the trip is on the road (the SOS screen sends its own).
+  useRoadPings(trip, !isLogin && !isSos && phase === 'ready');
 
   const value = useMemo<DriverContextValue>(
     () => ({ me, day, trip, online, stale, cachedAt, refresh }),
@@ -208,7 +214,10 @@ function ShellInner({ children }: { children: ReactNode }) {
               <PhoneTopRow me={me} onSignOut={signOutDriver} />
             </div>
           )}
-          <main className="flex-1 px-5 pb-[130px] pt-2 lg:px-10 lg:py-8">{children}</main>
+          <main className="flex-1 px-5 pb-[130px] pt-2 lg:px-10 lg:py-8">
+            <RejectedBanner />
+            {children}
+          </main>
         </PhoneColumn>
         <SosControl />
         <div className="lg:hidden">

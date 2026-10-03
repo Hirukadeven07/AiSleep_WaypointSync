@@ -17,6 +17,7 @@ import {
 } from '@waypoint/domain';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { tellDriversPlanChanged } from '../driver/driver-notices';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { toStopView, toVehicle, tripInclude, type TripRow } from '../plan/plan.mapper';
 import { DEPART_MIN, PlanService } from '../plan/plan.service';
@@ -173,6 +174,7 @@ export class MoveStopService {
         where: { id: { in: [from.id, target.id] } },
         data: { planVersion: { increment: 1 } },
       });
+      await tellDriversPlanChanged(tx, [from.id, target.id]);
     });
 
     const storeName = stop.order.store.displayName ?? stop.order.store.id;

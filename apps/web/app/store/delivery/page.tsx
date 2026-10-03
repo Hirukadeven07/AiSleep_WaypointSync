@@ -27,29 +27,31 @@ export default function DeliveryPage() {
           description="Deliveries appear here once the plan is published."
         />
       )}
-      {data?.map((d) => (
-        <div key={d.stopId} className="space-y-md rounded-card bg-surface p-lg">
-          <div className="flex items-start justify-between gap-sm">
-            <div className="min-w-0">
-              <p className="truncate text-title text-ink">{d.plate}</p>
-              <p className="text-label text-muted">
-                {d.driverName ?? 'Driver'} · {d.lines.length} lines{d.chilled ? ' · chilled' : ''}
-              </p>
+      <div className="space-y-md lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0">
+        {data?.map((d) => (
+          <div key={d.stopId} className="space-y-md rounded-card bg-surface p-lg">
+            <div className="flex items-start justify-between gap-sm">
+              <div className="min-w-0">
+                <p className="truncate text-title text-ink">{d.plate}</p>
+                <p className="text-label text-muted">
+                  {d.driverName ?? 'Driver'} · {d.lines.length} lines{d.chilled ? ' · chilled' : ''}
+                </p>
+              </div>
+              <StatusChip status={d.status} />
             </div>
-            <StatusChip status={d.status} />
+            <HandoffTimeline delivery={d} />
+            <IssueList delivery={d} />
+            {(d.status === 'arrived' || d.status === 'waiting') && (
+              <Link
+                href="/store/receive"
+                className="flex min-h-[44px] items-center justify-center rounded-pill bg-primary text-body font-semibold text-on-primary"
+              >
+                Check the goods
+              </Link>
+            )}
           </div>
-          <HandoffTimeline delivery={d} />
-          <IssueList delivery={d} />
-          {(d.status === 'arrived' || d.status === 'waiting') && (
-            <Link
-              href="/store/receive"
-              className="flex min-h-[44px] items-center justify-center rounded-pill bg-primary text-body font-semibold text-on-primary"
-            >
-              Check the goods
-            </Link>
-          )}
-        </div>
-      ))}
+        ))}
+      </div>
     </section>
   );
 }

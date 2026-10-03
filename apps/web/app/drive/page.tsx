@@ -9,6 +9,7 @@ import type { StopSummary } from '@/lib/driver-cache';
 import {
   DISPATCH_PHONE,
   clockText,
+  dayText,
   displayName,
   firstName,
   greeting,
@@ -17,6 +18,7 @@ import {
   vehicleLabel,
   windowText,
 } from '@/lib/driver-format';
+import { usePlanLock } from '@/lib/plan-ack';
 import { usePendingCount } from '@/lib/use-pending-count';
 
 const stopCount = (n: number) => `${n} ${n === 1 ? 'stop' : 'stops'}`;
@@ -114,6 +116,9 @@ export default function DriverHome() {
   const firstStop = stops[0];
   const nextTrip = day?.trips.find((t) => t.id !== trip?.id) ?? null;
   const vehicle = day?.vehicle ?? null;
+  const upcoming = day?.upcoming ?? [];
+  const unread = day?.unreadNotices ?? 0;
+  const planLock = usePlanLock(trip);
 
   const subtitle = [displayName(me?.name), vehicle?.plate, vehicleLabel(vehicle?.type)].filter(Boolean).join(' · ');
   const name = firstName(me?.name);
@@ -139,6 +144,43 @@ export default function DriverHome() {
       </header>
 
       {!online && <OfflineBanner />}
+
+      {planLock.locked && (
+        <Link
+          href="/drive/next"
+          className="flex items-center gap-3 rounded-card bg-warning/[0.12] p-4"
+          role="alert"
+        >
+          <Icon name="alert" size={18} className="text-warning" />
+          <span className="flex-1 text-[15px] font-semibold leading-5 text-ink">
+            Dispatch changed Trip {trip?.tripNumber}. Check and accept the new stop list.
+          </span>
+          <Icon name="chevron-right" size={18} className="text-muted" />
+        </Link>
+      )}
+
+      {unread > 0 && (
+        <Link href="/drive/notices" className="flex items-center gap-3 rounded-card bg-surface p-4">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-danger-tint text-danger">
+            <Icon name="bell" size={18} />
+          </span>
+          <span className="flex-1 text-[15px] font-semibold leading-5 text-ink">
+            {unread} new {unread === 1 ? 'message' : 'messages'} from dispatch
+          </span>
+          <Icon name="chevron-right" size={18} className="text-muted" />
+        </Link>
+      )}
+
+      {!trip && (
+        <section className="flex flex-col gap-1 rounded-card bg-surface p-4">
+          <p className="text-[17px] font-semibold leading-[22px] text-ink">No trip today</p>
+          <p className="text-[14px] leading-5 text-muted">
+            {upcoming.length > 0
+              ? 'Your next trip is below. It opens here on its day.'
+              : 'Dispatch sends your trip here once it is published.'}
+          </p>
+        </section>
+      )}
 
       {trip && (
         <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_412px] lg:gap-x-6">
@@ -242,6 +284,34 @@ export default function DriverHome() {
         </div>
       )}
 
+      {upcoming.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <SectionHead title="Coming up" />
+          <ul className="flex flex-col gap-2">
+            {upcoming.map((t) => {
+              const first = [...t.stops].sort((a, b) => a.sequence - b.sequence)[0];
+              return (
+                <li key={String(t.id)} className="flex items-center gap-3 rounded-card bg-surface p-4">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-peek text-slate">
+                    <Icon name="clock" size={18} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[15px] font-semibold leading-5 text-ink">
+                      {t.serviceDate ? dayText(t.serviceDate, day?.serviceDate) : 'Later'} · Trip {t.tripNumber}
+                    </span>
+                    <span className="block text-caption font-medium leading-4 text-muted">
+                      {[stopCount(t.stops.length), first ? `first stop ${first.outletName}` : null]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
       <section className="flex flex-col gap-4">
         <SectionHead title="Quick actions" />
         <div className="flex gap-[10px] overflow-x-auto lg:gap-4 lg:overflow-visible">
@@ -260,6 +330,14 @@ export default function DriverHome() {
             tag="Report"
             tint="bg-style-tint"
             tagInk="text-style"
+          />
+          <QuickCard
+            href="/drive/notices"
+            title="Messages"
+            text={unread > 0 ? `${unread} new from dispatch` : 'From dispatch and stores'}
+            tag="Read"
+            tint="bg-sage"
+            tagInk="text-success"
           />
           <QuickCard
             href={telHref(DISPATCH_PHONE)}

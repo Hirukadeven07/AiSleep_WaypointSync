@@ -413,6 +413,8 @@ model TripStop {
   arrivedAt               DateTime?
   storeConfirmedAt        DateTime?
   driverAckAt             DateTime?
+  /// Set when dispatch was alerted that the driver waited WAIT_ALERT_MIN at the store; one alert per stop.
+  waitAlertedAt           DateTime?
   plannedArrivalTime      DateTime?
   leaveOutletTime         DateTime?
   serviceMin              Float?
@@ -570,6 +572,7 @@ model Driver {
   userId        String           @unique
   user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   licenseNo     String?          @unique
+  licenseExpiry DateTime?        @db.Date
   idNo          String?          @unique
   joinDate      DateTime?        @db.Date
   leavingDate   DateTime?        @db.Date

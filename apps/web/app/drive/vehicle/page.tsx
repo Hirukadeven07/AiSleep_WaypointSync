@@ -1,5 +1,5 @@
-import { PlaceholderPage } from '@/components/shell/PlaceholderPage';
+import { DriverProfileView } from '@/components/drive/DriverProfileView';
 
 export default function Page() {
-  return <PlaceholderPage title="Vehicle" />;
+  return <DriverProfileView />;
 }

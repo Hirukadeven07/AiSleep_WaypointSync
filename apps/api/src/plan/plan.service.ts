@@ -42,6 +42,8 @@ export const DEPART_MIN = { Fresh: 3 * 60 + 30, Style: 8 * 60, Tech: 8 * 60 } as
 const dateOnly = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 const round1 = (n: number) => Math.round(n * 10) / 10;
+/** "Kasun (Driver)" -> "Kasun": seeded names carry the role in brackets. */
+const personName = (name: string) => name.replace(/\s*\(.*\)\s*$/, '').trim() || name;
 const byWindow = (a: PlanOrder, b: PlanOrder) =>
   a.windowOpenMin - b.windowOpenMin || a.storeName.localeCompare(b.storeName);
 /** Urgent orders move to the top; each group keeps its order (a stable partition). */
@@ -73,7 +75,7 @@ export class PlanService {
     const date = dateParam ?? addDays(this.clock.today(), 1);
     const day = dateOnly(date);
 
-    const [waitingRows, deferredRows, tripRows, vehicles, districts, allowances] =
+    const [waitingRows, deferredRows, tripRows, vehicles, districts, allowances, drivers] =
       await Promise.all([
         this.prisma.order.findMany({
           where: { deliveryDate: day, status: 'waiting', stop: null, store: { depotId } },
@@ -91,6 +93,24 @@ export class PlanService {
         this.prisma.vehicle.findMany({ where: { depotId } }),
         this.prisma.district.findMany(),
         this.prisma.serviceAllowance.findMany(),
+        // Drivers who still work here: no leaving date yet, or one after the plan day.
+        this.prisma.user.findMany({
+          where: {
+            role: 'driver',
+            depotId,
+            OR: [
+              { driverProfile: null },
+              {
+                driverProfile: {
+                  isActive: true,
+                  OR: [{ leavingDate: null }, { leavingDate: { gt: day } }],
+                },
+              },
+            ],
+          },
+          select: { id: true, name: true, vehicle: { select: { id: true } } },
+          orderBy: { name: 'asc' },
+        }),
       ]);
 
     const lookup = toLookup(districts, allowances);
@@ -106,6 +126,11 @@ export class PlanService {
       orders,
       movedToLater,
       trips,
+      drivers: drivers.map((d) => ({
+        id: d.id,
+        name: personName(d.name),
+        vehicleId: d.vehicle?.id ?? null,
+      })),
       districts: [...new Set(orders.map((o) => o.district))].sort(),
       summary: this.summary(waitingRows, tripRows, trips, vehicles, orders, movedToLater),
       published: this.published(tripRows),
@@ -194,6 +219,8 @@ export class PlanService {
       state = stopViews.length === 0 || issues.length > 0 ? 'draft' : 'ready';
     }
 
+    // The driver the dispatcher picked, else the vehicle's registered driver (same rule as the phone).
+    const driver = row.assignedDriver ?? row.vehicle.driver;
     return {
       id: row.id,
       vehicleId: row.vehicleId,
@@ -214,6 +241,9 @@ export class PlanService {
       volumeCapM3: capacity.volumeCapM3,
       minutes,
       budgetMin: TIME_BUDGET_MIN[row.brand],
+      driverId: driver?.id ?? null,
+      driverName: driver ? personName(driver.name) : null,
+      driverAssigned: row.assignedDriverId !== null,
       stops: row.stops.map((s) => ({
         id: s.id,
         orderId: s.orderId,

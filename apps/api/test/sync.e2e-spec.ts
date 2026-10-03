@@ -752,4 +752,220 @@ describe('driver sync (e2e)', () => {
     expect(resolved.body.applied).toEqual(['b2bbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']);
     expect(await alerts()).toBe(before + 1);
   });
+
+  it('alerts dispatch once when the driver has waited 10 minutes at a store', async () => {
+    // The sequence-2 stop from the arrival test: waiting since 08:40, it is now 09:00.
+    const waiting = await prisma.tripStop.findFirstOrThrow({ where: { tripId, sequence: 2 } });
+    expect(waiting.status).toBe('waiting');
+    const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+    const alerts = () =>
+      prisma.notification.findMany({
+        where: {
+          userId: nimal.id,
+          title: { startsWith: 'Waiting ' },
+          createdAt: { gte: startedAt },
+        },
+      });
+
+    await driverAgent.get('/api/driver/day').expect(200);
+    await driverAgent.get('/api/driver/day').expect(200);
+    const sent = await alerts();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.title).toBe('Waiting 20 min at Sync Store');
+    expect(
+      (await prisma.tripStop.findUniqueOrThrow({ where: { id: waiting.id } })).waitAlertedAt,
+    ).toBeTruthy();
+    await prisma.notification.deleteMany({ where: { id: { in: sent.map((n) => n.id) } } });
+  });
+
+  it('blocks the next arrival until the store result before it is acknowledged', async () => {
+    const order = (n: number) =>
+      prisma.order.create({
+        data: {
+          storeId,
+          brand: 'Fresh',
+          deliveryDate: date(DAY),
+          temp: 'ambient',
+          status: 'planned',
+          units: 1,
+          weightKg: 5,
+          volumeM3: 0.05,
+          urgentNote: `E2E order ${n}`,
+        },
+      });
+    const checked = await prisma.tripStop.create({
+      data: {
+        tripId,
+        orderId: (await order(3)).id,
+        sequence: 3,
+        status: 'confirmed',
+        arrivedAt: new Date('2026-10-01T03:00:00Z'),
+        storeConfirmedAt: new Date('2026-10-01T03:10:00Z'),
+      },
+    });
+    const next = await prisma.tripStop.create({
+      data: { tripId, orderId: (await order(4)).id, sequence: 4, status: 'upcoming' },
+    });
+    const event = (clientId: string, type: string, stop: string) => ({
+      clientId,
+      driverId,
+      tripId,
+      type,
+      payload: { stopId: stop },
+      createdOnPhoneAt: '2026-10-01T08:55:00+05:30',
+      seenPlanVersion: 1,
+    });
+
+    const early = await driverAgent
+      .post('/api/sync')
+      .send({ events: [event('c1cccccc-cccc-4ccc-8ccc-cccccccccccc', 'ARRIVED', next.id)] })
+      .expect(200);
+    expect(early.body.rejectedReasons['c1cccccc-cccc-4ccc-8ccc-cccccccccccc']).toBe('ACK_PENDING');
+
+    // Acknowledge first, then arrive: both in one push, in order.
+    const ok = await driverAgent
+      .post('/api/sync')
+      .send({
+        events: [
+          event('c2cccccc-cccc-4ccc-8ccc-cccccccccccc', 'ACKNOWLEDGEMENT', checked.id),
+          event('c3cccccc-cccc-4ccc-8ccc-cccccccccccc', 'ARRIVED', next.id),
+        ],
+      })
+      .expect(200);
+    expect(ok.body.applied).toEqual([
+      'c2cccccc-cccc-4ccc-8ccc-cccccccccccc',
+      'c3cccccc-cccc-4ccc-8ccc-cccccccccccc',
+    ]);
+    expect((await prisma.tripStop.findUniqueOrThrow({ where: { id: next.id } })).status).toBe(
+      'waiting',
+    );
+  });
+
+  it('returns an open road issue in the driver day until it is resolved', async () => {
+    const issue = (clientId: string, status: 'reported' | 'resolved') => ({
+      events: [
+        {
+          clientId,
+          driverId,
+          tripId,
+          type: 'ROAD_ISSUE',
+          payload: { status, kind: 'traffic', note: 'E2E jam' },
+          createdOnPhoneAt:
+            // After the 10:05 road issue of the earlier test, so these are the newest.
+            status === 'reported' ? '2026-10-01T10:10:00+05:30' : '2026-10-01T10:12:00+05:30',
+          seenPlanVersion: 1,
+        },
+      ],
+    });
+    await driverAgent
+      .post('/api/sync')
+      .send(issue('d1dddddd-dddd-4ddd-8ddd-dddddddddddd', 'reported'))
+      .expect(200);
+    const paused = (await driverAgent.get('/api/driver/day').expect(200)).body;
+    expect(paused.roadIssue).toMatchObject({ tripId, kind: 'traffic', note: 'E2E jam' });
+
+    await driverAgent
+      .post('/api/sync')
+      .send(issue('d2dddddd-dddd-4ddd-8ddd-dddddddddddd', 'resolved'))
+      .expect(200);
+    expect((await driverAgent.get('/api/driver/day').expect(200)).body.roadIssue).toBeNull();
+  });
+
+  it('records breaks and shows them in the driver day', async () => {
+    const at = (t: string) => `2026-10-01T${t}:00+05:30`;
+    const ev = (clientId: string, type: string, time: string) => ({
+      clientId,
+      driverId,
+      tripId,
+      type,
+      payload: {},
+      createdOnPhoneAt: at(time),
+      seenPlanVersion: 1,
+    });
+    const res = await driverAgent
+      .post('/api/sync')
+      .send({
+        events: [
+          ev('e1eeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'BREAK_START', '07:00'),
+          ev('e2eeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'BREAK_END', '07:15'),
+          ev('e3eeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'BREAK_START', '08:50'),
+        ],
+      })
+      .expect(200);
+    expect(res.body.applied).toHaveLength(3);
+    const day = (await driverAgent.get('/api/driver/day').expect(200)).body;
+    expect(day.break).toEqual({
+      onBreakSince: new Date(at('08:50')).toISOString(),
+      usedMin: 15,
+      allowanceMin: 45,
+    });
+
+    await driverAgent
+      .post('/api/sync')
+      .send({ events: [ev('e4eeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'BREAK_END', '08:58')] })
+      .expect(200);
+    const after = (await driverAgent.get('/api/driver/day').expect(200)).body;
+    expect(after.break).toMatchObject({ onBreakSince: null, usedMin: 23 });
+  });
+
+  it('stores GPS pings once, rejects bad ones, and moves an open SOS while SOS is open', async () => {
+    const ping = (clientId: string, payload: Record<string, unknown>) => ({
+      events: [
+        {
+          clientId,
+          driverId,
+          tripId,
+          type: 'LOCATION_PING',
+          payload,
+          createdOnPhoneAt: '2026-10-01T08:59:00+05:30',
+          seenPlanVersion: 1,
+        },
+      ],
+    });
+    const first = await driverAgent
+      .post('/api/sync')
+      .send(ping('f1ffffff-ffff-4fff-8fff-ffffffffffff', { lat: 6.91, lng: 79.88, accuracyM: 8 }))
+      .expect(200);
+    expect(first.body.applied).toEqual(['f1ffffff-ffff-4fff-8fff-ffffffffffff']);
+    const again = await driverAgent
+      .post('/api/sync')
+      .send(ping('f1ffffff-ffff-4fff-8fff-ffffffffffff', { lat: 6.91, lng: 79.88, accuracyM: 8 }))
+      .expect(200);
+    expect(again.body.duplicate).toEqual(['f1ffffff-ffff-4fff-8fff-ffffffffffff']);
+    expect(
+      await prisma.locationPing.count({
+        where: { clientUuid: 'f1ffffff-ffff-4fff-8fff-ffffffffffff' },
+      }),
+    ).toBe(1);
+
+    const bad = await driverAgent
+      .post('/api/sync')
+      .send(ping('f2ffffff-ffff-4fff-8fff-ffffffffffff', { lat: 120, lng: 79.88 }))
+      .expect(200);
+    expect(bad.body.rejectedReasons['f2ffffff-ffff-4fff-8fff-ffffffffffff']).toBe(
+      'INVALID_PAYLOAD',
+    );
+
+    const driver = await prisma.driver.findUniqueOrThrow({ where: { userId: driverId } });
+    const sos = await prisma.driverIncident.create({
+      data: { driverId: driver.id, tripId, incidentType: 'sos', severity: 'high' },
+    });
+    try {
+      await driverAgent
+        .post('/api/sync')
+        .send(ping('f3ffffff-ffff-4fff-8fff-ffffffffffff', { lat: 6.93, lng: 79.9, sos: true }))
+        .expect(200);
+      expect(
+        await prisma.driverIncident.findUniqueOrThrow({ where: { id: sos.id } }),
+      ).toMatchObject({ lat: 6.93, lng: 79.9 });
+    } finally {
+      await prisma.driverIncident.delete({ where: { id: sos.id } });
+    }
+  });
+
+  it('returns the driver profile with vehicle and recent trips', async () => {
+    const res = await driverAgent.get('/api/driver/profile').expect(200);
+    expect(res.body).toMatchObject({ loginId: 'kasun', vehicle: { id: vehicleId } });
+    expect(res.body.recentTrips.map((t: { id: string }) => t.id)).toContain(tripId);
+  });
 });

@@ -18,7 +18,14 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { Toast } from '@/components/ui/Toast';
-import { PageTitle, formatDate, formatDuration, useServerMinutes } from '@/components/store/parts';
+import {
+  PageTitle,
+  SPLIT,
+  SPLIT_COL,
+  formatDate,
+  formatDuration,
+  useServerMinutes,
+} from '@/components/store/parts';
 import { QtyStepper } from '@/components/store/QtyStepper';
 import { readLocal, requestStoreRefresh, writeLocal } from '@/components/store/settings';
 
@@ -223,183 +230,199 @@ export default function OrderPage() {
         </p>
       )}
 
-      {placed && (
-        <div role="status" className="rounded-card bg-success-tint p-lg">
-          <p className="text-title text-ink">Order placed</p>
-          <p className="text-body text-muted">
-            For {formatDate(placed.deliveryDate)} · {placed.units} units · {placed.weightKg} kg
-          </p>
-        </div>
-      )}
-
-      {upcoming.map((o) => (
-        <details key={o.id} className="rounded-card bg-surface p-md">
-          <summary className="cursor-pointer text-body font-semibold text-ink">
-            Already ordered for {formatDate(o.deliveryDate)} · {o.units} units
-          </summary>
-          <ul className="mt-sm space-y-xs">
-            {o.lines.map((l, i) => (
-              <li key={i} className="flex justify-between gap-sm text-label text-muted">
-                <span className="min-w-0 truncate">
-                  {l.name} · {l.pack}
-                </span>
-                <span className="shrink-0 font-semibold text-ink">× {l.qty}</span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ))}
-
-      <div className="space-y-sm">
-        <div className="flex min-h-[44px] items-center gap-sm rounded-input border border-mist bg-surface px-md">
-          <Icon name="search" size={18} className="shrink-0 text-muted" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search items"
-            aria-label="Search items"
-            className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none"
-          />
-        </div>
-        <div className="flex flex-wrap gap-xs">
-          <Chip active={view === 'saved'} onClick={() => setView('saved')}>
-            ★ Saved ({savedCount})
-          </Chip>
-          <Chip active={view === 'all'} onClick={() => setView('all')}>
-            All items ({catalogue.length})
-          </Chip>
-          {types.length > 1 &&
-            types.map((t) => (
-              <Chip
-                key={t}
-                active={type === t}
-                disabled={lockedType(t) && type !== t}
-                onClick={() => setType(type === t ? 'all' : t)}
-              >
-                {ITEM_TYPE_LABEL[t]}
-              </Chip>
-            ))}
-        </div>
-        {group !== null && (
-          <p className="text-label text-muted">
-            This order is {GROUP_LABEL[group]}. Place or clear it to order from another category.
-          </p>
-        )}
-        {!closed && again.length > 0 && (
-          <button
-            type="button"
-            onClick={orderAgain}
-            className="min-h-[44px] w-full rounded-pill border border-mist px-md text-label font-semibold text-ink"
-          >
-            Order again · {again.length} {again.length === 1 ? 'line' : 'lines'} from{' '}
-            {formatDate(last!.deliveryDate)}
-          </button>
-        )}
-      </div>
-
-      {visible.length === 0 &&
-        (view === 'saved' && savedCount === 0 ? (
-          <EmptyState
-            title="No saved items yet"
-            description="Tap the star on an item to keep it here for next time."
-            action={
-              <button
-                type="button"
-                onClick={() => setView('all')}
-                className="text-label font-semibold text-slate"
-              >
-                Show all items
-              </button>
-            }
-          />
-        ) : (
-          <EmptyState title="No items match" description="Try another word or filter." />
-        ))}
-
-      <ul
-        className={`space-y-sm ${closed ? 'pointer-events-none opacity-50' : ''}`}
-        aria-disabled={closed}
-      >
-        {visible.map((c) => {
-          const starred = savedSet.has(c.id);
-          const locked = lockedType(c.type);
-          return (
-            <li key={c.id} className="flex items-center gap-xs rounded-card bg-surface p-md">
-              <button
-                type="button"
-                aria-label={starred ? `Remove ${c.name} from saved` : `Save ${c.name}`}
-                aria-pressed={starred}
-                onClick={() => toggleSaved(c)}
-                className={`-ml-sm flex size-11 shrink-0 items-center justify-center text-title ${starred ? 'text-warning' : 'text-mist'}`}
-              >
-                {starred ? '★' : '☆'}
-              </button>
-              <div className={`min-w-0 flex-1 ${locked ? 'opacity-50' : ''}`}>
-                <p className="break-words text-body font-semibold text-ink">{c.name}</p>
-                <p className="text-caption text-muted">
-                  {ITEM_TYPE_LABEL[c.type]} · {c.pack}
-                  {c.chilled ? ' · chilled' : ''}
-                </p>
-              </div>
-              <QtyStepper
-                name={c.name}
-                value={qty[c.id] ?? 0}
-                max={MAX_QTY}
-                disabled={closed || locked}
-                onChange={(n) => setItemQty(c.id, n)}
-              />
-            </li>
-          );
-        })}
-      </ul>
-
-      <div className="space-y-sm rounded-card bg-surface p-md">
-        <div className="flex items-center justify-between gap-sm">
-          <p className="text-title text-ink">Your order</p>
-          {picks.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setQty({})}
-              className="min-h-[36px] text-label font-semibold text-slate"
-            >
-              Clear all
-            </button>
+      {/* Phone: one column in the `order-*` sequence. Desktop: the catalogue left, the order right. */}
+      <div className={SPLIT}>
+        <div
+          className={`${SPLIT_COL} lg:sticky lg:top-8 lg:col-start-2 lg:row-start-1 lg:max-h-[calc(100dvh-4rem)] lg:overflow-y-auto`}
+        >
+          {placed && (
+            <div role="status" className="order-1 rounded-card bg-success-tint p-lg">
+              <p className="text-title text-ink">Order placed</p>
+              <p className="text-body text-muted">
+                For {formatDate(placed.deliveryDate)} · {placed.units} units · {placed.weightKg} kg
+              </p>
+            </div>
           )}
-        </div>
-        {picks.length === 0 ? (
-          <p className="text-label text-muted">Nothing picked yet.</p>
-        ) : (
-          <ul className="space-y-xs">
-            {picks.map((c) => (
-              <li key={c.id} className="flex items-center gap-sm">
-                <span className="min-w-0 flex-1 truncate text-body text-ink">{c.name}</span>
-                <span className="shrink-0 text-body font-semibold text-ink">× {qty[c.id]}</span>
+
+          {upcoming.map((o) => (
+            <details key={o.id} className="order-2 rounded-card bg-surface p-md">
+              <summary className="cursor-pointer text-body font-semibold text-ink">
+                Already ordered for {formatDate(o.deliveryDate)} · {o.units} units
+              </summary>
+              <ul className="mt-sm space-y-xs">
+                {o.lines.map((l, i) => (
+                  <li key={i} className="flex justify-between gap-sm text-label text-muted">
+                    <span className="min-w-0 truncate">
+                      {l.name} · {l.pack}
+                    </span>
+                    <span className="shrink-0 font-semibold text-ink">× {l.qty}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ))}
+
+          <div className="order-5 space-y-sm rounded-card bg-surface p-md">
+            <div className="flex items-center justify-between gap-sm">
+              <p className="text-title text-ink">Your order</p>
+              {picks.length > 0 && (
                 <button
                   type="button"
-                  aria-label={`Remove ${c.name}`}
-                  onClick={() => setItemQty(c.id, 0)}
-                  className="flex size-9 shrink-0 items-center justify-center text-muted"
+                  onClick={() => setQty({})}
+                  className="min-h-[36px] text-label font-semibold text-slate"
                 >
-                  <Icon name="x" size={16} />
+                  Clear all
                 </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="text-label text-muted">
-          {picks.length} {picks.length === 1 ? 'line' : 'lines'} · {units}{' '}
-          {units === 1 ? 'unit' : 'units'} · {Math.round(weight * 10) / 10} kg ·{' '}
-          {Math.round(volume * 1000) / 1000} m³
-        </p>
-        <Button className="w-full" disabled={closed || busy || picks.length === 0} onClick={place}>
-          {busy ? 'Placing…' : upcoming.length > 0 ? 'Place another order' : 'Place order'}
-        </Button>
-        {upcoming.length > 0 && picks.length > 0 && !closed && (
-          <p className="text-center text-caption text-muted">
-            This is sent as a separate order, on top of what is already placed.
-          </p>
-        )}
+              )}
+            </div>
+            {picks.length === 0 ? (
+              <p className="text-label text-muted">Nothing picked yet.</p>
+            ) : (
+              <ul className="space-y-xs">
+                {picks.map((c) => (
+                  <li key={c.id} className="flex items-center gap-sm">
+                    <span className="min-w-0 flex-1 truncate text-body text-ink">{c.name}</span>
+                    <span className="shrink-0 text-body font-semibold text-ink">× {qty[c.id]}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${c.name}`}
+                      onClick={() => setItemQty(c.id, 0)}
+                      className="flex size-9 shrink-0 items-center justify-center text-muted"
+                    >
+                      <Icon name="x" size={16} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-label text-muted">
+              {picks.length} {picks.length === 1 ? 'line' : 'lines'} · {units}{' '}
+              {units === 1 ? 'unit' : 'units'} · {Math.round(weight * 10) / 10} kg ·{' '}
+              {Math.round(volume * 1000) / 1000} m³
+            </p>
+            <Button
+              className="w-full"
+              disabled={closed || busy || picks.length === 0}
+              onClick={place}
+            >
+              {busy ? 'Placing…' : upcoming.length > 0 ? 'Place another order' : 'Place order'}
+            </Button>
+            {upcoming.length > 0 && picks.length > 0 && !closed && (
+              <p className="text-center text-caption text-muted">
+                This is sent as a separate order, on top of what is already placed.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className={`${SPLIT_COL} lg:col-start-1 lg:row-start-1`}>
+          <div className="order-3 space-y-sm">
+            <div className="flex min-h-[44px] items-center gap-sm rounded-input border border-mist bg-surface px-md">
+              <Icon name="search" size={18} className="shrink-0 text-muted" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search items"
+                aria-label="Search items"
+                className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none"
+              />
+            </div>
+            <div className="flex flex-wrap gap-xs">
+              <Chip active={view === 'saved'} onClick={() => setView('saved')}>
+                ★ Saved ({savedCount})
+              </Chip>
+              <Chip active={view === 'all'} onClick={() => setView('all')}>
+                All items ({catalogue.length})
+              </Chip>
+              {types.length > 1 &&
+                types.map((t) => (
+                  <Chip
+                    key={t}
+                    active={type === t}
+                    disabled={lockedType(t) && type !== t}
+                    onClick={() => setType(type === t ? 'all' : t)}
+                  >
+                    {ITEM_TYPE_LABEL[t]}
+                  </Chip>
+                ))}
+            </div>
+            {group !== null && (
+              <p className="text-label text-muted">
+                This order is {GROUP_LABEL[group]}. Place or clear it to order from another
+                category.
+              </p>
+            )}
+            {!closed && again.length > 0 && (
+              <button
+                type="button"
+                onClick={orderAgain}
+                className="min-h-[44px] w-full rounded-pill border border-mist px-md text-label font-semibold text-ink"
+              >
+                Order again · {again.length} {again.length === 1 ? 'line' : 'lines'} from{' '}
+                {formatDate(last!.deliveryDate)}
+              </button>
+            )}
+          </div>
+
+          <div className="order-4 space-y-md">
+            {visible.length === 0 &&
+              (view === 'saved' && savedCount === 0 ? (
+                <EmptyState
+                  title="No saved items yet"
+                  description="Tap the star on an item to keep it here for next time."
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setView('all')}
+                      className="text-label font-semibold text-slate"
+                    >
+                      Show all items
+                    </button>
+                  }
+                />
+              ) : (
+                <EmptyState title="No items match" description="Try another word or filter." />
+              ))}
+
+            <ul
+              className={`space-y-sm 2xl:grid 2xl:grid-cols-2 2xl:gap-sm 2xl:space-y-0 ${closed ? 'pointer-events-none opacity-50' : ''}`}
+              aria-disabled={closed}
+            >
+              {visible.map((c) => {
+                const starred = savedSet.has(c.id);
+                const locked = lockedType(c.type);
+                return (
+                  <li key={c.id} className="flex items-center gap-xs rounded-card bg-surface p-md">
+                    <button
+                      type="button"
+                      aria-label={starred ? `Remove ${c.name} from saved` : `Save ${c.name}`}
+                      aria-pressed={starred}
+                      onClick={() => toggleSaved(c)}
+                      className={`-ml-sm flex size-11 shrink-0 items-center justify-center text-title ${starred ? 'text-warning' : 'text-mist'}`}
+                    >
+                      {starred ? '★' : '☆'}
+                    </button>
+                    <div className={`min-w-0 flex-1 ${locked ? 'opacity-50' : ''}`}>
+                      <p className="break-words text-body font-semibold text-ink">{c.name}</p>
+                      <p className="text-caption text-muted">
+                        {ITEM_TYPE_LABEL[c.type]} · {c.pack}
+                        {c.chilled ? ' · chilled' : ''}
+                      </p>
+                    </div>
+                    <QtyStepper
+                      name={c.name}
+                      value={qty[c.id] ?? 0}
+                      max={MAX_QTY}
+                      disabled={closed || locked}
+                      onChange={(n) => setItemQty(c.id, n)}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
       </div>
       {toast && <Toast message={toast.message} tone={toast.tone} onClose={clearToast} />}
     </section>

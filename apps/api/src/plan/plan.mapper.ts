@@ -10,8 +10,11 @@ export const orderInclude = {
 } satisfies Prisma.OrderInclude;
 export type OrderRow = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 
+const personSelect = { select: { id: true, name: true } } as const;
+
 export const tripInclude = {
-  vehicle: true,
+  vehicle: { include: { driver: personSelect } },
+  assignedDriver: personSelect,
   district: true,
   extraDistricts: { orderBy: { name: 'asc' } },
   stops: { orderBy: { sequence: 'asc' }, include: { order: { include: orderInclude } } },

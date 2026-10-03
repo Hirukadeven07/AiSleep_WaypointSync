@@ -13,6 +13,8 @@ import {
   HandoffTimeline,
   IssueList,
   PageTitle,
+  SPLIT,
+  SPLIT_COL,
   formatDate,
   formatDuration,
   useServerMinutes,
@@ -42,103 +44,116 @@ export default function StoreHomePage() {
     <section className="space-y-md">
       <PageTitle eyebrow={data.brand} title={data.storeName} />
 
-      <div className="grid grid-cols-2 gap-sm">
-        <div className="rounded-card bg-surface p-md">
-          <p className="text-caption text-muted">Delivery window</p>
-          <p className="text-title text-ink">
-            {formatMinutes(data.windowOpenMin)}–{formatMinutes(data.windowCloseMin)}
-          </p>
+      {/* Phone: one column in the `order-*` sequence. Desktop: the delivery left, the rest right. */}
+      <div className={SPLIT}>
+        <div className={`${SPLIT_COL} lg:col-start-2 lg:row-start-1`}>
+          <div className="order-1 grid grid-cols-2 gap-sm">
+            <div className="rounded-card bg-surface p-md">
+              <p className="text-caption text-muted">Delivery window</p>
+              <p className="text-title text-ink">
+                {formatMinutes(data.windowOpenMin)}–{formatMinutes(data.windowCloseMin)}
+              </p>
+            </div>
+            <div
+              className={`rounded-card p-md ${open ? (left <= 60 ? 'bg-warning-tint' : 'bg-surface') : 'bg-border'}`}
+            >
+              <p className="text-caption text-muted">
+                Order cutoff {formatMinutes(data.cutoffMin)}
+              </p>
+              <p
+                className={`text-title ${open ? (left <= 60 ? 'text-warning' : 'text-ink') : 'text-muted'}`}
+              >
+                {open ? `${formatDuration(left)} left` : 'Ordering closed'}
+              </p>
+            </div>
+          </div>
+
+          {data.deferral && (
+            <Link href="/store/updates" className="order-2 block">
+              <DeferralCard order={data.deferral} />
+            </Link>
+          )}
+
+          <div className="order-5 flex items-center gap-md rounded-card bg-surface p-lg">
+            <div className="min-w-0 flex-1">
+              <p className="text-title text-ink">Next order</p>
+              <p className="text-label text-muted">
+                {data.nextOrder
+                  ? `${formatDate(data.nextOrder.deliveryDate)} · ${data.nextOrder.units} units · ${data.nextOrder.status}`
+                  : 'Nothing ordered for tomorrow yet.'}
+              </p>
+            </div>
+            {open && (
+              <Link
+                href="/store/order"
+                className="shrink-0 rounded-pill bg-olive px-md py-sm text-label font-semibold text-ink"
+              >
+                Order
+              </Link>
+            )}
+          </div>
+
+          {data.phones.length > 0 && (
+            <div className="order-6 space-y-sm rounded-card bg-surface p-lg">
+              <p className="text-title text-ink">Store phones</p>
+              <ul className="space-y-xs">
+                {data.phones.map((p) => (
+                  <li key={p.phoneNo}>
+                    <a
+                      href={`tel:${p.phoneNo}`}
+                      className="flex min-h-[44px] items-center gap-sm text-body text-ink"
+                    >
+                      <Icon name="phone" size={18} />
+                      <span className="flex-1 capitalize text-muted">{p.label}</span>
+                      <span className="font-semibold">{p.phoneNo}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
-        <div
-          className={`rounded-card p-md ${open ? (left <= 60 ? 'bg-warning-tint' : 'bg-surface') : 'bg-border'}`}
-        >
-          <p className="text-caption text-muted">Order cutoff {formatMinutes(data.cutoffMin)}</p>
-          <p
-            className={`text-title ${open ? (left <= 60 ? 'text-warning' : 'text-ink') : 'text-muted'}`}
-          >
-            {open ? `${formatDuration(left)} left` : 'Ordering closed'}
-          </p>
+
+        <div className={`${SPLIT_COL} lg:col-start-1 lg:row-start-1`}>
+          {canReceive && (
+            <Link
+              href="/store/receive"
+              className="order-3 flex items-center gap-md rounded-card bg-primary p-lg text-on-primary shadow-raised"
+            >
+              <Icon name="truck" />
+              <span className="flex-1">
+                <span className="block text-title">The driver is here</span>
+                <span className="block text-label opacity-80">
+                  Check the goods and confirm receipt
+                </span>
+              </span>
+              <span aria-hidden>›</span>
+            </Link>
+          )}
+
+          <div className="order-4 space-y-md rounded-card bg-surface p-lg">
+            <div className="flex items-center justify-between gap-sm">
+              <p className="text-title text-ink">Today&apos;s delivery</p>
+              {data.delivery && <StatusChip status={data.delivery.status} />}
+            </div>
+            {data.delivery ? (
+              <>
+                <p className="text-label text-muted">
+                  {data.delivery.plate}
+                  {data.delivery.driverName ? ` · ${data.delivery.driverName}` : ''} ·{' '}
+                  {data.delivery.lines.length} lines
+                </p>
+                <HandoffTimeline delivery={data.delivery} />
+                <IssueList delivery={data.delivery} />
+              </>
+            ) : (
+              <p className="text-body text-muted">
+                No delivery planned for {formatDate(data.today)}.
+              </p>
+            )}
+          </div>
         </div>
       </div>
-
-      {data.deferral && (
-        <Link href="/store/updates" className="block">
-          <DeferralCard order={data.deferral} />
-        </Link>
-      )}
-
-      {canReceive && (
-        <Link
-          href="/store/receive"
-          className="flex items-center gap-md rounded-card bg-primary p-lg text-on-primary shadow-raised"
-        >
-          <Icon name="truck" />
-          <span className="flex-1">
-            <span className="block text-title">The driver is here</span>
-            <span className="block text-label opacity-80">Check the goods and confirm receipt</span>
-          </span>
-          <span aria-hidden>›</span>
-        </Link>
-      )}
-
-      <div className="space-y-md rounded-card bg-surface p-lg">
-        <div className="flex items-center justify-between gap-sm">
-          <p className="text-title text-ink">Today&apos;s delivery</p>
-          {data.delivery && <StatusChip status={data.delivery.status} />}
-        </div>
-        {data.delivery ? (
-          <>
-            <p className="text-label text-muted">
-              {data.delivery.plate}
-              {data.delivery.driverName ? ` · ${data.delivery.driverName}` : ''} ·{' '}
-              {data.delivery.lines.length} lines
-            </p>
-            <HandoffTimeline delivery={data.delivery} />
-            <IssueList delivery={data.delivery} />
-          </>
-        ) : (
-          <p className="text-body text-muted">No delivery planned for {formatDate(data.today)}.</p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-md rounded-card bg-surface p-lg">
-        <div className="min-w-0 flex-1">
-          <p className="text-title text-ink">Next order</p>
-          <p className="text-label text-muted">
-            {data.nextOrder
-              ? `${formatDate(data.nextOrder.deliveryDate)} · ${data.nextOrder.units} units · ${data.nextOrder.status}`
-              : 'Nothing ordered for tomorrow yet.'}
-          </p>
-        </div>
-        {open && (
-          <Link
-            href="/store/order"
-            className="shrink-0 rounded-pill bg-olive px-md py-sm text-label font-semibold text-ink"
-          >
-            Order
-          </Link>
-        )}
-      </div>
-
-      {data.phones.length > 0 && (
-        <div className="space-y-sm rounded-card bg-surface p-lg">
-          <p className="text-title text-ink">Store phones</p>
-          <ul className="space-y-xs">
-            {data.phones.map((p) => (
-              <li key={p.phoneNo}>
-                <a
-                  href={`tel:${p.phoneNo}`}
-                  className="flex min-h-[44px] items-center gap-sm text-body text-ink"
-                >
-                  <Icon name="phone" size={18} />
-                  <span className="flex-1 capitalize text-muted">{p.label}</span>
-                  <span className="font-semibold">{p.phoneNo}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </section>
   );
 }

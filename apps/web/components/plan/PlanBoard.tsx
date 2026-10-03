@@ -86,6 +86,7 @@ export function PlanBoard() {
         {view === 'list' ? (
           <TripList
             trips={plan.trips}
+            drivers={plan.drivers}
             edit={edit}
             onPublish={(tripId) => void publish(tripId)}
             className="min-w-0 lg:flex-1"

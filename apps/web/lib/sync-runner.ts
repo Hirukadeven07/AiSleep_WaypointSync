@@ -1,6 +1,7 @@
 'use client';
 import type { SyncPushResponse } from '@waypoint/contracts';
 import { getPendingActions, markActionSynced, purgeSynced, toSyncEvent } from './outbox';
+import { recordRejected } from './sync-rejected';
 
 const SYNC_ENDPOINT = '/api/sync';
 /** POST /api/sync takes at most 100 events per call. */
@@ -43,6 +44,18 @@ async function push(): Promise<number> {
         ...(body.stale ?? []),
       ]);
       const done = pending.filter((a) => answered.has(a.clientId));
+      // Refused actions leave the queue, so keep them where the driver can see why.
+      const refused = new Set(body.rejected);
+      recordRejected(
+        pending
+          .filter((a) => refused.has(a.clientId))
+          .map((a) => ({
+            clientId: a.clientId,
+            type: a.type,
+            reason: body.rejectedReasons?.[a.clientId] ?? 'UNKNOWN',
+            at: new Date().toISOString(),
+          })),
+      );
       for (const a of done) await markActionSynced(a.clientId);
       sent += done.length;
       // Nothing answered: stop rather than resend the same batch forever.

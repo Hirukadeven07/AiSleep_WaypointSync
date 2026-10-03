@@ -60,6 +60,8 @@ export interface LiveTrip {
   departedAt: string | null;
   /** Open SOS alerts from this trip's driver. */
   openSos: number;
+  /** Set while the driver is on a break (ISO start). */
+  onBreakSince: string | null;
   /** When the vehicle got back to the depot (completed trips). */
   backAt: string | null;
   bay: string | null;

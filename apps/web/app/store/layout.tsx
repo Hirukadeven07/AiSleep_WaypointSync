@@ -13,6 +13,7 @@ import { PhoneTopRow } from '@/components/shell/PhoneTopRow';
 import { Icon } from '@/components/ui/Icon';
 import { Toast } from '@/components/ui/Toast';
 import { formatDuration, useServerMinutes } from '@/components/store/parts';
+import { StoreSidebar } from '@/components/store/StoreSidebar';
 import {
   STORE_REFRESH,
   isMuted,
@@ -38,7 +39,10 @@ export default function StoreLayout({ children }: { children: ReactNode }) {
   return <RoleGate role="store">{(me) => <StoreShell me={me}>{children}</StoreShell>}</RoleGate>;
 }
 
-/** The phone shell plus what every store screen shares: the unread count, alerts and the cutoff reminder. */
+/**
+ * The store shell plus what every store screen shares: the unread count, alerts and the cutoff
+ * reminder. Phone column with a tab bar below 1024px; sidebar layout from 1024px, as the driver app.
+ */
 function StoreShell({ me, children }: { me: Me; children: ReactNode }) {
   const pathname = usePathname();
   const [settings] = useStoreSettings();
@@ -105,46 +109,54 @@ function StoreShell({ me, children }: { me: Me; children: ReactNode }) {
   const tabs = TABS.map((t) => (t.href === '/store/updates' ? { ...t, badge: unread } : t));
 
   return (
-    <PhoneColumn>
-      <div className="relative">
-        <PhoneTopRow me={me} />
-        <Link
-          href="/store/settings"
-          aria-label="Settings"
-          className="absolute right-5 top-1.5 flex size-9 items-center justify-center rounded-full bg-sand text-primary"
-        >
-          <Icon name="settings" size={16} />
-        </Link>
-      </div>
-      <main className="flex-1 px-5 pb-[130px] pt-2">
-        {showReminder && left !== undefined && (
-          <div className="mb-md flex items-center gap-sm rounded-card bg-warning-tint p-md">
-            <Link href="/store/order" className="min-w-0 flex-1">
-              <span className="block text-body font-semibold text-ink">
-                Ordering closes in {formatDuration(left)}
-              </span>
-              <span className="block text-label text-muted">
-                Nothing ordered for tomorrow yet. Order now ›
-              </span>
-            </Link>
-            <button
-              type="button"
-              aria-label="Dismiss reminder"
-              onClick={() => {
-                if (!today) return;
-                writeLocal(REMINDER_DISMISSED, today);
-                setDismissedDay(today);
-              }}
-              className="flex size-11 shrink-0 items-center justify-center text-muted"
-            >
-              <Icon name="x" size={18} />
-            </button>
+    <div className="lg:flex lg:min-h-dvh">
+      <StoreSidebar me={me} tabs={tabs} storeName={home.data?.storeName} />
+      <PhoneColumn className="lg:relative lg:mx-0 lg:min-w-0 lg:max-w-none lg:flex-1">
+        <div className="relative lg:hidden">
+          <PhoneTopRow me={me} />
+          <Link
+            href="/store/settings"
+            aria-label="Settings"
+            className="absolute right-5 top-1.5 flex size-9 items-center justify-center rounded-full bg-sand text-primary"
+          >
+            <Icon name="settings" size={16} />
+          </Link>
+        </div>
+        <main className="flex-1 px-5 pb-[130px] pt-2 lg:px-10 lg:py-8">
+          {/* Wide screens stop growing here, so lines stay readable. */}
+          <div className="lg:max-w-[1160px]">
+            {showReminder && left !== undefined && (
+              <div className="mb-md flex items-center gap-sm rounded-card bg-warning-tint p-md">
+                <Link href="/store/order" className="min-w-0 flex-1">
+                  <span className="block text-body font-semibold text-ink">
+                    Ordering closes in {formatDuration(left)}
+                  </span>
+                  <span className="block text-label text-muted">
+                    Nothing ordered for tomorrow yet. Order now ›
+                  </span>
+                </Link>
+                <button
+                  type="button"
+                  aria-label="Dismiss reminder"
+                  onClick={() => {
+                    if (!today) return;
+                    writeLocal(REMINDER_DISMISSED, today);
+                    setDismissedDay(today);
+                  }}
+                  className="flex size-11 shrink-0 items-center justify-center text-muted"
+                >
+                  <Icon name="x" size={18} />
+                </button>
+              </div>
+            )}
+            {children}
           </div>
-        )}
-        {children}
-      </main>
-      <PhoneTabBar tabs={tabs} />
+        </main>
+      </PhoneColumn>
+      <div className="lg:hidden">
+        <PhoneTabBar tabs={tabs} />
+      </div>
       {toast && <Toast message={toast} onClose={clearToast} durationMs={6000} />}
-    </PhoneColumn>
+    </div>
   );
 }

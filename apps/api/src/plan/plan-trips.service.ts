@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   CreateTripRequest,
   Me,
@@ -14,9 +14,12 @@ import { DomainError, evaluateNewTrip, formatMinutes, type Depot } from '@waypoi
 import { backAtLabel } from '../common/back-at';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { tripDriverId } from '../driver/driver-trips';
+import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { PlanEditService } from './plan-edit.service';
+import { dayLabel } from './plan-labels';
 import { DEPART_MIN, PlanService } from './plan.service';
-import { orderInclude, toVehicle, tripInclude } from './plan.mapper';
+import { isAtDepot, orderInclude, toVehicle, tripInclude } from './plan.mapper';
 
 const dateOnly = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const kg = (n: number) => n.toLocaleString('en-US');
@@ -31,6 +34,7 @@ export class PlanTripsService {
     private readonly edit: PlanEditService,
     private readonly plan: PlanService,
     private readonly clock: ClockService,
+    @Inject(NOTIFIER) private readonly notifier: Notifier,
   ) {}
 
   private serviceDate(date?: string) {
@@ -155,6 +159,83 @@ export class PlanTripsService {
       await tx.trip.delete({ where: { id: trip.id } });
     });
     return { tripId: trip.id, ordersReturned: orderIds.length };
+  }
+
+  /**
+   * Put a driver on a trip, or (`null`) go back to the vehicle's registered driver. Allowed until
+   * the trip leaves the depot. A sent trip tells the new driver, and the one taken off it.
+   */
+  async assignDriver(me: Me, tripId: string, driverId: string | null): Promise<PlanTrip> {
+    const trip = await this.edit.loadTrip(me, tripId);
+    const label = `${trip.vehicle.numberPlate ?? trip.vehicleId} · Trip ${trip.tripNumber}`;
+    if (!isAtDepot(trip.status)) {
+      throw new DomainError(
+        'PLAN_LOCKED',
+        `${label} has left the depot; its driver cannot change.`,
+      );
+    }
+    if (driverId) {
+      const driver = await this.prisma.user.findFirst({
+        where: { id: driverId, role: 'driver' },
+        include: { driverProfile: true },
+      });
+      if (!driver) throw new NotFoundException('Driver not found');
+      const profile = driver.driverProfile;
+      const left = profile?.leavingDate && profile.leavingDate <= trip.serviceDate;
+      if (driver.depotId !== trip.depotId || profile?.isActive === false || left) {
+        throw new DomainError(
+          'DRIVER_UNAVAILABLE',
+          `${driver.name} is not an active driver at this depot.`,
+        );
+      }
+      // One driver per run: the same driver cannot drive another truck's Trip 1 at the same time.
+      const clash = await this.prisma.trip.findFirst({
+        where: {
+          id: { not: trip.id },
+          serviceDate: trip.serviceDate,
+          tripNumber: trip.tripNumber,
+          status: { notIn: ['completed', 'breakdown'] },
+          OR: [{ assignedDriverId: driverId }, { assignedDriverId: null, vehicle: { driverId } }],
+        },
+        include: { vehicle: true },
+      });
+      if (clash) {
+        throw new DomainError(
+          'DRIVER_UNAVAILABLE',
+          `${driver.name} already drives ${clash.vehicle.numberPlate ?? clash.vehicleId} · Trip ${clash.tripNumber}.`,
+        );
+      }
+    }
+
+    const before = tripDriverId(trip);
+    await this.prisma.trip.update({
+      where: { id: trip.id },
+      data: { assignedDriverId: driverId },
+    });
+    const after = driverId ?? trip.vehicle.driverId;
+
+    if (trip.status !== 'planning' && before !== after) {
+      const day = dayLabel(trip.serviceDate);
+      if (after) {
+        await this.notifier.notify({
+          userId: after,
+          title: `You are driving ${label}`,
+          body: `Dispatch put you on ${label} for ${day}, ${trip.stops.length} ${trip.stops.length === 1 ? 'stop' : 'stops'}.`,
+          link: '/drive',
+        });
+      }
+      if (before) {
+        await this.notifier.notify({
+          userId: before,
+          title: `${label} moved to another driver`,
+          body: `Dispatch gave ${label} for ${day} to another driver.`,
+          link: '/drive',
+        });
+      }
+    }
+
+    const lookup = await this.plan.loadLookup();
+    return this.edit.tripView(me, trip.id, lookup, trip.depotId as Depot);
   }
 
   /** The depot's stores in a district, optionally of one brand, A to Z. */
