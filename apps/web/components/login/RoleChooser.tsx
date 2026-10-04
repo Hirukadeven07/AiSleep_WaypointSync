@@ -85,7 +85,7 @@ export function RoleChooser() {
             <Link
               key={w.slug}
               href={`/login/${w.slug}`}
-              className={`flex min-h-[260px] flex-col rounded-card p-7 ${w.tint}`}
+              className={`flex min-h-[260px] min-w-0 flex-col rounded-card p-7 ${w.tint}`}
             >
               <div className={`flex items-center gap-3 ${w.ink}`}>
                 <span className="text-[14px] font-semibold">{w.index}</span>
@@ -97,7 +97,10 @@ export function RoleChooser() {
               </div>
               <div className="flex-1" />
               <div className="flex flex-col items-start gap-[10px]">
-                <p className="text-[34px] font-medium tracking-[-0.02em] text-ink sm:text-[40px]">{w.title}</p>
+                {/* Steps down at mid widths so "Store manager" stays inside a half-width card. */}
+                <p className="max-w-full text-[28px] font-medium tracking-[-0.02em] text-ink [overflow-wrap:anywhere] sm:text-[32px] xl:text-[40px]">
+                  {w.title}
+                </p>
                 <p className="text-[15px] leading-[1.5] text-slate">{w.blurb}</p>
                 <span className="flex items-center gap-[6px] rounded-pill bg-surface py-[6px] pl-[10px] pr-3 text-[13px] font-semibold text-slate">
                   <Icon name={DEVICE_ICON[w.slug] ?? 'phone'} size={16} />

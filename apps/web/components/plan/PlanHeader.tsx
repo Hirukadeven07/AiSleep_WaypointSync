@@ -161,7 +161,8 @@ export function SummaryStrip({
 }) {
   const used = Math.min(summary.capacityUsedPct, 100);
   return (
-    <section className="flex items-center gap-6 rounded-[20px] bg-surface px-[18px] py-3">
+    // Wraps onto a second line on narrower screens instead of widening the page.
+    <section className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-[20px] bg-surface px-[18px] py-3">
       <Stat value={String(summary.orderCount)} label="orders" />
       <Stat value={String(summary.waitingSinceYesterday)} label="waiting since yesterday" warn />
       <p className="flex items-center gap-2 whitespace-nowrap">
