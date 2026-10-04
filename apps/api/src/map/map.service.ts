@@ -156,7 +156,7 @@ export class MapService {
     const day = dateOnly(date);
     const now = this.clock.now();
 
-    const [districts, depots, stores, rows, events, pings, pingRows] = await Promise.all([
+    const [districts, depots, stores, rows, events, pings] = await Promise.all([
       this.districts(),
       this.prisma.depot.findMany({ orderBy: { name: 'asc' } }),
       this.storeMarkers(depotId, date),
@@ -183,11 +183,20 @@ export class MapService {
         _max: { receivedAt: true },
         where: { trip: { depotId, serviceDate: day } },
       }),
-      this.prisma.locationPing.findMany({
-        where: { trip: { depotId, serviceDate: day } },
-        select: { tripId: true, lat: true, lng: true, recordedAt: true },
-      }),
     ]);
+    // Only each trip's newest ping places the truck. Phones ping every 10 s, so read that one row
+    // per trip through the (tripId, recordedAt) index rather than the whole day's pings.
+    const pingRows = (
+      await Promise.all(
+        rows.map((trip) =>
+          this.prisma.locationPing.findFirst({
+            where: { tripId: trip.id },
+            orderBy: { recordedAt: 'desc' },
+            select: { tripId: true, lat: true, lng: true, recordedAt: true },
+          }),
+        ),
+      )
+    ).filter((ping) => ping !== null);
 
     const lastSeen = new Map<string, Date>();
     for (const event of events) {
@@ -198,11 +207,7 @@ export class MapService {
       const prev = lastSeen.get(ping.tripId);
       if (seen && (!prev || seen > prev)) lastSeen.set(ping.tripId, seen);
     }
-    const latestPing = new Map<string, { lat: number; lng: number; recordedAt: Date }>();
-    for (const ping of pingRows) {
-      const prev = latestPing.get(ping.tripId);
-      if (!prev || ping.recordedAt > prev.recordedAt) latestPing.set(ping.tripId, ping);
-    }
+    const latestPing = new Map(pingRows.map((ping) => [ping.tripId, ping]));
 
     const trips: LocateTrip[] = [];
     let firstDepartMin: number | null = null;

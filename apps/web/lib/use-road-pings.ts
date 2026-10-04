@@ -4,10 +4,10 @@ import type { TripSummary } from './driver-cache';
 import { enqueueAction } from './outbox';
 
 /** How often the phone records its position while the trip is on the road. */
-export const ROAD_PING_MS = 2 * 60_000;
+export const ROAD_PING_MS = 10_000;
 
 /**
- * While the active trip is on the road, queue the phone's position every two minutes as a
+ * While the active trip is on the road, queue the phone's position every 10 seconds as a
  * LOCATION_PING. Pings go through the outbox like every other action, so a stretch with no
  * signal fills in on the dispatch board once the phone reconnects.
  */
@@ -38,7 +38,8 @@ export function useRoadPings(trip: TripSummary | null, enabled: boolean) {
         () => {
           /* no fix or location blocked: try again next time */
         },
-        { enableHighAccuracy: false, maximumAge: 60_000, timeout: 30_000 },
+        // A cached fix may be no older than one interval, or the truck would not move between pings.
+        { enableHighAccuracy: false, maximumAge: ROAD_PING_MS, timeout: ROAD_PING_MS },
       );
     ping();
     const timer = setInterval(ping, ROAD_PING_MS);
