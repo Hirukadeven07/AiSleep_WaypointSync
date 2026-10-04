@@ -1,160 +1,1306 @@
 # Data model
 
-**Source of truth:** [apps/api/prisma/schema.prisma](../apps/api/prisma/schema.prisma).  
-**Picture:** [waypoint-schema.drawio](waypoint-schema.drawio) and [waypoint-schema1.drawio](waypoint-schema1.drawio). Open either in Draw.io — Prisma has no ERD plugin. Field names follow `schema.prisma`.
+## 1. Overview and system scope
 
-`Store` is the running-app name for an **outlet**. Login people are `User` rows (`role` = dispatcher / store / loader / driver). `Driver`, `Loader`, and `Dispatcher` are 1:1 profile tables on that user. Vehicle assignment is `Vehicle.driverId` → `User`, not a column on `Driver`.
+### High-level purpose
 
-Photos are **not** BLOBs. `photoKey` is a MinIO object name on `LoadFlag`, `FieldFlag`, and `LoaderFlag`. The storekeeper signature is `StoreReceipt.signaturePhotoKey`.
+Waypoint Sync is a delivery planning web app for two depots (Peliyagoda and Kandy) that supply a chain of Fresh, Style and Tech stores. Dispatchers build and publish each day's trips, loaders load the trucks, drivers deliver (often with no signal), and store managers order, track and receive the goods. The database is the single source of truth for all four roles. It holds the reference data the planner needs, every order and trip with its live status, the dock and delivery paperwork, and an audit trail of what each driver's phone reported.
 
-`Session` is created at login only. Do not seed it.
+### Database architecture
+
+| | |
+| --- | --- |
+| Database | **PostgreSQL 16** (Docker image `postgres:16`; a managed Postgres in the Railway deployment) |
+| Access layer | **Prisma 5** ORM from the NestJS API. The schema is [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma), changed only through migrations in [`apps/api/prisma/migrations`](../apps/api/prisma/migrations) |
+| Size of the model | 40 tables + 1 join table, 24 enums, 2 check constraints, 62 foreign keys |
+| Files and photos | Not stored in the database. Photos and signatures go to **MinIO** (S3-compatible); rows keep only the object key |
+| Time | Timestamps are `TIMESTAMP(3)` in UTC; business dates (`DATE`) are Asia/Colombo days |
+| Who connects | Only the API. Browsers and phones never talk to the database directly |
+
+Full column-level detail is also in [database-structure.md](database-structure.md). Draw.io diagrams: [waypoint-schema.drawio](waypoint-schema.drawio), [waypoint-schema1.drawio](waypoint-schema1.drawio).
 
 ---
 
-## How the pieces fit
+## 2. Conceptual model
 
+### Visual diagram
+
+The core of the model is one chain: **Store → Order → TripStop → Trip → Vehicle**, with the depot owning both ends.
+
+```mermaid
+erDiagram
+  Depot ||--o{ Store : supplies
+  Depot ||--o{ Vehicle : owns
+  Depot ||--o{ Trip : runs
+  Depot |o--o{ District : serves
+  District ||--o{ Store : contains
+  Store ||--o{ Order : places
+  Order ||--|{ OrderLine : "is made of"
+  Item |o--o{ OrderLine : "catalogue item"
+  Vehicle ||--o{ Trip : drives
+  Trip ||--o{ TripStop : visits
+  Order ||--o| TripStop : "delivered as"
+  TripStop ||--o| StoreReceipt : "signed off by"
+  Trip ||--o| LoadSession : "loaded in"
+  Trip ||--o| LoadingJob : "handed over as"
+  Order ||--o{ DeliveryNote : "picked as"
+  User ||--o| Driver : profile
+  User ||--o| Loader : profile
+  User ||--o| Dispatcher : profile
+  User |o--o| Vehicle : "drives"
+  Store ||--o{ User : "managed by"
+  User ||--o{ DriverEvent : "phone reports"
+  Trip ||--o{ LocationPing : "GPS trail"
 ```
-Depot → District → Store (outlet) → Order → OrderLine → Item
-                 ↘ User (outlet manager, loginId = store.id)
-Depot → Vehicle → Trip → TripStop (one order) → StoreReceipt
-                 ↘ LoadSession (live dock)    → LoadFlag
-                 ↘ LoadingJob (dispatcher handoff)
-Order → DeliveryNote (versioned) → DeliveryNoteLine → DeliveryNotePick → InventoryBatch
-```
 
-`ServiceAllowance` has **no foreign key**. The planner looks up `minutes` by `Store.brand` + `Store.dockType`.
+More detailed diagrams of each area are in [database-structure.md](database-structure.md#relationship-diagrams).
+
+### Key entity definitions
+
+| Entity | Business role |
+| --- | --- |
+| **Depot** | A distribution centre. Owns its vehicles, trips, staff and the stores it supplies. Two exist: `depo1` Peliyagoda, `depo2` Kandy |
+| **District** | A delivery area (Colombo, Kandy…), with the travel times the planner uses. Keyed by its name |
+| **Store** | A retail **outlet** of one brand, with its delivery window, dock type and location. ("Store" in code, "Outlet" in the team ERD) |
+| **Item** | A catalogue product (`F-MILK`…), chilled or ambient, with its pack size |
+| **Order** | One store's delivery for one day, with its total weight and volume and its status (waiting → planned → delivered) |
+| **OrderLine** | One item and quantity on an order |
+| **Vehicle** | A truck or van with weight, volume and fuel limits, its depot and its own driver |
+| **Trip** | One vehicle's run on one day (trip 1 or 2) for one brand and district; carries the `planVersion` that changes when a sent plan is edited |
+| **TripStop** | One order on a trip, in delivery order, with arrival, store confirmation and driver acknowledgement times |
+| **User** | Anyone who signs in, with a role: dispatcher, store, loader or driver. `Driver`, `Loader` and `Dispatcher` add HR details |
+| **LoadSession / LoadingJob** | The live dock checklist of a truck, and the dispatcher's handoff of that truck to the loaders |
+| **DeliveryNote** | The versioned pick list for an order: which items, from which stock batch, confirmed by which loader |
+| **StoreReceipt / FieldFlag** | The store's sign-off of a delivery, and any item it reports missing or damaged |
+| **DriverEvent / LocationPing** | Everything a driver's phone synced (arrivals, SOS, fuel, breaks) and its GPS trail |
+| **Incident / DriverIncident** | Problems on a trip (breakdown, delay, SOS) and how dispatch handled them |
+| **Notification** | An in-app notice for one user |
 
 ---
 
-## Tables (40)
+## 3. Physical data schema (tables and attributes)
 
-### Lookups (CSV / seed)
+How to read the tables:
 
-| Table | Role |
-| --- | --- |
-| `Depot` | Peliyagoda, Kandy. Parent of stores, vehicles, users, trips. `dockPasswordHash` is the shared dock-tablet password (argon2). |
-| `District` | PK is `name`. Optional `depotId`. Travel fields (`depotToDistrictMin`, `interStopMin`, km) used in trip minutes. |
-| `ServiceAllowance` | Unique `(brand, dockType)` → `minutes`. |
-| `CalendarDay` | PK is the calendar date. Operating / monsoon / payday flags. |
-| `TrafficSpeed` | Hourly speed index by district name. No FK. |
-| `RoadCondition` | Daily disruption by district name. No FK. |
-| `Item` | Catalogue. `id` is the catalogue code (`F-MILK`, …). Brand is on `Store` and `Order`. `type` is the booklet class: `chilled_food`, `fresh`, `style`, `tech`. |
-| `InventoryBatch` | FEFO stock for an item. |
+- **Data type** is the PostgreSQL type. Enums are PostgreSQL enum types; their allowed values are shown as `CHECK (enum: …)`.
+- **Key type**: `PK` primary key, `FK → Table(column)` foreign key, `UNIQUE`. *Composite* means the key spans several columns (listed under the table).
+- **On delete** shows what happens to this row when the referenced row is deleted. `RESTRICT` blocks the delete.
+- Examples come from the data dump of 4 Oct 2026. Password, PIN and session values are hidden.
 
-### Login and people
+### 3.1 Reference data
 
-| Table | Role |
-| --- | --- |
-| `User` | Login account. Unique `loginId`. `role` picks the home screen. `storeId` for outlet managers. `depotId` for depot staff. `passwordHash` or `pinHash`. Optional `notificationPrefs` JSON. Phone numbers live on `DriverPhone`, `LoaderPhone`, `DispatcherPhone`, and `OutletPhone`. |
-| `Session` | Cookie token. `userId` + `expiresAt`. Cascades off `User`. |
-| `Notification` | In-app notice for one user. |
-| `Driver` | 1:1 `userId`. License, `licenseExpiry`, NIC, address, `isActive`. |
-| `DriverPhone` | Driver numbers. PK is `phoneNumber`. |
-| `Loader` | 1:1 `userId`. Shift morning / night. Optional address. |
-| `LoaderPhone` | Loader numbers. PK is `phoneNumber`. |
-| `Dispatcher` | 1:1 `userId`. Optional email and address. Assigns `LoadingJob`, reviews `LoaderFlag`. |
-| `DispatcherPhone` | Dispatcher numbers. PK is `phoneNumber`. |
+#### Table: `Depot`
 
-**Outlet manager rule:** one `User` with `role = store` per `Store`. Login id is the outlet id (`OUT001`, …). Password is the store secret. `sunil` is an extra demo login on the same home store.
+**Description:** One row per distribution centre (Peliyagoda, Kandy), with contact details and the hashed dock-tablet password.
 
-### Outlet, order, trip
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL | Unique identifier. e.g. `depo1` |
+| `name` | TEXT | — | NOT NULL | Depot name (Peliyagoda, Kandy). e.g. `Peliyagoda` |
+| `telephone` | TEXT | — | NULL | Depot phone. e.g. `011 293 9100` |
+| `email` | TEXT | — | NULL | Email address. e.g. `peliyagoda@waypoint.lk` |
+| `address` | TEXT | — | NULL | Postal address. e.g. `148 Negombo Road, Peliyagoda` |
+| `lat` | DOUBLE PRECISION | — | NULL | Latitude. e.g. `6.9678` |
+| `lng` | DOUBLE PRECISION | — | NULL | Longitude. e.g. `79.8832` |
+| `dockPasswordHash` | TEXT | — | NULL | argon2 hash of the depot's shared dock password (6 digits on the dock keypad). Null until set |
 
-| Table | Role |
-| --- | --- |
-| `Store` | Outlet. `id` from `outlets.csv`. Brand, district, depot, dock, windows, address, email, lat/lng. `daysSinceLastServed` is days since the latest served trip. Outlet numbers are `OutletPhone` rows. |
-| `OutletPhone` | Shop / manager / warehouse numbers. `phoneNo` is not unique — the same number can sit on one store twice or on two stores. |
-| `StoreSavedItem` | Catalogue items a manager starred for that outlet. Composite PK `(storeId, itemId)`. |
-| `Order` | One delivery for one store on one date. Status is `waiting`, `planned`, `deferred`, `delivered`, `partial`, or `cancelled`. Optional `urgent`, `stockLevel`, `cancelledAt`, `cancelledById`. Optional `TripStop`. |
-| `OrderLine` | Named qty + optional `itemId`. Cascades off `Order`. |
-| `Vehicle` | Caps, fuel, `depotId`, unique `numberPlate`. Optional unique `driverId`. Out of service stores `outOfServiceReason` (required by the app) and optional `returnDate` (date and time). `lastServiceAt` is the last service timestamp. |
-| `Trip` | One vehicle, one depot, one brand, one main district, one `serviceDate`. Extra districts may be added beside the main one. `tripNumber` is 1 (morning) or 2 (afternoon). |
-| `TripStop` | One order on a trip. Unique `orderId`. Unique `(tripId, sequence)`. |
-| `RouteLeg` | Planned/actual travel between points. Unique `(tripId, seq)`. |
-| `LocationPing` | GPS trail. Unique `clientUuid` so phone retries do not duplicate. |
+#### Table: `District`
 
-### Dock (two layers)
+**Description:** Delivery areas and the travel times the planner uses. The district name is the primary key.
 
-| Table | Role |
-| --- | --- |
-| `LoadSession` | **Live** dock. 1:1 `tripId`. `ackedPlanVersion` + `ackedStopIds` power the plan-change lock. |
-| `LoadFlag` | Live missing / damaged / wrong_quantity on a stop (optional order line). |
-| `LoadingJob` | Dispatcher → loader handoff. 1:1 `tripId`. Status assigned → picking → loaded → handed_over. |
-| `DeliveryNote` | Versioned pick list. Composite PK `(dnId, versionAt)`. Current version has `validTo = null`. |
-| `DeliveryNoteLine` | Confirmed qty per item on that version. |
-| `DeliveryNotePick` | FEFO qty from a batch. |
-| `DeliveryNoteLoader` | Who picked / confirmed. Unique `(dnId, versionAt, loaderId)`. |
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `name` | TEXT | PK | NOT NULL | District name, also the primary key. e.g. `Kandy` |
+| `depotId` | TEXT | FK → Depot(id) | NULL, ON DELETE SET NULL | References Depot(id). e.g. `depo2` |
+| `served` | BOOLEAN | — | NOT NULL, DEFAULT true | Whether the depots deliver here. e.g. `true` |
+| `roadClass` | TEXT | — | NULL | e.g. `urban` |
+| `freeFlowKmh` | DOUBLE PRECISION | — | NULL | e.g. `30` |
+| `depotToDistrictKm` | DOUBLE PRECISION | — | NULL | e.g. `8` |
+| `depotToDistrictMin` | INTEGER | — | NULL | Minutes from the depot to the district. e.g. `16` |
+| `interStopKm` | DOUBLE PRECISION | — | NULL | e.g. `3` |
+| `interStopMin` | INTEGER | — | NULL | Minutes between two stops in the district. e.g. `6` |
 
-### Receipt, flags, incidents
+#### Table: `ServiceAllowance`
 
-| Table | Role |
-| --- | --- |
-| `StoreReceipt` | 1:1 `stopId`. `lineResults` JSON + signature keys. Signed by a `User`. |
-| `FieldFlag` | Raised by the **outlet**, not the driver. Driver only sets `driverDecision`. `resolveStatus` stays false until a replacement of that item is ordered, or the flag is marked solved. |
-| `LoaderFlag` | Dock issue on a DN version. Dispatcher `validationStatus`. |
-| `DriverEvent` | Phone sync audit. Unique `clientId`. Types (`DRIVER_EVENT_TYPES` in contracts): SOS_ALERT, SOS_CLEARED, ARRIVED, ACKNOWLEDGEMENT, ROAD_ISSUE, FUEL_READING, BREAK_START, BREAK_END, LOCATION_PING. |
-| `Incident` | Legacy dispatcher ticket on a trip (`breakdown` / `delay` / …). Not the same as `DriverIncident`. |
-| `DriverIncident` | SOS / on-road incident from the driver profile. Optional reassigned trip. |
+**Description:** Unloading minutes for each brand and dock type, looked up by value when timing a trip.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuqj60lk0000128gw1yqbr2i` |
+| `brand` | "Brand" (enum) | UNIQUE (composite) | NOT NULL, CHECK (enum: Fresh \| Style \| Tech) | Retail brand. e.g. `Fresh` |
+| `dockType` | "DockType" (enum) | UNIQUE (composite) | NOT NULL, CHECK (enum: rear_dock \| street \| mall_bay) | e.g. `rear_dock` |
+| `minutes` | INTEGER | — | NOT NULL | Unloading minutes for a brand at a dock type. e.g. `15` |
+
+- Unique `(brand, dockType)`
+
+#### Table: `CalendarDay`
+
+**Description:** One row per calendar day: weekday, ISO week, paydays, festivals, holidays, monsoon, and whether deliveries run.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | DATE | PK | NOT NULL | The calendar date. e.g. `2024-01-01` |
+| `dow` | INTEGER | — | NOT NULL | e.g. `0` |
+| `isWeekend` | BOOLEAN | — | NOT NULL | e.g. `false` |
+| `isoYear` | INTEGER | — | NOT NULL | e.g. `2024` |
+| `isoWeek` | INTEGER | — | NOT NULL | e.g. `1` |
+| `isPayday` | BOOLEAN | — | NOT NULL | e.g. `false` |
+| `festival` | TEXT | — | NULL | e.g. `thai_pongal` |
+| `festivalRamp` | DOUBLE PRECISION | — | NOT NULL, DEFAULT 0 | 0–1 build-up to a festival. e.g. `0` |
+| `isHoliday` | BOOLEAN | — | NOT NULL | e.g. `false` |
+| `monsoon` | BOOLEAN | — | NOT NULL | e.g. `false` |
+| `isOperating` | BOOLEAN | — | NOT NULL | Whether deliveries run that day. e.g. `true` |
+
+#### Table: `TrafficSpeed`
+
+**Description:** Hourly road-speed index per district from the competition CSV. The raw row is kept as JSON.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppysr9007cahsw44d1hxr8` |
+| `districtName` | TEXT | — | NOT NULL | District name (text, no FK). e.g. `Colombo` |
+| `hour` | INTEGER | — | NULL | e.g. `0` |
+| `monsoon` | BOOLEAN | — | NULL | e.g. `false` |
+| `speedIndex` | DOUBLE PRECISION | — | NULL | Relative road speed for that hour. e.g. `94` |
+| `raw` | JSONB | — | NOT NULL | Original CSV row, kept for audit. e.g. `{"hour": "0", "monsoon": "0", "dist…` |
+
+#### Table: `RoadCondition`
+
+**Description:** Daily road-disruption index per district from the competition CSV. The raw row is kept as JSON.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppysxs00ncahsw2r8bv37d` |
+| `date` | DATE | — | NOT NULL | e.g. `2024-01-01` |
+| `districtName` | TEXT | — | NOT NULL | District name (text, no FK). e.g. `Colombo` |
+| `disruptionIndex` | DOUBLE PRECISION | — | NULL | Road disruption for that day. e.g. `100` |
+| `raw` | JSONB | — | NOT NULL | Original CSV row, kept for audit. e.g. `{"date": "2024-01-01", "district": …` |
+
+#### Table: `Item`
+
+**Description:** The product catalogue: code, name, product class, chilled or not, pack size.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL | Catalogue code (`F-MILK`…). e.g. `T-TV` |
+| `itemName` | TEXT | — | NOT NULL | Item name. e.g. `43" television` |
+| `type` | "ItemType" (enum) | — | NOT NULL, DEFAULT fresh, CHECK (enum: chilled_food \| fresh \| style \| tech) | Product class. e.g. `tech` |
+| `isChilled` | BOOLEAN | — | NOT NULL, DEFAULT false | Needs a chilled vehicle. e.g. `false` |
+| `packLabel` | TEXT | — | NULL | Pack size text. e.g. `single box` |
+| `packWeightKg` | DOUBLE PRECISION | — | NULL | Weight of one pack. e.g. `11` |
+
+- Index `(type)`
+
+#### Table: `InventoryBatch`
+
+**Description:** Stock batches of an item with dates and quantity, picked first-expiry-first-out.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `BATCH-S-HAT` |
+| `itemId` | TEXT | FK → Item(id) | NOT NULL, ON DELETE RESTRICT | References Item(id). e.g. `S-HAT` |
+| `batchName` | TEXT | — | NULL | Batch label. e.g. `S-HAT-2026-W40` |
+| `manufacturingDate` | DATE | — | NULL | Made on. e.g. `2026-09-20` |
+| `expiryDate` | DATE | — | NULL | Expires on (FEFO order). e.g. `2027-09-20` |
+| `qty` | DOUBLE PRECISION | — | NOT NULL, DEFAULT 0 | Quantity in stock. e.g. `80` |
+
+### 3.2 People and sign-in
+
+#### Table: `User`
+
+**Description:** Every sign-in account: dispatchers, store managers, loaders, drivers and the shared dock tablet.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuqqet65009264hi4ijqufty` |
+| `loginId` | TEXT | UNIQUE | NOT NULL | Sign-in name (outlet id for store managers, `dock-<depot>` for the dock tablet). e.g. `D020` |
+| `role` | "Role" (enum) | — | NOT NULL, CHECK (enum: dispatcher \| store \| loader \| driver) | Picks the home app. e.g. `driver` |
+| `name` | TEXT | — | NOT NULL | Display name. e.g. `Udara Weerasinghe` |
+| `depotId` | TEXT | FK → Depot(id) | NULL, ON DELETE SET NULL | References Depot(id). e.g. `depo1` |
+| `storeId` | TEXT | FK → Store(id) | NULL, ON DELETE SET NULL | Store of an outlet manager. e.g. `OUT001` |
+| `passwordHash` | TEXT | — | NULL | argon2 hash (dispatcher, store). e.g. `(hash hidden)` |
+| `pinHash` | TEXT | — | NULL | argon2 hash of the PIN (driver, loader). e.g. `(hash hidden)` |
+| `notificationPrefs` | JSONB | — | NULL | NotificationPreferences JSON; null means every preference is on. Saved only, not enforced yet. e.g. `{"delayAlerts": true, "planChanges"…` |
+
+#### Table: `Session`
+
+**Description:** Active sign-ins. The id is the `ws_session` cookie. Created at login only.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL | Random 32-byte token, also the `ws_session` cookie. e.g. `(token hidden)` |
+| `userId` | TEXT | FK → User(id) | NOT NULL, ON DELETE CASCADE | References User(id). e.g. `cmuppyuae092pahswvmx7xq1j` |
+| `createdAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When the row was created. e.g. `2026-10-02 08:21:24.119` |
+| `expiresAt` | TIMESTAMP(3) | — | NOT NULL | When the session stops working. e.g. `2026-10-02 20:21:24.117` |
+
+#### Table: `Notification`
+
+**Description:** In-app notices for one user, also pushed live while the user is online.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyuhf0943ahswo9dn7oq7` |
+| `userId` | TEXT | FK → User(id) | NOT NULL, ON DELETE CASCADE | References User(id). e.g. `cmuppyuak092rahsw8zmn6kd9` |
+| `title` | TEXT | — | NOT NULL | Notice heading. e.g. `Delivery moved to tomorrow` |
+| `body` | TEXT | — | NOT NULL | Notice text. e.g. `One order was moved from 2026-10-01…` |
+| `link` | TEXT | — | NULL | Page it opens. e.g. `/store/updates` |
+| `read` | BOOLEAN | — | NOT NULL, DEFAULT false | Seen by the user. e.g. `false` |
+| `createdAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When the row was created. e.g. `2026-10-01 15:59:10.803` |
+
+#### Table: `Driver`
+
+**Description:** HR profile of a driver user: licence, identity number, dates, address.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuqqesy3007064hi57o3t9iq` |
+| `userId` | TEXT | FK → User(id), UNIQUE | NOT NULL, ON DELETE CASCADE | References User(id). e.g. `cmuqqesxm006y64hima50g8fv` |
+| `licenseNo` | TEXT | UNIQUE | NULL | Driving licence number. e.g. `B2000001` |
+| `licenseExpiry` | DATE | — | NULL | Licence expiry date. e.g. `2026-07-02` |
+| `idNo` | TEXT | UNIQUE | NULL | National identity card number. e.g. `199000001V` |
+| `joinDate` | DATE | — | NULL | Date the person joined. e.g. `2019-01-12` |
+| `leavingDate` | DATE | — | NULL | Date the person left. e.g. `2026-03-15` |
+| `lastLoginAt` | TIMESTAMP(3) | — | NULL | Last sign-in time. e.g. `2026-10-02 18:52:51.128` |
+| `isActive` | BOOLEAN | — | NOT NULL, DEFAULT true | False once the person has left. e.g. `true` |
+| `address` | TEXT | — | NULL | Postal address. e.g. `21 Lake Road, Peliyagoda` |
+
+#### Table: `DriverPhone`
+
+**Description:** A driver's phone numbers.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `phoneNumber` | TEXT | PK | NOT NULL | Phone number (the row key). e.g. `0772000059` |
+| `driverId` | TEXT | FK → Driver(id) | NOT NULL, ON DELETE CASCADE | References Driver(id). e.g. `cmuqqetqr00dg64hivlpjj4wj` |
+
+#### Table: `Loader`
+
+**Description:** HR profile of a loader user: employee number, shift, dates, address.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyuj60947ahswznphd535` |
+| `userId` | TEXT | FK → User(id), UNIQUE | NOT NULL, ON DELETE CASCADE | References User(id). e.g. `cmuppyuam092tahswqfk3w0xp` |
+| `employeeNo` | TEXT | UNIQUE | NULL | Employee number. e.g. `LDR-014` |
+| `idNo` | TEXT | UNIQUE | NULL | National identity card number. e.g. `199512378V` |
+| `shift` | "LoaderShift" (enum) | — | NULL, CHECK (enum: morning \| night) | morning or night. e.g. `morning` |
+| `joinDate` | DATE | — | NULL | Date the person joined. e.g. `2023-06-15` |
+| `leavingDate` | DATE | — | NULL | Date the person left. e.g. `2026-03-15` |
+| `lastLoginAt` | TIMESTAMP(3) | — | NULL | Last sign-in time. e.g. `2026-10-01 15:59:10.865` |
+| `isActive` | BOOLEAN | — | NOT NULL, DEFAULT true | False once the person has left. e.g. `true` |
+| `address` | TEXT | — | NULL | Postal address. e.g. `8 Dock Lane, Peliyagoda` |
+
+#### Table: `LoaderPhone`
+
+**Description:** A loader's phone numbers.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `phoneNumber` | TEXT | PK | NOT NULL | Phone number (the row key). e.g. `0771000000` |
+| `loaderId` | TEXT | FK → Loader(id) | NOT NULL, ON DELETE CASCADE | References Loader(id). e.g. `cmuppyuj60947ahswznphd535` |
+
+#### Table: `Dispatcher`
+
+**Description:** HR profile of a dispatcher user.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyujd0949ahsw6bow5lhr` |
+| `userId` | TEXT | FK → User(id), UNIQUE | NOT NULL, ON DELETE CASCADE | References User(id). e.g. `cmuppyuae092pahswvmx7xq1j` |
+| `employeeNo` | TEXT | UNIQUE | NULL | Employee number. e.g. `DSP-001` |
+| `email` | TEXT | — | NULL | Email address. e.g. `nimal@waypoint.lk` |
+| `address` | TEXT | — | NULL | Postal address. e.g. `4 Depot Office, Peliyagoda` |
+| `lastLoginAt` | TIMESTAMP(3) | — | NULL | Last sign-in time. e.g. `2026-10-01 15:59:10.873` |
+| `isActive` | BOOLEAN | — | NOT NULL, DEFAULT true | False once the person has left. e.g. `true` |
+
+#### Table: `DispatcherPhone`
+
+**Description:** A dispatcher's phone numbers.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `phoneNumber` | TEXT | PK | NOT NULL | Phone number (the row key). e.g. `0112000000` |
+| `dispatcherId` | TEXT | FK → Dispatcher(id) | NOT NULL, ON DELETE CASCADE | References Dispatcher(id). e.g. `cmuppyujd0949ahsw6bow5lhr` |
+
+### 3.3 Stores and orders
+
+#### Table: `Store`
+
+**Description:** Retail outlets: brand, district, depot, dock and parking, delivery window, location.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL | Outlet id from outlets.csv (`OUT001`…). e.g. `OUT011` |
+| `displayName` | TEXT | — | NULL | e.g. `Green Basket 11` |
+| `address` | TEXT | — | NULL | Postal address. e.g. `22 Temple Road, Colombo` |
+| `email` | TEXT | — | NULL | Email address. e.g. `out011@shops.waypoint.lk` |
+| `brand` | "Brand" (enum) | — | NOT NULL, CHECK (enum: Fresh \| Style \| Tech) | Retail brand. e.g. `Fresh` |
+| `districtId` | TEXT | FK → District(name) | NOT NULL, ON DELETE RESTRICT | References District(name). e.g. `Colombo` |
+| `depotId` | TEXT | FK → Depot(id) | NOT NULL, ON DELETE RESTRICT | References Depot(id). e.g. `depo1` |
+| `dockType` | "DockType" (enum) | — | NOT NULL, CHECK (enum: rear_dock \| street \| mall_bay) | How the truck unloads. e.g. `rear_dock` |
+| `parkingConstraint` | "ParkingConstraint" (enum) | — | NOT NULL, DEFAULT normal, CHECK (enum: normal \| van_only \| mall_dock) | Which vehicles can park. e.g. `normal` |
+| `mallWindow` | TEXT | — | NULL | Mall delivery slot text. e.g. `09:00-11:00` |
+| `windowOpenMin` | INTEGER | — | NOT NULL | Delivery window opens (minutes after midnight). e.g. `480` |
+| `windowCloseMin` | INTEGER | — | NOT NULL | Delivery window closes (minutes after midnight). e.g. `1020` |
+| `lat` | DOUBLE PRECISION | — | NULL | Latitude. e.g. `6.898` |
+| `lng` | DOUBLE PRECISION | — | NULL | Longitude. e.g. `79.922` |
+| `daysSinceLastServed` | INTEGER | — | NULL | Days since this outlet last received a delivery. Null when it has never been served. e.g. `1` |
+
+#### Table: `OutletPhone`
+
+**Description:** Shop, manager and warehouse numbers of an outlet. The same number may repeat.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyujm094aahswv2s7yck7` |
+| `storeId` | TEXT | FK → Store(id) | NOT NULL, ON DELETE CASCADE | References Store(id). e.g. `OUT001` |
+| `phoneNo` | TEXT | — | NOT NULL | Phone number (not unique). e.g. `0112345678` |
+| `label` | "PhoneLabel" (enum) | — | NOT NULL, CHECK (enum: shop \| manager \| warehouse) | shop, manager or warehouse. e.g. `shop` |
+
+#### Table: `StoreSavedItem`
+
+**Description:** Catalogue items a store has starred, shared by every phone of that store.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `storeId` | TEXT | PK (composite), FK → Store(id) | NOT NULL, ON DELETE CASCADE | References Store(id). e.g. `OUT001` |
+| `itemId` | TEXT | PK (composite), FK → Item(id) | NOT NULL, ON DELETE CASCADE | References Item(id). e.g. `F-BUTTR` |
+| `createdAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When the row was created. e.g. `2026-10-04 00:00:57.622` |
+
+- Primary key `(storeId, itemId)`
+
+#### Table: `Order`
+
+**Description:** One store's delivery for one day: totals, temperature, status, urgency, deferral and cancellation details.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyugg0937ahswhnuucedx` |
+| `storeId` | TEXT | FK → Store(id) | NOT NULL, ON DELETE RESTRICT | References Store(id). e.g. `OUT003` |
+| `brand` | "Brand" (enum) | — | NOT NULL, CHECK (enum: Fresh \| Style \| Tech) | Retail brand. e.g. `Fresh` |
+| `deliveryDate` | DATE | — | NOT NULL | Day the order is delivered. e.g. `2026-10-01` |
+| `temp` | "Temp" (enum) | — | NOT NULL, CHECK (enum: chilled \| ambient) | Chilled or ambient goods. e.g. `chilled` |
+| `status` | "OrderStatus" (enum) | — | NOT NULL, DEFAULT waiting, CHECK (enum: waiting \| planned \| deferred \| delivered \| partial \| cancelled) | Current state. e.g. `planned` |
+| `units` | INTEGER | — | NOT NULL | Number of units. e.g. `9` |
+| `weightKg` | DOUBLE PRECISION | — | NOT NULL | Total weight in kg. e.g. `93` |
+| `volumeM3` | DOUBLE PRECISION | — | NOT NULL | Total volume in m³. e.g. `0.15` |
+| `urgentNote` | TEXT | — | NULL | Store note on an urgent order |
+| `urgent` | BOOLEAN | — | NOT NULL, DEFAULT false | Set by the store at order time; urgent orders head the dispatcher's waiting list. e.g. `false` |
+| `stockLevel` | "StockLevel" (enum) | — | NULL, CHECK (enum: out_of_stock \| running_low) |  |
+| `movedFromDate` | DATE | — | NULL | Original day before a deferral. e.g. `2026-10-01` |
+| `deferReason` | TEXT | — | NULL | Why it was moved. e.g. `Fleet over capacity at Peliyagoda t…` |
+| `deferredById` | TEXT | — | NULL | User who moved it (no FK) |
+| `deferredYesterday` | BOOLEAN | — | NOT NULL, DEFAULT false | Was already moved yesterday. e.g. `false` |
+| `repeatSkip` | BOOLEAN | — | NOT NULL, DEFAULT false | Skipped more than once. e.g. `false` |
+| `cancelledAt` | TIMESTAMP(3) | — | NULL | When it was cancelled |
+| `cancelledById` | TEXT | — | NULL | User who cancelled (no FK) |
+| `createdAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When the row was created. e.g. `2026-10-01 15:59:10.768` |
+
+- Index `(deliveryDate, status)`
+
+#### Table: `OrderLine`
+
+**Description:** The items and quantities on an order, with a snapshot of each unit's weight and volume.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyufz0931ahswdhv6zo0f` |
+| `orderId` | TEXT | FK → Order(id) | NOT NULL, ON DELETE CASCADE | References Order(id). e.g. `cmuppyufz092zahswmpzgp636` |
+| `itemId` | TEXT | FK → Item(id) | NULL, ON DELETE SET NULL | References Item(id). e.g. `F-MILK` |
+| `name` | TEXT | — | NOT NULL | Item name at order time. e.g. `Fresh milk 1 L` |
+| `qty` | INTEGER | — | NOT NULL | Quantity. e.g. `6` |
+| `pack` | TEXT | — | NOT NULL | Pack label. e.g. `crate of 12` |
+| `chilled` | BOOLEAN | — | NOT NULL, DEFAULT false | Needs a chilled vehicle. e.g. `true` |
+| `unitWeightKg` | DOUBLE PRECISION | — | NOT NULL | Weight of one unit. e.g. `12.6` |
+| `unitVolumeM3` | DOUBLE PRECISION | — | NOT NULL | Volume of one unit. e.g. `0.018` |
+
+### 3.4 Fleet and trips
+
+#### Table: `Vehicle`
+
+**Description:** Trucks and vans: capacity, fuel, depot, status and their own driver.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL | Vehicle id from the CSV. e.g. `VEH007` |
+| `numberPlate` | TEXT | UNIQUE | NULL | e.g. `WP LQ-1007` |
+| `depotId` | TEXT | FK → Depot(id) | NOT NULL, ON DELETE RESTRICT | References Depot(id). e.g. `depo1` |
+| `type` | "VehicleType" (enum) | — | NOT NULL, CHECK (enum: truck \| van) | e.g. `truck` |
+| `temp` | "VehicleTemp" (enum) | — | NOT NULL, CHECK (enum: reefer \| ambient) | e.g. `reefer` |
+| `weightCapKg` | DOUBLE PRECISION | — | NOT NULL | Weight capacity in kg. e.g. `3610` |
+| `volumeCapM3` | DOUBLE PRECISION | — | NOT NULL | Volume capacity in m³. e.g. `19.4` |
+| `fuelType` | TEXT | — | NULL | e.g. `diesel` |
+| `kmPerL` | DOUBLE PRECISION | — | NULL | Fuel economy. e.g. `6.4` |
+| `weeklyFuelQuotaL` | DOUBLE PRECISION | — | NULL | Weekly fuel allowance in litres. e.g. `590` |
+| `status` | "VehicleStatus" (enum) | — | NOT NULL, DEFAULT available, CHECK (enum: available \| out_of_service \| on_road) | Current state. e.g. `available` |
+| `outOfServiceReason` | TEXT | — | NULL, CHECK (filled in when status = 'out_of_service') | Required when status is out_of_service (database check). Cleared when the vehicle is back. e.g. `Brake service — rear pads` |
+| `returnDate` | TIMESTAMP(3) | — | NULL | Optional expected return. Stores the date and the time. Null when no return time is known. e.g. `2026-10-04 09:00:00` |
+| `lastServiceAt` | TIMESTAMP(3) | — | NULL | Last time this vehicle was serviced. e.g. `2026-08-26 00:00:00` |
+| `driverId` | TEXT | FK → User(id), UNIQUE | NULL, ON DELETE SET NULL | The vehicle's own driver. e.g. `cmuqqet1d007m64hitgopf8l6` |
+
+#### Table: `Trip`
+
+**Description:** One run of one vehicle on one day (trip 1 or 2), for one brand and main district, with its status and plan version.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmurdd49h001fhcno6lywr2zt` |
+| `vehicleId` | TEXT | FK → Vehicle(id) | NOT NULL, ON DELETE RESTRICT | References Vehicle(id). e.g. `VEH039` |
+| `assignedDriverId` | TEXT | FK → User(id) | NULL, ON DELETE SET NULL | Driver for this trip. e.g. `cmuppyuaq092vahswi6i7eszo` |
+| `depotId` | TEXT | FK → Depot(id) | NOT NULL, ON DELETE RESTRICT | References Depot(id). e.g. `depo2` |
+| `brand` | "Brand" (enum) | — | NOT NULL, CHECK (enum: Fresh \| Style \| Tech) | Retail brand. e.g. `Fresh` |
+| `districtId` | TEXT | FK → District(name) | NOT NULL, ON DELETE RESTRICT | Main district. e.g. `Kandy` |
+| `serviceDate` | DATE | UNIQUE (composite) | NOT NULL | Delivery day. e.g. `2026-10-02` |
+| `tripNumber` | INTEGER | UNIQUE (composite) | NOT NULL, CHECK (tripNumber BETWEEN 1 AND 2) | 1 or 2. Database check Trip_tripNumber_max_2. e.g. `1` |
+| `csvRouteId` | TEXT | — | NULL | Route id from the CSV. e.g. `DEMO-STATUS-Kandy-completed` |
+| `status` | "TripStatus" (enum) | — | NOT NULL, DEFAULT planning, CHECK (enum: planning \| published \| loading \| ready \| on_road \| completed \| breakdown) | Current state. e.g. `completed` |
+| `planVersion` | INTEGER | — | NOT NULL, DEFAULT 1 | Bumped on every change to a sent trip. e.g. `1` |
+| `plannedMinutes` | INTEGER | — | NULL | Planned duration |
+| `plannedLitres` | DOUBLE PRECISION | — | NULL | Planned fuel |
+| `fuelLitresAtEnd` | DOUBLE PRECISION | — | NULL | Latest FUEL_READING synced for this trip; once the trip ends it is the end-of-trip fuel |
+| `publishedAt` | TIMESTAMP(3) | — | NULL | When the plan was published. e.g. `2026-10-02 02:00:00` |
+| `tripStartingDate` | DATE | — | NULL | e.g. `2026-10-01` |
+| `tripEndingDate` | DATE | — | NULL |  |
+| `startingTime` | TIMESTAMP(3) | — | NULL | e.g. `2026-10-02 02:00:00` |
+| `estimatedStartingTime` | TIMESTAMP(3) | — | NULL |  |
+| `endingTime` | TIMESTAMP(3) | — | NULL | e.g. `2026-10-02 05:00:00` |
+
+- Unique `(vehicleId, serviceDate, tripNumber)`
+- Index `(depotId, serviceDate)`
+
+#### Table: `_TripExtraDistricts`
+
+**Description:** Join table for the extra districts a trip covers besides its main one.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `A` | TEXT | PK (composite), FK → District(name) | NOT NULL, ON DELETE CASCADE | The extra district |
+| `B` | TEXT | PK (composite), FK → Trip(id) | NOT NULL, ON DELETE CASCADE | The trip |
+
+- Unique `(A, B)`
+- Index `(B)`
+
+#### Table: `TripStop`
+
+**Description:** One order on one trip, in delivery order, with planned and actual times.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyugk093cahsw5xnjkm20` |
+| `tripId` | TEXT | FK → Trip(id) | NOT NULL, ON DELETE CASCADE | References Trip(id). e.g. `cmuppyufu092xahswqj3cytia` |
+| `orderId` | TEXT | FK → Order(id), UNIQUE | NOT NULL, ON DELETE RESTRICT | References Order(id). e.g. `cmuppyugg0937ahswhnuucedx` |
+| `sequence` | INTEGER | UNIQUE (composite) | NOT NULL | Position on the trip (1 = first stop). e.g. `2` |
+| `status` | "StopStatus" (enum) | — | NOT NULL, DEFAULT upcoming, CHECK (enum: upcoming \| arrived \| waiting \| confirmed \| delivered \| partial \| deferred \| at_risk) | Current state. e.g. `upcoming` |
+| `etaMin` | INTEGER | — | NULL | Planned arrival (minutes after midnight). e.g. `505` |
+| `arrivedAt` | TIMESTAMP(3) | — | NULL | Driver arrived. e.g. `2026-10-02 05:36:34.726` |
+| `storeConfirmedAt` | TIMESTAMP(3) | — | NULL | Store checked the goods. e.g. `2026-10-02 05:36:34.726` |
+| `driverAckAt` | TIMESTAMP(3) | — | NULL | Driver acknowledged the receipt. e.g. `2026-10-04 03:42:33.361` |
+| `waitAlertedAt` | TIMESTAMP(3) | — | NULL | Set when dispatch was alerted that the driver waited WAIT_ALERT_MIN at the store; one alert per stop |
+| `plannedArrivalTime` | TIMESTAMP(3) | — | NULL |  |
+| `leaveOutletTime` | TIMESTAMP(3) | — | NULL |  |
+| `serviceMin` | DOUBLE PRECISION | — | NULL |  |
+| `unloadingTime` | DOUBLE PRECISION | — | NULL |  |
+| `estimatedUnloadingTime` | DOUBLE PRECISION | — | NULL |  |
+| `estimatedTripStopTime` | TIMESTAMP(3) | — | NULL |  |
+| `tripStopTime` | TIMESTAMP(3) | — | NULL |  |
+| `tripStartTime` | TIMESTAMP(3) | — | NULL |  |
+| `estimatedTripStartTime` | TIMESTAMP(3) | — | NULL |  |
+
+- Unique `(tripId, sequence)`
+
+#### Table: `RouteLeg`
+
+**Description:** Planned and actual travel between two points of a trip.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyulo094rahswhwwolxid` |
+| `tripId` | TEXT | FK → Trip(id) | NOT NULL, ON DELETE CASCADE | References Trip(id). e.g. `cmuppyugw093mahswbcrogboy` |
+| `seq` | INTEGER | UNIQUE (composite) | NOT NULL | Leg number on the trip. e.g. `1` |
+| `fromPoint` | TEXT | — | NULL | Start point. e.g. `Peliyagoda depot` |
+| `toOutlet` | TEXT | — | NULL | Destination outlet. e.g. `OUT001` |
+| `distanceKm` | DOUBLE PRECISION | — | NULL | Leg distance. e.g. `12.4` |
+| `plannedDepartTime` | TIMESTAMP(3) | — | NULL |  |
+| `plannedTravelMin` | DOUBLE PRECISION | — | NULL | e.g. `28` |
+| `actualDepartTime` | TIMESTAMP(3) | — | NULL |  |
+| `actualTravelMin` | DOUBLE PRECISION | — | NULL | e.g. `31` |
+| `monsoon` | BOOLEAN | — | NULL | e.g. `false` |
+| `trafficBand` | TEXT | — | NULL | Traffic band used for the estimate. e.g. `peak` |
+
+- Unique `(tripId, seq)`
+
+#### Table: `LocationPing`
+
+**Description:** A driver phone's GPS trail during a trip.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyulx094sahswy2i1nkmv` |
+| `clientUuid` | TEXT | UNIQUE | NOT NULL | UUID made on the phone; stops a retry being stored twice. e.g. `ping-cmuppyugw093mahswbcrogboy-1` |
+| `tripId` | TEXT | FK → Trip(id) | NOT NULL, ON DELETE CASCADE | References Trip(id). e.g. `cmuppyugw093mahswbcrogboy` |
+| `driverId` | TEXT | FK → Driver(id) | NOT NULL, ON DELETE RESTRICT | References Driver(id). e.g. `cmuppyuiu0945ahsw76l1sfl2` |
+| `lat` | DOUBLE PRECISION | — | NOT NULL | Latitude. e.g. `6.958` |
+| `lng` | DOUBLE PRECISION | — | NOT NULL | Longitude. e.g. `79.899` |
+| `accuracyM` | DOUBLE PRECISION | — | NULL | GPS accuracy in metres. e.g. `8` |
+| `speedKmh` | DOUBLE PRECISION | — | NULL | e.g. `34` |
+| `recordedAt` | TIMESTAMP(3) | — | NOT NULL | Time on the phone. e.g. `2026-10-01 15:47:10.964` |
+| `receivedAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | Time the server received it. e.g. `2026-10-01 15:59:10.965` |
+
+- Index `(tripId, recordedAt)`
+
+### 3.5 Dock and delivery notes
+
+#### Table: `LoadSession`
+
+**Description:** The live dock checklist of one truck: loaders, times, and what the loader last accepted of the plan.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `demo-session-cmurdd49h001fhcno6lywr…` |
+| `tripId` | TEXT | FK → Trip(id), UNIQUE | NOT NULL, ON DELETE CASCADE | References Trip(id). e.g. `cmurdd49h001fhcno6lywr2zt` |
+| `loaderIds` | TEXT[] | — | NOT NULL | User ids of the loaders on this truck. e.g. `{cmuppyuam092tahswqfk3w0xp}` |
+| `startedAt` | TIMESTAMP(3) | — | NULL | Loading started. e.g. `2026-10-03 18:30:58.717` |
+| `finishedAt` | TIMESTAMP(3) | — | NULL | e.g. `2026-10-03 18:30:58.717` |
+| `departedAt` | TIMESTAMP(3) | — | NULL | Truck left the dock. e.g. `2026-10-03 18:30:58.717` |
+| `paused` | BOOLEAN | — | NOT NULL, DEFAULT false | Paused by a plan change. e.g. `false` |
+| `ackedPlanVersion` | INTEGER | — | NOT NULL, DEFAULT 0 | Plan version the loader accepted. e.g. `1` |
+| `ackedStopIds` | TEXT[] | — | NOT NULL, DEFAULT [] | Order ids on the trip when the loader last acknowledged; diffed against the live trip for the plan-change lock. e.g. `{cmurdd49c001ahcnolglchaek}` |
+| `takenOffOrderIds` | TEXT[] | — | NOT NULL, DEFAULT [] | Removed orders the loader has confirmed are off the truck; acknowledging needs all of them. Reset on acknowledge |
+| `newOrderIds` | TEXT[] | — | NOT NULL, DEFAULT [] | Orders added by the last acknowledged plan change, shown as NEW on the checklist. Cleared on depart |
+
+#### Table: `LoadFlag`
+
+**Description:** Missing, damaged or wrong-quantity goods flagged on the live dock sheet.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuqj610v0074128gxubikgsf` |
+| `stopId` | TEXT | FK → TripStop(id) | NOT NULL, ON DELETE CASCADE | References TripStop(id). e.g. `cmuppyuga0935ahswy6dkwz97` |
+| `orderLineId` | TEXT | FK → OrderLine(id) | NULL, ON DELETE SET NULL | The flagged line. e.g. `cmuppyufz0931ahswdhv6zo0f` |
+| `type` | "FlagType" (enum) | — | NOT NULL, CHECK (enum: missing \| damaged \| wrong_quantity) | missing, damaged or wrong quantity. e.g. `missing` |
+| `qty` | INTEGER | — | NULL | Quantity. e.g. `1` |
+| `note` | TEXT | — | NULL | Free-text note. e.g. `Demo: one pack short at dock.` |
+| `photoKey` | TEXT | — | NULL | MinIO object key of the photo. e.g. `load-flags/demo.png` |
+| `createdAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When the row was created. e.g. `2026-10-02 05:36:34.735` |
+| `resolvedAt` | TIMESTAMP(3) | — | NULL | When it was resolved. e.g. `2026-10-04 00:00:57.622` |
+
+#### Table: `LoadingJob`
+
+**Description:** The dispatcher's handoff of a trip to the dock: bay, deadline, status, loaded totals.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyukk094dahsw0bl0d6do` |
+| `tripId` | TEXT | FK → Trip(id), UNIQUE | NOT NULL, ON DELETE CASCADE | References Trip(id). e.g. `cmuppyufu092xahswqj3cytia` |
+| `depot` | TEXT | — | NOT NULL | Depot id (text copy, no FK). e.g. `depo1` |
+| `assignedById` | TEXT | FK → Dispatcher(id) | NOT NULL, ON DELETE RESTRICT | Dispatcher who handed it over. e.g. `cmuppyujd0949ahsw6bow5lhr` |
+| `assignedAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | e.g. `2026-10-01 15:59:10.917` |
+| `bay` | TEXT | — | NULL | Loading bay. e.g. `Bay-2` |
+| `loadByTime` | TIMESTAMP(3) | — | NULL |  |
+| `instructions` | TEXT | — | NULL | e.g. `Chill first. Confirm DN version bef…` |
+| `priority` | INTEGER | — | NOT NULL, DEFAULT 0 | Higher loads first. e.g. `1` |
+| `status` | "LoadingJobStatus" (enum) | — | NOT NULL, DEFAULT assigned, CHECK (enum: assigned \| picking \| loaded \| handed_over \| cancelled) | Current state. e.g. `assigned` |
+| `startedAt` | TIMESTAMP(3) | — | NULL | e.g. `2026-10-03 18:30:58.707` |
+| `loadedAt` | TIMESTAMP(3) | — | NULL |  |
+| `handedOverAt` | TIMESTAMP(3) | — | NULL | e.g. `2026-10-03 18:30:58.707` |
+| `totalWeightKg` | DOUBLE PRECISION | — | NULL | Loaded weight. e.g. `420` |
+| `totalVolumeM3` | DOUBLE PRECISION | — | NULL | Loaded volume. e.g. `4.8` |
+
+#### Table: `DeliveryNote`
+
+**Description:** Versioned pick list for an order. Each change adds a version; the current one has `validTo` empty.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `dnId` | TEXT | PK (composite) | NOT NULL | Delivery note id (`DN-<orderId>`). e.g. `DN-cmuppyugz093oahsw05yw3ajt` |
+| `versionAt` | TIMESTAMP(3) | PK (composite) | NOT NULL | Version timestamp of the delivery note. e.g. `2026-10-01 04:00:00` |
+| `orderId` | TEXT | FK → Order(id) | NOT NULL, ON DELETE RESTRICT | References Order(id). e.g. `cmuppyugz093oahsw05yw3ajt` |
+| `status` | TEXT | — | NULL | Current state. e.g. `picking` |
+| `validTo` | TIMESTAMP(3) | — | NULL | Null on the current version |
+| `changedById` | TEXT | FK → Loader(id) | NULL, ON DELETE SET NULL | Loader who made this version. e.g. `cmuppyuj60947ahswznphd535` |
+| `changeReason` | TEXT | — | NULL | Why this version was made. e.g. `initial pick list` |
+
+- Primary key `(dnId, versionAt)`
+- Index `(dnId)`
+- Index `(orderId)`
+
+#### Table: `DeliveryNoteLine`
+
+**Description:** Quantity confirmed per item on one delivery-note version.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyuks094fahsw8eiot41w` |
+| `dnId` | TEXT | FK → DeliveryNote(dnId) | NOT NULL, ON DELETE CASCADE | References DeliveryNote(dnId). e.g. `DN-cmuppyugz093oahsw05yw3ajt` |
+| `versionAt` | TIMESTAMP(3) | FK → DeliveryNote(versionAt) | NOT NULL, ON DELETE CASCADE | References DeliveryNote(versionAt). e.g. `2026-10-01 04:00:00` |
+| `itemId` | TEXT | FK → Item(id) | NOT NULL, ON DELETE RESTRICT | References Item(id). e.g. `F-CHKN` |
+| `qtyConfirmed` | DOUBLE PRECISION | — | NULL | Quantity confirmed on the truck. e.g. `2` |
+| `shortageReason` | TEXT | — | NULL | Why less was loaded |
+
+#### Table: `DeliveryNotePick`
+
+**Description:** How much of a delivery-note line came from each stock batch.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyul5094lahsw2hor7ekl` |
+| `dnLineId` | TEXT | FK → DeliveryNoteLine(id) | NOT NULL, ON DELETE CASCADE | The delivery note line. e.g. `cmuppyuks094gahswyqusccgw` |
+| `batchId` | TEXT | FK → InventoryBatch(id) | NOT NULL, ON DELETE RESTRICT | Batch the goods came from. e.g. `BATCH-F-MILK` |
+| `qty` | DOUBLE PRECISION | — | NOT NULL | Quantity. e.g. `2` |
+
+#### Table: `DeliveryNoteLoader`
+
+**Description:** Which loaders picked or confirmed a delivery-note version.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyuks094jahsw4w7loie4` |
+| `dnId` | TEXT | FK → DeliveryNote(dnId) | NOT NULL, ON DELETE CASCADE | References DeliveryNote(dnId). e.g. `DN-cmuppyugz093oahsw05yw3ajt` |
+| `versionAt` | TIMESTAMP(3) | FK → DeliveryNote(versionAt) | NOT NULL, ON DELETE CASCADE | References DeliveryNote(versionAt). e.g. `2026-10-01 04:00:00` |
+| `loaderId` | TEXT | FK → Loader(id) | NOT NULL, ON DELETE RESTRICT | References Loader(id). e.g. `cmuppyuj60947ahswznphd535` |
+| `role` | "LoaderNoteRole" (enum) | — | NULL, CHECK (enum: picking \| confirming) | picking or confirming. e.g. `picking` |
+| `startedAt` | TIMESTAMP(3) | — | NULL | e.g. `2026-10-01 15:59:10.923` |
+| `finishedAt` | TIMESTAMP(3) | — | NULL |  |
+
+- Unique `(dnId, versionAt, loaderId)`
+
+#### Table: `LoaderFlag`
+
+**Description:** An issue recorded on a handed-over delivery note, waiting for the dispatcher to approve or reject it.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyul8094nahswhsx413b7` |
+| `raisedAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When it was raised. e.g. `2026-10-01 15:59:10.941` |
+| `loaderId` | TEXT | FK → Loader(id) | NOT NULL, ON DELETE RESTRICT | References Loader(id). e.g. `cmuppyuj60947ahswznphd535` |
+| `dnId` | TEXT | FK → DeliveryNote(dnId) | NOT NULL, ON DELETE CASCADE | References DeliveryNote(dnId). e.g. `DN-cmuppyugz093oahsw05yw3ajt` |
+| `versionAt` | TIMESTAMP(3) | FK → DeliveryNote(versionAt) | NOT NULL, ON DELETE CASCADE | References DeliveryNote(versionAt). e.g. `2026-10-01 04:00:00` |
+| `scope` | "LoaderFlagScope" (enum) | — | NOT NULL, CHECK (enum: item \| dn) | One item, or the whole delivery note. e.g. `item` |
+| `itemId` | TEXT | FK → Item(id) | NULL, ON DELETE SET NULL | References Item(id). e.g. `F-MILK` |
+| `qtyFlagged` | DOUBLE PRECISION | — | NULL | e.g. `1` |
+| `reason` | TEXT | — | NOT NULL | Reason code. e.g. `crate crushed at dock` |
+| `reasonDetail` | TEXT | — | NULL | Readable reason. e.g. `Outer crate split; 1 bottle leaking…` |
+| `photoKey` | TEXT | — | NULL | MinIO object key of the photo |
+| `validationStatus` | "LoaderFlagStatus" (enum) | — | NOT NULL, DEFAULT pending_dispatcher, CHECK (enum: pending_dispatcher \| approved \| rejected) | Dispatcher's review. e.g. `pending_dispatcher` |
+| `reviewedById` | TEXT | FK → Dispatcher(id) | NULL, ON DELETE SET NULL | Dispatcher who reviewed |
+| `reviewedAt` | TIMESTAMP(3) | — | NULL |  |
+| `reviewNote` | TEXT | — | NULL |  |
+
+- Index `(dnId)`
+
+### 3.6 Receipts, driver sync and incidents
+
+#### Table: `StoreReceipt`
+
+**Description:** The store's sign-off of one stop: per-line results, cold-chain check and signature.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuqj61100076128glu8kkexy` |
+| `stopId` | TEXT | FK → TripStop(id), UNIQUE | NOT NULL, ON DELETE CASCADE | References TripStop(id). e.g. `cmuppyuga0935ahswy6dkwz97` |
+| `lineResults` | JSONB | — | NOT NULL | Per line: ordered, received and any issue. e.g. `[{"name": "Fresh milk 1 L", "issue"…` |
+| `chilledWasCold` | BOOLEAN | — | NULL | Chilled goods arrived cold. e.g. `true` |
+| `signaturePhotoKey` | TEXT | — | NULL | MinIO key of the signature. e.g. `signatures/demo.png` |
+| `signedByUserId` | TEXT | FK → User(id) | NULL, ON DELETE SET NULL | Who signed. e.g. `cmuqj60pz000c128ge5cvtrg1` |
+| `signedAt` | TIMESTAMP(3) | — | NULL | When it was signed. e.g. `2026-10-02 05:36:34.726` |
+| `createdAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When the row was created. e.g. `2026-10-02 05:36:34.74` |
+
+#### Table: `FieldFlag`
+
+**Description:** An item the store reported missing or damaged after receiving, and the driver's decision on it.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyulh094pahsw2cl1m2i8` |
+| `raisedAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When it was raised. e.g. `2026-10-01 15:59:10.95` |
+| `storeId` | TEXT | FK → Store(id) | NOT NULL, ON DELETE RESTRICT | References Store(id). e.g. `OUT001` |
+| `orderId` | TEXT | FK → Order(id) | NOT NULL, ON DELETE RESTRICT | References Order(id). e.g. `cmuppyugz093oahsw05yw3ajt` |
+| `tripId` | TEXT | FK → Trip(id) | NULL, ON DELETE SET NULL | References Trip(id). e.g. `cmuppyugw093mahswbcrogboy` |
+| `itemId` | TEXT | FK → Item(id) | NULL, ON DELETE SET NULL | References Item(id). e.g. `F-MILK` |
+| `qtyFlagged` | DOUBLE PRECISION | — | NULL | Quantity with a problem. e.g. `1` |
+| `reason` | TEXT | — | NOT NULL | Reason code. e.g. `damaged` |
+| `reasonDetail` | TEXT | — | NULL | Readable reason. e.g. `One milk crate arrived with a split…` |
+| `severity` | "FlagSeverity" (enum) | — | NULL, CHECK (enum: low \| medium \| high) | low, medium or high. e.g. `medium` |
+| `driverDecision` | "FieldFlagDecision" (enum) | — | NOT NULL, DEFAULT pending, CHECK (enum: pending \| accepted \| rejected) | Driver's answer to the store's flag. e.g. `pending` |
+| `driverDecidedAt` | TIMESTAMP(3) | — | NULL |  |
+| `driverNote` | TEXT | — | NULL |  |
+| `photoKey` | TEXT | — | NULL | MinIO object key of the photo |
+| `resolvedAt` | TIMESTAMP(3) | — | NULL | When it was resolved. e.g. `2026-10-04 00:00:57.622` |
+| `resolveStatus` | BOOLEAN | — | NOT NULL, DEFAULT false | False until a replacement of this item is ordered, or the flag is marked solved. e.g. `false` |
+
+- Index `(orderId)`
+
+#### Table: `DriverEvent`
+
+**Description:** Audit log of every action synced from a driver's phone (arrived, SOS, fuel, breaks…).
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuqj61180077128gsb2p9ps2` |
+| `clientId` | TEXT | UNIQUE | NOT NULL | UUID made on the phone; stops a retry being stored twice. e.g. `seed-arrived-cmuppyufu092xahswqj3cy…` |
+| `driverId` | TEXT | FK → User(id) | NOT NULL, ON DELETE RESTRICT | References User(id). e.g. `cmuppyuaq092vahswi6i7eszo` |
+| `tripId` | TEXT | FK → Trip(id) | NULL, ON DELETE SET NULL | References Trip(id). e.g. `cmuppyufu092xahswqj3cytia` |
+| `type` | TEXT | — | NOT NULL | Event type (`DRIVER_EVENT_TYPES`). e.g. `ARRIVED` |
+| `payload` | JSONB | — | NOT NULL | Event details. e.g. `{"stopId": "cmuppyuga0935ahswy6dkwz…` |
+| `createdOnPhoneAt` | TIMESTAMP(3) | — | NOT NULL | Time on the phone. e.g. `2026-10-02 05:16:34.747` |
+| `seenPlanVersion` | INTEGER | — | NULL | Plan version the driver saw. e.g. `1` |
+| `appliedAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When the server applied it. e.g. `2026-10-02 05:36:34.749` |
+
+- Index `(driverId, type, appliedAt)`
+
+#### Table: `Incident`
+
+**Description:** A dispatcher incident on a trip (breakdown, delay, quiet driver, wait timeout) with its timeline.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuqj611f007a128gjtmjla25` |
+| `type` | "IncidentType" (enum) | — | NOT NULL, CHECK (enum: breakdown \| delay \| quiet_driver \| wait_timeout) | breakdown, delay, quiet driver or wait timeout. e.g. `breakdown` |
+| `tripId` | TEXT | FK → Trip(id) | NOT NULL, ON DELETE RESTRICT | References Trip(id). e.g. `cmuppyugw093mahswbcrogboy` |
+| `status` | TEXT | — | NOT NULL | Current state. e.g. `open` |
+| `timeline` | JSONB | — | NOT NULL | Steps taken, as JSON. e.g. `[{"at": "2026-10-02T05:36:34.754Z",…` |
+| `createdAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When the row was created. e.g. `2026-10-02 05:36:34.756` |
+
+#### Table: `DriverIncident`
+
+**Description:** An SOS or on-road incident raised by a driver, and how it was acknowledged and resolved.
+
+| Column | Data type | Key type | Constraints / Nullable | Description / Example |
+| --- | --- | --- | --- | --- |
+| `id` | TEXT | PK | NOT NULL, DEFAULT cuid() | Unique identifier (cuid). e.g. `cmuppyum3094wahswsooqn6qh` |
+| `driverId` | TEXT | FK → Driver(id) | NOT NULL, ON DELETE RESTRICT | References Driver(id). e.g. `cmuppyuiu0945ahsw76l1sfl2` |
+| `tripId` | TEXT | FK → Trip(id) | NULL, ON DELETE SET NULL | References Trip(id). e.g. `cmuppyugw093mahswbcrogboy` |
+| `vehicleId` | TEXT | FK → Vehicle(id) | NULL, ON DELETE SET NULL | References Vehicle(id). e.g. `VEH009` |
+| `incidentType` | TEXT | — | NOT NULL | Kind of incident (text). e.g. `sos` |
+| `severity` | "SosSeverity" (enum) | — | NOT NULL, CHECK (enum: low \| high \| critical) | low, high or critical. e.g. `high` |
+| `message` | TEXT | — | NULL | Driver's message. e.g. `Breakdown on Baseline Road — reques…` |
+| `lat` | DOUBLE PRECISION | — | NULL | Latitude. e.g. `6.941` |
+| `lng` | DOUBLE PRECISION | — | NULL | Longitude. e.g. `79.863` |
+| `lastStopId` | TEXT | FK → TripStop(id) | NULL, ON DELETE SET NULL | Last stop reached. e.g. `cmuppyuh3093uahsw2fzcy1bt` |
+| `raisedAt` | TIMESTAMP(3) | — | NOT NULL, DEFAULT NOW() | When it was raised. e.g. `2026-10-01 15:59:10.971` |
+| `acknowledgedAt` | TIMESTAMP(3) | — | NULL |  |
+| `acknowledgedBy` | TEXT | — | NULL | User who acknowledged (no FK) |
+| `resolvedAt` | TIMESTAMP(3) | — | NULL | When it was resolved |
+| `resolution` | TEXT | — | NULL |  |
+| `reassignedTripId` | TEXT | FK → Trip(id) | NULL, ON DELETE SET NULL | Trip that took over the stops |
 
 ---
 
-## Database rules (constraints)
+## 4. Entity relationships and foreign keys
 
-These are rules the database itself refuses to break. The app checks some of the same things earlier, so the person sees a clear message instead of a raw database error.
+### Key relationships
 
-**A vehicle runs at most two trips on one day.** `tripNumber` must be 1 or 2 (`Trip_tripNumber_max_2`): 1 is the morning run, 2 is the afternoon run. The same vehicle cannot have two rows with the same service date and the same trip number (`vehicleId`, `serviceDate`, `tripNumber` together are unique). A second Trip 1 on that truck that day is rejected.
+- **Depot to Store:** One-to-Many (1 : N). `Depot.id` → `Store.depotId` (RESTRICT on delete).
+- **Store to Order:** One-to-Many (1 : N). `Store.id` → `Order.storeId` (RESTRICT).
+- **Order to OrderLine:** One-to-Many (1 : N). `Order.id` → `OrderLine.orderId` (CASCADE on delete).
+- **Order to TripStop:** One-to-One (1 : 1, optional). `Order.id` → `TripStop.orderId`, unique, so an order is on at most one trip.
+- **Trip to TripStop:** One-to-Many (1 : N). `Trip.id` → `TripStop.tripId` (CASCADE), with `(tripId, sequence)` unique.
+- **Vehicle to Trip:** One-to-Many (1 : N). `Vehicle.id` → `Trip.vehicleId`, at most trip 1 and trip 2 per day (`(vehicleId, serviceDate, tripNumber)` unique).
+- **User to Driver / Loader / Dispatcher:** One-to-One (1 : 1). `User.id` → `Driver.userId` (CASCADE), and the same for `Loader` and `Dispatcher`.
+- **User to Vehicle:** One-to-One (1 : 1, optional). `User.id` → `Vehicle.driverId`, unique, so a driver has at most one vehicle.
+- **Trip to LoadSession / LoadingJob:** One-to-One (1 : 1). `Trip.id` → `LoadSession.tripId` and `LoadingJob.tripId`, both unique (CASCADE).
+- **TripStop to StoreReceipt:** One-to-One (1 : 1). `TripStop.id` → `StoreReceipt.stopId`, unique (CASCADE).
+- **DeliveryNote to its lines, loaders and flags:** One-to-Many (1 : N) on the composite key `(dnId, versionAt)` (CASCADE).
 
-**An order is on at most one trip.** `TripStop.orderId` is unique, so a delivery cannot be a stop on two trips at once. On one trip, two stops cannot share a sequence number (`tripId` + `sequence` is unique). Sequence is the delivery order, earliest window first.
+### Many-to-many relationships
 
-**A driver has at most one vehicle.** `Vehicle.driverId` is unique. The truck keeps that driver until the driver's `leavingDate`. After they leave, another driver can be set on the vehicle. The registration `numberPlate` is also unique when it is filled in.
+| Between | Resolved through | Notes |
+| --- | --- | --- |
+| Trip ↔ District (extra districts) | `_TripExtraDistricts (A = District.name, B = Trip.id)` | Prisma's implicit join table; a trip's main district stays on `Trip.districtId` |
+| Store ↔ Item (starred items) | `StoreSavedItem (storeId, itemId)` | Composite primary key; CASCADE from both sides |
+| DeliveryNote ↔ Loader | `DeliveryNoteLoader (dnId, versionAt, loaderId)` | Who picked or confirmed each version; unique per loader per version |
+| DeliveryNoteLine ↔ InventoryBatch | `DeliveryNotePick (dnLineId, batchId, qty)` | How much of a line came from each stock batch (FEFO) |
 
-**A vehicle that is out of service must say why.** The check `Vehicle_out_of_service_needs_reason` requires a non-blank `outOfServiceReason` whenever `status` is `out_of_service`. The reason is cleared when the vehicle is available again. `returnDate` is optional and stores both the date and the time. A blank reason is allowed for any other status.
+### Every foreign key
 
-**One live dock sheet and one loading job per trip.** `LoadSession.tripId` and `LoadingJob.tripId` are each unique. Deleting the trip deletes the session, the job, the stops, the route legs, and the location pings.
+All 62 foreign keys, generated from the schema.
 
-**One receipt per stop.** `StoreReceipt.stopId` is unique. The store confirms by moving the stop from `arrived` or `waiting` to `confirmed`. A second confirm does not create a second receipt. If the user who signed is deleted, `signedBy` is cleared and the receipt stays.
+| Parent → Child | Cardinality | Key | On delete |
+| --- | --- | --- | --- |
+| DeliveryNote → DeliveryNoteLine | One-to-Many (1 : N) | `DeliveryNote.dnId + DeliveryNote.versionAt` → `DeliveryNoteLine.dnId + DeliveryNoteLine.versionAt` | CASCADE |
+| DeliveryNote → DeliveryNoteLoader | One-to-Many (1 : N) | `DeliveryNote.dnId + DeliveryNote.versionAt` → `DeliveryNoteLoader.dnId + DeliveryNoteLoader.versionAt` | CASCADE |
+| DeliveryNote → LoaderFlag | One-to-Many (1 : N) | `DeliveryNote.dnId + DeliveryNote.versionAt` → `LoaderFlag.dnId + LoaderFlag.versionAt` | CASCADE |
+| DeliveryNoteLine → DeliveryNotePick | One-to-Many (1 : N) | `DeliveryNoteLine.id` → `DeliveryNotePick.dnLineId` | CASCADE |
+| Depot → District | One-to-Many (1 : N), optional | `Depot.id` → `District.depotId` | SET NULL |
+| Depot → Store | One-to-Many (1 : N) | `Depot.id` → `Store.depotId` | RESTRICT |
+| Depot → Trip | One-to-Many (1 : N) | `Depot.id` → `Trip.depotId` | RESTRICT |
+| Depot → User | One-to-Many (1 : N), optional | `Depot.id` → `User.depotId` | SET NULL |
+| Depot → Vehicle | One-to-Many (1 : N) | `Depot.id` → `Vehicle.depotId` | RESTRICT |
+| Dispatcher → DispatcherPhone | One-to-Many (1 : N) | `Dispatcher.id` → `DispatcherPhone.dispatcherId` | CASCADE |
+| Dispatcher → LoaderFlag | One-to-Many (1 : N), optional | `Dispatcher.id` → `LoaderFlag.reviewedById` | SET NULL |
+| Dispatcher → LoadingJob | One-to-Many (1 : N) | `Dispatcher.id` → `LoadingJob.assignedById` | RESTRICT |
+| District → Store | One-to-Many (1 : N) | `District.name` → `Store.districtId` | RESTRICT |
+| District → Trip | One-to-Many (1 : N) | `District.name` → `Trip.districtId` | RESTRICT |
+| Driver → DriverIncident | One-to-Many (1 : N) | `Driver.id` → `DriverIncident.driverId` | RESTRICT |
+| Driver → DriverPhone | One-to-Many (1 : N) | `Driver.id` → `DriverPhone.driverId` | CASCADE |
+| Driver → LocationPing | One-to-Many (1 : N) | `Driver.id` → `LocationPing.driverId` | RESTRICT |
+| InventoryBatch → DeliveryNotePick | One-to-Many (1 : N) | `InventoryBatch.id` → `DeliveryNotePick.batchId` | RESTRICT |
+| Item → DeliveryNoteLine | One-to-Many (1 : N) | `Item.id` → `DeliveryNoteLine.itemId` | RESTRICT |
+| Item → FieldFlag | One-to-Many (1 : N), optional | `Item.id` → `FieldFlag.itemId` | SET NULL |
+| Item → InventoryBatch | One-to-Many (1 : N) | `Item.id` → `InventoryBatch.itemId` | RESTRICT |
+| Item → LoaderFlag | One-to-Many (1 : N), optional | `Item.id` → `LoaderFlag.itemId` | SET NULL |
+| Item → OrderLine | One-to-Many (1 : N), optional | `Item.id` → `OrderLine.itemId` | SET NULL |
+| Item → StoreSavedItem | One-to-Many (1 : N) | `Item.id` → `StoreSavedItem.itemId` | CASCADE |
+| Loader → DeliveryNote | One-to-Many (1 : N), optional | `Loader.id` → `DeliveryNote.changedById` | SET NULL |
+| Loader → DeliveryNoteLoader | One-to-Many (1 : N) | `Loader.id` → `DeliveryNoteLoader.loaderId` | RESTRICT |
+| Loader → LoaderFlag | One-to-Many (1 : N) | `Loader.id` → `LoaderFlag.loaderId` | RESTRICT |
+| Loader → LoaderPhone | One-to-Many (1 : N) | `Loader.id` → `LoaderPhone.loaderId` | CASCADE |
+| Order → DeliveryNote | One-to-Many (1 : N) | `Order.id` → `DeliveryNote.orderId` | RESTRICT |
+| Order → FieldFlag | One-to-Many (1 : N) | `Order.id` → `FieldFlag.orderId` | RESTRICT |
+| Order → OrderLine | One-to-Many (1 : N) | `Order.id` → `OrderLine.orderId` | CASCADE |
+| Order → TripStop | One-to-One (1 : 1) | `Order.id` → `TripStop.orderId` | RESTRICT |
+| OrderLine → LoadFlag | One-to-Many (1 : N), optional | `OrderLine.id` → `LoadFlag.orderLineId` | SET NULL |
+| Store → FieldFlag | One-to-Many (1 : N) | `Store.id` → `FieldFlag.storeId` | RESTRICT |
+| Store → Order | One-to-Many (1 : N) | `Store.id` → `Order.storeId` | RESTRICT |
+| Store → OutletPhone | One-to-Many (1 : N) | `Store.id` → `OutletPhone.storeId` | CASCADE |
+| Store → StoreSavedItem | One-to-Many (1 : N) | `Store.id` → `StoreSavedItem.storeId` | CASCADE |
+| Store → User | One-to-Many (1 : N), optional | `Store.id` → `User.storeId` | SET NULL |
+| Trip → DriverEvent | One-to-Many (1 : N), optional | `Trip.id` → `DriverEvent.tripId` | SET NULL |
+| Trip → DriverIncident | One-to-Many (1 : N), optional | `Trip.id` → `DriverIncident.tripId` | SET NULL |
+| Trip → DriverIncident | One-to-Many (1 : N), optional | `Trip.id` → `DriverIncident.reassignedTripId` | SET NULL |
+| Trip → FieldFlag | One-to-Many (1 : N), optional | `Trip.id` → `FieldFlag.tripId` | SET NULL |
+| Trip → Incident | One-to-Many (1 : N) | `Trip.id` → `Incident.tripId` | RESTRICT |
+| Trip → LoadingJob | One-to-One (1 : 1) | `Trip.id` → `LoadingJob.tripId` | CASCADE |
+| Trip → LoadSession | One-to-One (1 : 1) | `Trip.id` → `LoadSession.tripId` | CASCADE |
+| Trip → LocationPing | One-to-Many (1 : N) | `Trip.id` → `LocationPing.tripId` | CASCADE |
+| Trip → RouteLeg | One-to-Many (1 : N) | `Trip.id` → `RouteLeg.tripId` | CASCADE |
+| Trip → TripStop | One-to-Many (1 : N) | `Trip.id` → `TripStop.tripId` | CASCADE |
+| TripStop → DriverIncident | One-to-Many (1 : N), optional | `TripStop.id` → `DriverIncident.lastStopId` | SET NULL |
+| TripStop → LoadFlag | One-to-Many (1 : N) | `TripStop.id` → `LoadFlag.stopId` | CASCADE |
+| TripStop → StoreReceipt | One-to-One (1 : 1) | `TripStop.id` → `StoreReceipt.stopId` | CASCADE |
+| User → Dispatcher | One-to-One (1 : 1) | `User.id` → `Dispatcher.userId` | CASCADE |
+| User → Driver | One-to-One (1 : 1) | `User.id` → `Driver.userId` | CASCADE |
+| User → DriverEvent | One-to-Many (1 : N) | `User.id` → `DriverEvent.driverId` | RESTRICT |
+| User → Loader | One-to-One (1 : 1) | `User.id` → `Loader.userId` | CASCADE |
+| User → Notification | One-to-Many (1 : N) | `User.id` → `Notification.userId` | CASCADE |
+| User → Session | One-to-Many (1 : N) | `User.id` → `Session.userId` | CASCADE |
+| User → StoreReceipt | One-to-Many (1 : N), optional | `User.id` → `StoreReceipt.signedByUserId` | SET NULL |
+| User → Trip | One-to-Many (1 : N), optional | `User.id` → `Trip.assignedDriverId` | SET NULL |
+| User → Vehicle | One-to-One (1 : 1), optional | `User.id` → `Vehicle.driverId` | SET NULL |
+| Vehicle → DriverIncident | One-to-Many (1 : N), optional | `Vehicle.id` → `DriverIncident.vehicleId` | SET NULL |
+| Vehicle → Trip | One-to-Many (1 : N) | `Vehicle.id` → `Trip.vehicleId` | RESTRICT |
 
-**A delivery note is stored as versions.** The primary key is `dnId` plus `versionAt`. The current version is the one with `validTo` empty. Lines, the loaders who worked it, and loader flags all point at that pair. The same loader is recorded once per version (`dnId`, `versionAt`, `loaderId` unique).
+### Links without a foreign key (on purpose)
 
-**Login names and identity numbers do not repeat.** `User.loginId` is unique. A driver license number and a NIC (`idNo`) are unique when present, and the same is true of a loader or dispatcher employee number. Each profile is one-to-one with its user (`userId` unique). Deleting the user deletes the profile, its phone rows, its sessions, and its notifications.
-
-**A staff phone number is the row's identity.** `DriverPhone`, `LoaderPhone`, and `DispatcherPhone` use `phoneNumber` as the primary key, so one number cannot be stored twice for that role. `OutletPhone.phoneNo` is not unique: the same shop number may appear twice on one outlet, or on two outlets, with a label of shop, manager, or warehouse.
-
-**Starred catalogue items are one row per store and item.** `StoreSavedItem` uses `(storeId, itemId)` as its primary key. Deleting the store or the item deletes those stars.
-
-**Service time is looked up by brand and dock type.** `ServiceAllowance` is unique on `(brand, dockType)` and has no foreign key. `TrafficSpeed` and `RoadCondition` store a district name as text, also with no foreign key. `District` itself is keyed by `name`.
-
-**Retries from the phone do not insert twice.** `DriverEvent.clientId` is unique, and `LocationPing.clientUuid` is unique, so the same tap or the same GPS point sent again updates nothing new.
+| Column | Points at | Why there is no FK |
+| --- | --- | --- |
+| `ServiceAllowance (brand, dockType)` | `Store.brand` + `Store.dockType` | A lookup by value, loaded from CSV |
+| `TrafficSpeed.districtName`, `RoadCondition.districtName` | `District.name` | Raw CSV rows; must load even if a name is spelled differently |
+| `LoadSession.loaderIds` | `User.id` (array) | Small list read with the session |
+| `LoadSession.ackedStopIds`, `takenOffOrderIds`, `newOrderIds` | `Order.id` (arrays) | Snapshots for the plan-change lock, not live links |
+| `LoadingJob.depot` | `Depot.id` | Text copy for the dock queue |
+| `Order.deferredById`, `Order.cancelledById`, `DriverIncident.acknowledgedBy` | `User.id` | Audit fields; the row must outlive the user |
 
 ---
 
-## Domain rules the schema supports
+## 5. Data seeding and population strategy
 
-These are booklet / app rules. They are enforced in Nest services, not only by unique keys.
+### Population method
 
-| Rule | How it shows in the DB |
+The database is filled by a TypeScript seed, [`apps/api/prisma/seed/index.ts`](../apps/api/prisma/seed/index.ts), run with `pnpm seed` (and automatically every time the API container starts, after `prisma migrate deploy`). No Faker library and no LLM-generated data are used. Every value is either from the competition CSVs or written by deterministic seed code.
+
+1. **CSV import** (`load-csv.ts`). The organisers' competition files are loaded from `DATA_DIR` (`data/` locally, `/data` in Docker): `outlets.csv` → `Store` (and the two `Depot` rows), `district_travel.csv` → `District`, `vehicles.csv` → `Vehicle`, `service_allowance.csv` → `ServiceAllowance`, `calendar.csv` → `CalendarDay`, `traffic_speed.csv` → `TrafficSpeed`, `road_conditions.csv` → `RoadCondition`. Column names are matched loosely (case and separators ignored). Only `service_allowance.csv` is committed; the other CSVs are kept out of git and supplied separately.
+2. **Derived fill-ins.** Planner minutes per district, store map locations, and vehicle number plates are filled from the loaded data.
+3. **People.** Demo logins (`nimal` dispatcher, `sunil` store, `sampath` loader, `kasun` driver), one manager login per outlet (`OUT001`… password `waypoint`), fleet drivers with licences and phones, 100 loaders per depot (the last 10 at each depot have left), and a dock tablet password per depot. Passwords and PINs are stored as argon2 hashes.
+4. **Team ERD and catalogue** (`team-erd.ts`). Catalogue items and stock batches, outlet phones, profiles, incidents and links from order lines to items.
+5. **Demo days** (`dispatch-demo.ts`, `depot-orders.ts`, `depot-trips.ts`, `dock-store-demo.ts`, `spine-demo.ts`). Orders, trips, stops, load sessions, delivery notes, receipts, flags and pings for today and tomorrow, so every screen has something to show.
+
+`pnpm seed:reset` (`SEED_RESET=1`) truncates every table first. A plain `pnpm seed` on a database that already has data only tops up the demo pieces, so it is safe to repeat.
+
+Teammates share a database with [`scripts/db-share`](../scripts/db-share): `export-db.mjs` writes a data-only SQL file (parents first, inside one transaction), `import-db.mjs` loads it, and `fill-demo.mjs` adds the dispatcher walkthrough rows.
+
+### Data volume
+
+Rows per table in the dump of 4 Oct 2026 (`waypoint-20261004-0920.sql`):
+
+In short: 2 depots, 12 districts, 120 stores, 35 catalogue items, 60 vehicles, 394 user accounts (1 dispatcher, 121 store managers, 201 loaders, 71 drivers), 80 orders with 155 lines, 17 trips with 22 stops, and 910 calendar days with 576 traffic and 10,920 road-condition rows.
+
+| Group | Table | Rows |
+| --- | --- | --- |
+| Reference data | `Depot` | 2 |
+| Reference data | `District` | 12 |
+| Reference data | `ServiceAllowance` | 9 |
+| Reference data | `CalendarDay` | 910 |
+| Reference data | `TrafficSpeed` | 576 |
+| Reference data | `RoadCondition` | 10,920 |
+| Reference data | `Item` | 35 |
+| Reference data | `InventoryBatch` | 35 |
+| People and sign-in | `User` | 394 |
+| People and sign-in | `Session` | 3 |
+| People and sign-in | `Notification` | 3 |
+| People and sign-in | `Driver` | 71 |
+| People and sign-in | `DriverPhone` | 71 |
+| People and sign-in | `Loader` | 201 |
+| People and sign-in | `LoaderPhone` | 201 |
+| People and sign-in | `Dispatcher` | 1 |
+| People and sign-in | `DispatcherPhone` | 1 |
+| Stores and orders | `Store` | 120 |
+| Stores and orders | `OutletPhone` | 242 |
+| Stores and orders | `StoreSavedItem` | 24 |
+| Stores and orders | `Order` | 80 |
+| Stores and orders | `OrderLine` | 155 |
+| Fleet and trips | `Vehicle` | 60 |
+| Fleet and trips | `Trip` | 17 |
+| Fleet and trips | `_TripExtraDistricts` | 0 |
+| Fleet and trips | `TripStop` | 22 |
+| Fleet and trips | `RouteLeg` | 22 |
+| Fleet and trips | `LocationPing` | 21 |
+| Dock and delivery notes | `LoadSession` | 8 |
+| Dock and delivery notes | `LoadFlag` | 1 |
+| Dock and delivery notes | `LoadingJob` | 13 |
+| Dock and delivery notes | `DeliveryNote` | 22 |
+| Dock and delivery notes | `DeliveryNoteLine` | 47 |
+| Dock and delivery notes | `DeliveryNotePick` | 45 |
+| Dock and delivery notes | `DeliveryNoteLoader` | 22 |
+| Dock and delivery notes | `LoaderFlag` | 2 |
+| Receipts, driver sync and incidents | `StoreReceipt` | 4 |
+| Receipts, driver sync and incidents | `FieldFlag` | 2 |
+| Receipts, driver sync and incidents | `DriverEvent` | 7 |
+| Receipts, driver sync and incidents | `Incident` | 5 |
+| Receipts, driver sync and incidents | `DriverIncident` | 2 |
+| **Total** | | **14,388** |
+
+### Sample data preview
+
+Two rows per table from the same dump. Long values are shortened (…), `NULL` is an empty value, and `—` means the column was added after the dump was taken.
+
+#### 5.1 Reference data
+
+**Depot** (2 rows)
+
+| id | name | telephone | email | address | lat | lng | dockPasswordHash |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| depo1 | Peliyagoda | 011 293 9100 | peliyagoda@waypoint.lk | 148 Negombo Road, Peliyagoda | 6.9678 | 79.8832 | — |
+| depo2 | Kandy | 081 223 8450 | kandy@waypoint.lk | 27 William Gopallawa Mawath… | 7.2906 | 80.6337 | — |
+
+**District** (12 rows)
+
+| name | depotId | served | roadClass | freeFlowKmh | depotToDistrictKm | depotToDistrictMin | interStopKm | interStopMin |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Kandy | depo2 | true | urban | 30 | 8 | 16 | 3 | 6 |
+| Matale | depo2 | true | suburban | 45 | 26 | 35 | 8 | 11 |
+
+**ServiceAllowance** (9 rows)
+
+| id | brand | dockType | minutes |
+| --- | --- | --- | --- |
+| cmuqj60lk0000128gw1yqbr2i | Fresh | rear_dock | 15 |
+| cmuqj60me0001128gu6qpfps3 | Fresh | street | 16 |
+
+**CalendarDay** (910 rows)
+
+| id | dow | isWeekend | isoYear | isoWeek | isPayday | festival | festivalRamp | isHoliday | monsoon | isOperating |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2024-01-01 | 0 | false | 2024 | 1 | false | NULL | 0 | false | false | true |
+| 2024-01-02 | 1 | false | 2024 | 1 | false | NULL | 0 | false | false | true |
+
+**TrafficSpeed** (576 rows)
+
+| id | districtName | hour | monsoon | speedIndex | raw |
+| --- | --- | --- | --- | --- | --- |
+| cmuppysr9007cahsw44d1hxr8 | Colombo | 0 | false | 94 | {"hour": "0", "monsoon": "0… |
+| cmuppysr9007dahswoim9hfa3 | Colombo | 1 | false | 94 | {"hour": "1", "monsoon": "0… |
+
+**RoadCondition** (10,920 rows)
+
+| id | date | districtName | disruptionIndex | raw |
+| --- | --- | --- | --- | --- |
+| cmuppysxs00ncahsw2r8bv37d | 2024-01-01 | Colombo | 100 | {"date": "2024-01-01", "dis… |
+| cmuppysxs00ndahswlwwt58zg | 2024-01-02 | Colombo | 81 | {"date": "2024-01-02", "dis… |
+
+**Item** (35 rows)
+
+| id | itemName | type | isChilled | packLabel | packWeightKg |
+| --- | --- | --- | --- | --- | --- |
+| T-TV | 43" television | tech | false | single box | 11 |
+| T-ACC | Accessories | tech | false | carton | 4 |
+
+**InventoryBatch** (35 rows)
+
+| id | itemId | batchName | manufacturingDate | expiryDate | qty |
+| --- | --- | --- | --- | --- | --- |
+| BATCH-S-HAT | S-HAT | S-HAT-2026-W40 | 2026-09-20 | 2027-09-20 | 80 |
+| BATCH-S-BELT | S-BELT | S-BELT-2026-W40 | 2026-09-20 | 2027-09-20 | 80 |
+
+#### 5.2 People and sign-in
+
+**User** (394 rows)
+
+| id | loginId | role | name | depotId | storeId | passwordHash | pinHash | notificationPrefs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuqqet65009264hi4ijqufty | D020 | driver | Udara Weerasinghe | depo1 | NULL | (hash hidden) | (hash hidden) | {"delayAlerts": true, "plan… |
+| cmuqqet6i009664hiby8oceua | D021 | driver | Vijitha Amarasinghe | depo1 | NULL | (hash hidden) | (hash hidden) | {"delayAlerts": true, "plan… |
+
+**Session** (3 rows)
+
+| id | userId | createdAt | expiresAt |
+| --- | --- | --- | --- |
+| (token hidden) | cmuppyuae092pahswvmx7xq1j | 2026-10-02 08:21:24.119 | 2026-10-02 20:21:24.117 |
+| (token hidden) | cmuppyuak092rahsw8zmn6kd9 | 2026-10-02 09:20:04.442 | 2026-10-02 21:20:04.44 |
+
+**Notification** (3 rows)
+
+| id | userId | title | body | link | read | createdAt |
+| --- | --- | --- | --- | --- | --- | --- |
+| cmuppyuhf0943ahswo9dn7oq7 | cmuppyuak092rahsw8zmn6kd9 | Delivery moved to tomorrow | One order was moved from 20… | /store/updates | false | 2026-10-01 15:59:10.803 |
+| demo-note-1 | cmuqqesxm006y64hima50g8fv | Plan ready | Tomorrow has waiting orders… | /dispatch/plan | false | 2026-10-04 00:00:57.622 |
+
+**Driver** (71 rows)
+
+| id | userId | licenseNo | licenseExpiry | idNo | joinDate | leavingDate | lastLoginAt | isActive | address |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuqqesy3007064hi57o3t9iq | cmuqqesxm006y64hima50g8fv | B2000001 | 2026-07-02 | 199000001V | 2019-01-12 | NULL | 2026-10-02 18:52:51.128 | true | 21 Lake Road, Peliyagoda |
+| cmuqqet0z007k64hia3wvknbb | cmuqqet0w007i64hic5kwayyn | B2000006 | 2026-07-07 | 199000006V | 2019-03-08 | NULL | 2026-10-02 18:52:51.193 | true | 26 Lake Road, Peliyagoda |
+
+**DriverPhone** (71 rows)
+
+| phoneNumber | driverId |
 | --- | --- |
-| One brand per trip, one main district | `Trip.brand` + `Trip.districtId`. Extra districts sit on `Trip.extraDistricts` |
-| Window owns sequence | `TripStop.sequence` + store `windowOpenMin` / `windowCloseMin` |
-| LIFO load | Load order is reverse of `sequence` (app, not a column) |
-| Store closes the stop | Driver sets `arrivedAt` → store writes `StoreReceipt` + `storeConfirmedAt` → driver `driverAckAt`. ACK before receipt is rejected |
-| Plan-change lock | `LoadSession.ackedPlanVersion` / `ackedStopIds` vs live `Trip.planVersion` and stop ids |
-| Stale actions | `DriverEvent.seenPlanVersion` vs `Trip.planVersion` |
-| Trip minutes | `District.depotToDistrictMin` + `interStopMin × (stops − 1)` + sum of `ServiceAllowance.minutes` for each stop’s brand + dock |
-| Fuel | `trip km / Vehicle.kmPerL`; latest `FUEL_READING` on `Trip.fuelLitresAtEnd` |
-| Capacity | `Order.weightKg` / `volumeM3` vs `Vehicle` caps; publish blocked if over |
-| Repeat skip | `Order.repeatSkip` / `deferredYesterday` |
-| Vehicle keeps its driver | `Vehicle.driverId` is that driver until `Driver.leavingDate`. The plan screen does not put a different driver on the trip |
-| Photos | keys on the flag/receipt row; bytes in MinIO |
+| 0772000059 | cmuqqetqr00dg64hivlpjj4wj |
+| 0772000018 | cmuqqet5k008w64hirlk5x4fo |
 
-**Flags are three tables on purpose**
+**Loader** (201 rows)
 
-- `LoadFlag` — live dock sheet (plan lock diffs against it).
-- `LoaderFlag` — same issue recorded on the DN when the truck is handed over; dispatcher must review (`pending_dispatcher` blocks a clean handoff in the ERD notes).
-- `FieldFlag` — outlet short/damage after receive. Drivers do not raise these.
+| id | userId | employeeNo | idNo | shift | joinDate | leavingDate | lastLoginAt | isActive | address |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyuj60947ahswznphd535 | cmuppyuam092tahswqfk3w0xp | LDR-014 | 199512378V | morning | 2023-06-15 | NULL | 2026-10-01 15:59:10.865 | true | 8 Dock Lane, Peliyagoda |
+| cmuqqqx5q00h810955lwjrhd5 | cmuqqqx3k00h6109512ssrqxo | LDR-L023 | 198000023V | morning | 2020-06-10 | NULL | 2026-10-02 18:52:52.127 | true | 31 Dock Lane, Peliyagoda |
+
+**LoaderPhone** (201 rows)
+
+| phoneNumber | loaderId |
+| --- | --- |
+| 0771000000 | cmuppyuj60947ahswznphd535 |
+| 0771000001 | cmuqqqwy800es1095o56a0hh1 |
+
+**Dispatcher** (1 rows)
+
+| id | userId | employeeNo | email | address | lastLoginAt | isActive |
+| --- | --- | --- | --- | --- | --- | --- |
+| cmuppyujd0949ahsw6bow5lhr | cmuppyuae092pahswvmx7xq1j | DSP-001 | nimal@waypoint.lk | 4 Depot Office, Peliyagoda | 2026-10-01 15:59:10.873 | true |
+
+**DispatcherPhone** (1 rows)
+
+| phoneNumber | dispatcherId |
+| --- | --- |
+| 0112000000 | cmuppyujd0949ahsw6bow5lhr |
+
+#### 5.3 Stores and orders
+
+**Store** (120 rows)
+
+| id | displayName | address | email | brand | districtId | depotId | dockType | parkingConstraint | mallWindow | windowOpenMin | windowCloseMin | lat | lng | daysSinceLastServed |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OUT011 | Green Basket 11 | 22 Temple Road, Colombo | out011@shops.waypoint.lk | Fresh | Colombo | depo1 | rear_dock | normal | NULL | 480 | 1020 | 6.898 | 79.922 | NULL |
+| OUT015 | Wardrobe Room 15 | 26 Temple Road, Colombo | out015@shops.waypoint.lk | Style | Colombo | depo1 | mall_bay | mall_dock | 09:00-11:00 | 540 | 660 | 6.883 | 79.878 | NULL |
+
+**OutletPhone** (242 rows)
+
+| id | storeId | phoneNo | label |
+| --- | --- | --- | --- |
+| cmuppyujm094aahswv2s7yck7 | OUT001 | 0112345678 | shop |
+| cmuppyujm094bahswjeq7au52 | OUT001 | 0778765432 | manager |
+
+**StoreSavedItem** (24 rows)
+
+| storeId | itemId | createdAt |
+| --- | --- | --- |
+| OUT001 | F-BUTTR | 2026-10-04 00:00:57.622 |
+| OUT001 | F-CHEE | 2026-10-04 00:00:57.622 |
+
+**Order** (80 rows)
+
+| id | storeId | brand | deliveryDate | temp | status | units | weightKg | volumeM3 | urgentNote | urgent | stockLevel | movedFromDate | deferReason | deferredById | deferredYesterday | repeatSkip | cancelledAt | cancelledById | createdAt |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyugg0937ahswhnuucedx | OUT003 | Fresh | 2026-10-01 | chilled | planned | 9 | 93 | 0.15 | NULL | false | NULL | NULL | NULL | NULL | false | false | NULL | NULL | 2026-10-01 15:59:10.768 |
+| cmuppyugm093eahswuoybokm8 | OUT004 | Fresh | 2026-10-01 | chilled | planned | 8 | 92.4 | 0.252 | NULL | false | NULL | NULL | NULL | NULL | false | false | NULL | NULL | 2026-10-01 15:59:10.775 |
+
+**OrderLine** (155 rows)
+
+| id | orderId | itemId | name | qty | pack | chilled | unitWeightKg | unitVolumeM3 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyufz0931ahswdhv6zo0f | cmuppyufz092zahswmpzgp636 | F-MILK | Fresh milk 1 L | 6 | crate of 12 | true | 12.6 | 0.018 |
+| cmuppyufz0932ahswu3ys8w6m | cmuppyufz092zahswmpzgp636 | F-BREAD | Sandwich bread | 4 | crate of 20 | false | 9 | 0.06 |
+
+#### 5.4 Fleet and trips
+
+**Vehicle** (60 rows)
+
+| id | numberPlate | depotId | type | temp | weightCapKg | volumeCapM3 | fuelType | kmPerL | weeklyFuelQuotaL | status | outOfServiceReason | returnDate | lastServiceAt | driverId |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| VEH007 | WP LQ-1007 | depo1 | truck | reefer | 3610 | 19.4 | diesel | 6.4 | 590 | available | NULL | NULL | 2026-08-26 00:00:00 | cmuqqet1d007m64hitgopf8l6 |
+| VEH008 | WP LQ-1008 | depo1 | truck | ambient | 3800 | 22 | diesel | 7.1 | 460 | available | NULL | NULL | 2026-08-25 00:00:00 | cmuqqet1t007q64hi0rb4c8rv |
+
+**Trip** (17 rows)
+
+| id | vehicleId | assignedDriverId | depotId | brand | districtId | serviceDate | tripNumber | csvRouteId | status | planVersion | plannedMinutes | plannedLitres | fuelLitresAtEnd | publishedAt | tripStartingDate | tripEndingDate | startingTime | estimatedStartingTime | endingTime |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmurdd49h001fhcno6lywr2zt | VEH039 | NULL | depo2 | Fresh | Kandy | 2026-10-02 | 1 | DEMO-STATUS-Kandy-completed | completed | 1 | NULL | NULL | NULL | 2026-10-02 02:00:00 | NULL | NULL | 2026-10-02 02:00:00 | NULL | 2026-10-02 05:00:00 |
+| cmurdd45e0006hcnoqbv61d1t | VEH039 | NULL | depo2 | Fresh | Kandy | 2026-10-03 | 1 | DEMO-STATUS-Kandy-planning | planning | 1 | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL |
+
+**_TripExtraDistricts** (0 rows)
+
+_No rows in the dump._
+
+**TripStop** (22 rows)
+
+| id | tripId | orderId | sequence | status | etaMin | arrivedAt | storeConfirmedAt | driverAckAt | waitAlertedAt | plannedArrivalTime | leaveOutletTime | serviceMin | unloadingTime | estimatedUnloadingTime | estimatedTripStopTime | tripStopTime | tripStartTime | estimatedTripStartTime |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyugk093cahsw5xnjkm20 | cmuppyufu092xahswqj3cytia | cmuppyugg0937ahswhnuucedx | 2 | upcoming | 505 | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL |
+| cmuppyugr093kahsw20cxgj68 | cmuppyufu092xahswqj3cytia | cmuppyugm093eahswuoybokm8 | 3 | upcoming | 530 | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL |
+
+**RouteLeg** (22 rows)
+
+| id | tripId | seq | fromPoint | toOutlet | distanceKm | plannedDepartTime | plannedTravelMin | actualDepartTime | actualTravelMin | monsoon | trafficBand |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyulo094rahswhwwolxid | cmuppyugw093mahswbcrogboy | 1 | Peliyagoda depot | OUT001 | 12.4 | NULL | 28 | NULL | 31 | false | peak |
+| demo-leg-cmuppyufu092xahswq… | cmuppyufu092xahswqj3cytia | 1 | Peliyagoda depot | Fort Market 2 | 4.8 | NULL | 7 | NULL | NULL | false | free |
+
+**LocationPing** (21 rows)
+
+| id | clientUuid | tripId | driverId | lat | lng | accuracyM | speedKmh | recordedAt | receivedAt |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyulx094sahswy2i1nkmv | ping-cmuppyugw093mahswbcrog… | cmuppyugw093mahswbcrogboy | cmuppyuiu0945ahsw76l1sfl2 | 6.958 | 79.899 | 8 | 34 | 2026-10-01 15:47:10.964 | 2026-10-01 15:59:10.965 |
+| cmuppyulx094tahswhpbseka3 | ping-cmuppyugw093mahswbcrog… | cmuppyugw093mahswbcrogboy | cmuppyuiu0945ahsw76l1sfl2 | 6.941 | 79.863 | 6 | 18 | 2026-10-01 15:55:10.964 | 2026-10-01 15:59:10.965 |
+
+#### 5.5 Dock and delivery notes
+
+**LoadSession** (8 rows)
+
+| id | tripId | loaderIds | startedAt | finishedAt | departedAt | paused | ackedPlanVersion | ackedStopIds | takenOffOrderIds | newOrderIds |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| demo-session-cmurdd49h001fh… | cmurdd49h001fhcno6lywr2zt | {cmuppyuam092tahswqfk3w0xp} | 2026-10-03 18:30:58.717 | 2026-10-03 18:30:58.717 | 2026-10-03 18:30:58.717 | false | 1 | {cmurdd49c001ahcnolglchaek} | {} | {} |
+| demo-session-cmurdd4l60036h… | cmurdd4l60036hcnosnbi53mf | {cmuppyuam092tahswqfk3w0xp} | 2026-10-03 18:30:58.725 | 2026-10-03 18:30:58.725 | 2026-10-03 18:30:58.725 | false | 1 | {cmurdd4l00031hcno46bo0qlc} | {} | {} |
+
+**LoadFlag** (1 rows)
+
+| id | stopId | orderLineId | type | qty | note | photoKey | createdAt | resolvedAt |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuqj610v0074128gxubikgsf | cmuppyuga0935ahswy6dkwz97 | cmuppyufz0931ahswdhv6zo0f | missing | 1 | Demo: one pack short at doc… | load-flags/demo.png | 2026-10-02 05:36:34.735 | 2026-10-04 00:00:57.622 |
+
+**LoadingJob** (13 rows)
+
+| id | tripId | depot | assignedById | assignedAt | bay | loadByTime | instructions | priority | status | startedAt | loadedAt | handedOverAt | totalWeightKg | totalVolumeM3 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyukk094dahsw0bl0d6do | cmuppyufu092xahswqj3cytia | depo1 | cmuppyujd0949ahsw6bow5lhr | 2026-10-01 15:59:10.917 | Bay-2 | NULL | Chill first. Confirm DN ver… | 1 | assigned | NULL | NULL | NULL | 420 | 4.8 |
+| demo-job-cmuppyugw093mahswb… | cmuppyugw093mahswbcrogboy | depo1 | cmuppyujd0949ahsw6bow5lhr | 2026-10-04 00:00:57.622 | Bay 2 | NULL | Load last shop first. | 0 | handed_over | 2026-10-03 18:30:58.707 | NULL | 2026-10-03 18:30:58.707 | NULL | NULL |
+
+**DeliveryNote** (22 rows)
+
+| dnId | versionAt | orderId | status | validTo | changedById | changeReason |
+| --- | --- | --- | --- | --- | --- | --- |
+| DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00:00 | cmuppyugz093oahsw05yw3ajt | picking | NULL | cmuppyuj60947ahswznphd535 | initial pick list |
+| dn-cmuppyugg0937ahswhnuucedx | 2026-10-03 18:30:58.832 | cmuppyugg0937ahswhnuucedx | picking | NULL | cmuppyuj60947ahswznphd535 | demo pick list |
+
+**DeliveryNoteLine** (47 rows)
+
+| id | dnId | versionAt | itemId | qtyConfirmed | shortageReason |
+| --- | --- | --- | --- | --- | --- |
+| cmuppyuks094fahsw8eiot41w | DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00:00 | F-CHKN | 2 | NULL |
+| cmuppyuks094gahswyqusccgw | DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00:00 | F-MILK | 4 | NULL |
+
+**DeliveryNotePick** (45 rows)
+
+| id | dnLineId | batchId | qty |
+| --- | --- | --- | --- |
+| cmuppyul5094lahsw2hor7ekl | cmuppyuks094gahswyqusccgw | BATCH-F-MILK | 2 |
+| pick-dnl-line-cmuppyugg0937… | dnl-line-cmuppyugg0937ahswh… | BATCH-F-YOG | 5 |
+
+**DeliveryNoteLoader** (22 rows)
+
+| id | dnId | versionAt | loaderId | role | startedAt | finishedAt |
+| --- | --- | --- | --- | --- | --- | --- |
+| cmuppyuks094jahsw4w7loie4 | DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00:00 | cmuppyuj60947ahswznphd535 | picking | 2026-10-01 15:59:10.923 | NULL |
+| dnl-cmuppyugg0937ahswhnuuce… | dn-cmuppyugg0937ahswhnuucedx | 2026-10-03 18:30:58.832 | cmuppyuj60947ahswznphd535 | picking | 2026-10-03 18:30:58.832 | NULL |
+
+**LoaderFlag** (2 rows)
+
+| id | raisedAt | loaderId | dnId | versionAt | scope | itemId | qtyFlagged | reason | reasonDetail | photoKey | validationStatus | reviewedById | reviewedAt | reviewNote |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyul8094nahswhsx413b7 | 2026-10-01 15:59:10.941 | cmuppyuj60947ahswznphd535 | DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00:00 | item | F-MILK | 1 | crate crushed at dock | Outer crate split; 1 bottle… | NULL | pending_dispatcher | NULL | NULL | NULL |
+| demo-loader-flag | 2026-10-04 00:00:57.622 | cmuppyuj60947ahswznphd535 | dn-cmuppyugg0937ahswhnuucedx | 2026-10-03 18:30:58.832 | item | F-BREAD | 1 | crate crushed | Demo dock flag | NULL | pending_dispatcher | NULL | NULL | NULL |
+
+#### 5.6 Receipts, driver sync and incidents
+
+**StoreReceipt** (4 rows)
+
+| id | stopId | lineResults | chilledWasCold | signaturePhotoKey | signedByUserId | signedAt | createdAt |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuqj61100076128glu8kkexy | cmuppyuga0935ahswy6dkwz97 | [{"name": "Fresh milk 1 L",… | true | signatures/demo.png | cmuqj60pz000c128ge5cvtrg1 | 2026-10-02 05:36:34.726 | 2026-10-02 05:36:34.74 |
+| rcpt-cmurdd49n001hhcnoc6n9d… | cmurdd49n001hhcnoc6n9d4lc | [{"name": "Samba rice 5 kg"… | true | receipts/cmurdd49n001hhcnoc… | cmuqj60tv004q128gbxiypnf0 | 2026-10-04 00:00:57.622 | 2026-10-04 00:00:57.622 |
+
+**FieldFlag** (2 rows)
+
+| id | raisedAt | storeId | orderId | tripId | itemId | qtyFlagged | reason | reasonDetail | severity | driverDecision | driverDecidedAt | driverNote | photoKey | resolvedAt | resolveStatus |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyulh094pahsw2cl1m2i8 | 2026-10-01 15:59:10.95 | OUT001 | cmuppyugz093oahsw05yw3ajt | cmuppyugw093mahswbcrogboy | F-MILK | 1 | damaged | One milk crate arrived with… | medium | pending | NULL | NULL | NULL | NULL | false |
+| demo-flag-solved | 2026-10-04 00:00:57.622 | OUT002 | cmuppyufz092zahswmpzgp636 | cmuppyufu092xahswqj3cytia | F-MILK | 1 | damaged | Demo: one pack damaged, rep… | medium | accepted | NULL | NULL | NULL | 2026-10-04 00:00:57.622 | true |
+
+**DriverEvent** (7 rows)
+
+| id | clientId | driverId | tripId | type | payload | createdOnPhoneAt | seenPlanVersion | appliedAt |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuqj61180077128gsb2p9ps2 | seed-arrived-cmuppyufu092xa… | cmuppyuaq092vahswi6i7eszo | cmuppyufu092xahswqj3cytia | ARRIVED | {"stopId": "cmuppyuga0935ah… | 2026-10-02 05:16:34.747 | 1 | 2026-10-02 05:36:34.749 |
+| cmuqj61180078128gr6a2maeb | seed-ack-cmuppyufu092xahswq… | cmuppyuaq092vahswi6i7eszo | cmuppyufu092xahswqj3cytia | ACKNOWLEDGEMENT | {"stopId": "cmuppyuga0935ah… | 2026-10-02 05:31:34.747 | 1 | 2026-10-02 05:36:34.749 |
+
+**Incident** (5 rows)
+
+| id | type | tripId | status | timeline | createdAt |
+| --- | --- | --- | --- | --- | --- |
+| cmuqj611f007a128gjtmjla25 | breakdown | cmuppyugw093mahswbcrogboy | open | [{"at": "2026-10-02T05:36:3… | 2026-10-02 05:36:34.756 |
+| inc-delay | delay | cmurbm3c6017s5qef0doy1efh | open | [{"at": "2026-10-02T19:29:5… | 2026-10-03 00:59:59.388 |
+
+**DriverIncident** (2 rows)
+
+| id | driverId | tripId | vehicleId | incidentType | severity | message | lat | lng | lastStopId | raisedAt | acknowledgedAt | acknowledgedBy | resolvedAt | resolution | reassignedTripId |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cmuppyum3094wahswsooqn6qh | cmuppyuiu0945ahsw76l1sfl2 | cmuppyugw093mahswbcrogboy | VEH009 | sos | high | Breakdown on Baseline Road … | 6.941 | 79.863 | cmuppyuh3093uahsw2fzcy1bt | 2026-10-01 15:59:10.971 | NULL | NULL | NULL | NULL | NULL |
+| demo-drv-inc-1 | cmuppyuiu0945ahsw76l1sfl2 | cmurbm3c6017s5qef0doy1efh | VEH001 | delay | low | Held in traffic near the fi… | 6.94 | 79.86 | NULL | 2026-10-04 00:00:57.622 | NULL | NULL | NULL | NULL | NULL |
 
 ---
 
-## Who writes what
+## 6. Design justifications and trade-offs
+
+### Performance and indexing
+
+Besides every primary key and unique constraint (each backed by an index):
+
+| Index | Query it serves |
+| --- | --- |
+| `Order (deliveryDate, status)` | The plan board's list of waiting orders for one day, loaded on every refresh |
+| `Trip (depotId, serviceDate)` | A depot's trips for one day: plan board, dock queue, live dispatch |
+| `DriverEvent (driverId, type, appliedAt)` | A driver's latest event of one type (fuel reading, open SOS) |
+| `LocationPing (tripId, recordedAt)` | A trip's GPS trail in time order and its latest position, polled every second by the live map |
+| `DeliveryNote (dnId)`, `(orderId)` | All versions of a note; the notes of an order |
+| `FieldFlag (orderId)`, `LoaderFlag (dnId)` | Flags shown with an order or a delivery note |
+| `Item (type)` | The catalogue grouped by product class |
+
+Uniqueness also does correctness work, so concurrent requests need no locks. `DriverEvent.clientId` and `LocationPing.clientUuid` make phone retries safe. `TripStop.orderId` stops one order going on two trips. Conditional updates (for example "confirm only while the stop is `arrived` or `waiting`") stop double receipts and double alerts.
+
+### Normalisation vs. denormalisation
+
+The model is normalised (roughly third normal form) around the order → stop → trip chain, with a few deliberate exceptions for speed and simplicity during the hackathon:
+
+| Choice | Why |
+| --- | --- |
+| **Natural keys** for CSV data (`Store.id` = `OUT001`, `Item.id` = `F-MILK`, `District.name`, `CalendarDay` date) | Matches the competition files, makes seed and debugging simple, and avoids lookup joins when importing |
+| **`Order.brand` copies `Store.brand`; `Trip.depotId` copies the vehicle's depot** | The plan board filters by brand and depot constantly; the copy avoids a join, and both are set once and never change |
+| **`OrderLine` keeps `name`, `pack`, `unitWeightKg`, `unitVolumeM3`** | A snapshot at order time, so later catalogue edits do not change past orders or loads |
+| **Cached results**: `Trip.plannedMinutes`, `plannedLitres`, `fuelLitresAtEnd`, `Store.daysSinceLastServed` | Computed by the domain rules or the latest sync and stored, so lists do not recompute them |
+| **JSONB** for `StoreReceipt.lineResults`, `Incident.timeline`, `DriverEvent.payload`, `User.notificationPrefs`, CSV `raw` | Variable-shape data that is always read whole; no need for extra tables |
+| **Text arrays** in `LoadSession` (`loaderIds`, `ackedStopIds`…) | Small sets read together for the plan-change lock; a join table would add writes for no benefit |
+| **Versioned `DeliveryNote`** (composite key `dnId` + `versionAt`, current = `validTo IS NULL`) | Keeps the full history of what was picked and loaded, instead of overwriting it |
+| **Three flag tables** (`LoadFlag`, `LoaderFlag`, `FieldFlag`) | They belong to three different moments (live dock sheet, handed-over note reviewed by dispatch, store's report after delivery) with different owners and life cycles |
+| **One `User` table + 1 : 1 profiles** | One login and session model for all four roles; HR details live only where they apply |
+| **Phone tables** keyed by the number (`DriverPhone`…) and `OutletPhone` | A person or outlet can have several numbers; staff numbers cannot repeat, outlet numbers can |
+| **Two check constraints** (`Trip_tripNumber_max_2`, `Vehicle_out_of_service_needs_reason`) | Rules the database must refuse even if a bug in the app tries; added by hand in migration SQL because Prisma cannot express them |
+| **Photos in MinIO, not `BYTEA`** | Keeps the database small and backups fast; rows store only the object key |
+
+Trade-offs accepted: the copied and cached columns must be kept in step by the API, and the columns without a foreign key (section 4) depend on the app for integrity.
+
+---
+
+## Appendix: who writes what
 
 ### Dock
 
@@ -162,7 +1308,7 @@ Live state stays in `LoadSession` and `LoadFlag` so the plan-change lock can dif
 
 - **Sign in to the dock:** the tablet signs in with the depot and its 6-digit dock password (`Depot.dockPasswordHash`, argon2) as one shared `User` per depot (`loginId` = `dock-<depotId>`, `role` = loader), created on first sign-in.
 - **Start loading** (`POST /loads/:tripId/start`, body `{ loaderId, pin }`): the loader's own ID and PIN are checked against their `User` row. The first confirmed loader creates the `LoadSession` (`loaderIds` = that loader, `ackedPlanVersion` and `ackedStopIds` from the live trip) and moves the trip `published` → `loading`; each later loader is added to `loaderIds`. `LoadingJob` → `picking`. Each order gets a `DeliveryNote` (`DN-<orderId>`) version `status: picking`, its lines (one per order line with an `itemId`), and a `DeliveryNoteLoader` row for the confirmed loader, not for the shared tablet account.
-- **Confirm departure** (`POST /loads/:tripId/depart`): current note `validTo` is set; a `loaded` version is added. `qtyConfirmed` is ordered qty minus missing / wrong-quantity flags. Each dock flag becomes a `LoaderFlag` (`pending_dispatcher`). `LoadingJob` → `handed_over` with loaded weight and volume.
+- **Confirm departure** (`POST /loads/:tripId/depart`): current note `validTo` is set; a `loaded` version is added. `qtyConfirmed` is ordered qty minus missing / wrong-quantity flags. Each dock flag becomes a `LoaderFlag` (`pending_dispatcher`). `LoadingJob` → `handed_over` with loaded weight and volume. `LoadSession.finishedAt` and `departedAt` are set and the trip moves `loading` → `ready`: loaded and waiting for the driver to leave.
 
 ### Store
 
@@ -175,406 +1321,17 @@ Each event is stored as `DriverEvent` (`clientId` unique). Then:
 
 | Event | Also writes |
 | --- | --- |
+| `START_TRIP` | Trip `ready` → `on_road`, `Trip.startingTime` (refused unless the trip is `ready` or already `on_road`) |
 | `ARRIVED` | `TripStop.status` waiting, `arrivedAt` |
 | `ACKNOWLEDGEMENT` | `driverAckAt` (only if `storeConfirmedAt` is set) |
+| `END_TRIP` | Trip `on_road` → `completed`, `Trip.endingTime` (refused while any stop is not done) |
 | `FUEL_READING` | `Trip.fuelLitresAtEnd` if newest |
-| `SOS_ALERT` | `DriverIncident` |
-| `location` pings | `LocationPing` (`clientUuid`) |
+| `SOS_ALERT` | `DriverIncident` (severity, location, last stop) |
+| `SOS_CLEARED` | Open SOS `DriverIncident` gets `resolvedAt` ("I'm safe") |
+| `ROAD_ISSUE` | Notifies the depot's dispatchers |
+| `BREAK_START`, `BREAK_END` | Only the `DriverEvent`; break time is worked out from these rows |
+| `LOCATION_PING` | `LocationPing` (`clientUuid` unique), about every second while on the road |
 
 The phone `outbox` / `cache_*` tables in the draw.io swimlane are **IndexedDB only**. They are not Prisma models.
 
 ---
-
-## Seeded people
-
-| loginId | role | Notes |
-| --- | --- | --- |
-| `nimal` | dispatcher | Password `waypoint` |
-| `sampath` | loader | PIN 1234, confirmed at Start loading (the dock itself uses the depot dock password) |
-| `L001` … | loader | Fleet loaders, no PIN: added at Start loading with the PIN box left blank |
-| `kasun` | driver | PIN `1234` |
-| `sunil` | store | Extra login on the demo Fresh store |
-| `OUT001` … | store | One manager per outlet, password `waypoint` |
-
-CSVs load from `DATA_DIR` (`/data` in Docker, or `General Data` on a laptop). `service_allowance.csv` uses column `service_allowance_min`.
-
----
-
-## Seeded sample
-
-First five rows in the local database, in primary-key order, so a teammate can see real values before the final changes. Password and PIN hashes are left out. A long value is cut off. A blank cell is null. The count is the whole table. `_TripExtraDistricts` is the link between a trip and its extra districts; it has no rows yet.
-
-### CalendarDay (910 rows)
-
-| id | dow | isWeekend | isoYear | isoWeek | isPayday | festival | festivalRamp | isHoliday | monsoon | isOperating |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2024-01-01 | 0 | false | 2024 | 1 | false |  | 0 | false | false | true |
-| 2024-01-02 | 1 | false | 2024 | 1 | false |  | 0 | false | false | true |
-| 2024-01-03 | 2 | false | 2024 | 1 | false |  | 0 | false | false | true |
-| 2024-01-04 | 3 | false | 2024 | 1 | false |  | 0 | false | false | true |
-| 2024-01-05 | 4 | false | 2024 | 1 | false |  | 0 | false | false | true |
-
-### DeliveryNote (22 rows)
-
-| dnId | versionAt | orderId | status | validTo | changedById | changeReason |
-| --- | --- | --- | --- | --- | --- | --- |
-| dn-cmuppyufz092zahswmpzgp636 | 2026-10-03 18:30 | cmuppyufz092zahswmpzgp636 | picking |  | cmuppyuj60947ahswznphd535 | demo pick list |
-| dn-cmuppyugg0937ahswhnuucedx | 2026-10-03 18:30 | cmuppyugg0937ahswhnuucedx | picking |  | cmuppyuj60947ahswznphd535 | demo pick list |
-| dn-cmuppyugm093eahswuoybokm8 | 2026-10-03 18:30 | cmuppyugm093eahswuoybokm8 | picking |  | cmuppyuj60947ahswznphd535 | demo pick list |
-| DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00 | cmuppyugz093oahsw05yw3ajt | picking |  | cmuppyuj60947ahswznphd535 | initial pick list |
-| dn-cmurbm3cb017u5qefenh1wrbk | 2026-10-03 18:30 | cmurbm3cb017u5qefenh1wrbk | picking |  | cmuppyuj60947ahswznphd535 | demo pick list |
-
-### DeliveryNoteLine (47 rows)
-
-| id | dnId | versionAt | itemId | qtyConfirmed | shortageReason |
-| --- | --- | --- | --- | --- | --- |
-| cmuppyuks094fahsw8eiot41w | DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00 | F-CHKN | 2 |  |
-| cmuppyuks094gahswyqusccgw | DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00 | F-MILK | 4 |  |
-| cmuppyuks094hahswrco2eyur | DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00 | F-BREAD | 2 |  |
-| dnl-line-cmuppyufz092zahswmpzgp636-F-BREAD | dn-cmuppyufz092zahswmpzgp636 | 2026-10-03 18:30 | F-BREAD | 4 |  |
-| dnl-line-cmuppyufz092zahswmpzgp636-F-MILK | dn-cmuppyufz092zahswmpzgp636 | 2026-10-03 18:30 | F-MILK | 6 |  |
-
-### DeliveryNoteLoader (22 rows)
-
-| id | dnId | versionAt | loaderId | role | startedAt | finishedAt |
-| --- | --- | --- | --- | --- | --- | --- |
-| cmuppyuks094jahsw4w7loie4 | DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00 | cmuppyuj60947ahswznphd535 | picking | 2026-10-01 15:59 |  |
-| dnl-cmuppyufz092zahswmpzgp636 | dn-cmuppyufz092zahswmpzgp636 | 2026-10-03 18:30 | cmuppyuj60947ahswznphd535 | picking | 2026-10-03 18:30 |  |
-| dnl-cmuppyugg0937ahswhnuucedx | dn-cmuppyugg0937ahswhnuucedx | 2026-10-03 18:30 | cmuppyuj60947ahswznphd535 | picking | 2026-10-03 18:30 |  |
-| dnl-cmuppyugm093eahswuoybokm8 | dn-cmuppyugm093eahswuoybokm8 | 2026-10-03 18:30 | cmuppyuj60947ahswznphd535 | picking | 2026-10-03 18:30 |  |
-| dnl-cmurbm3cb017u5qefenh1wrbk | dn-cmurbm3cb017u5qefenh1wrbk | 2026-10-03 18:30 | cmuppyuj60947ahswznphd535 | picking | 2026-10-03 18:30 |  |
-
-### DeliveryNotePick (45 rows)
-
-| id | dnLineId | batchId | qty |
-| --- | --- | --- | --- |
-| cmuppyul5094lahsw2hor7ekl | cmuppyuks094gahswyqusccgw | BATCH-F-MILK | 2 |
-| pick-dnl-line-cmuppyufz092zahswmpzgp636-F-BREAD | dnl-line-cmuppyufz092zahswmpzgp636-F-BREAD | BATCH-F-BREAD | 4 |
-| pick-dnl-line-cmuppyufz092zahswmpzgp636-F-MILK | dnl-line-cmuppyufz092zahswmpzgp636-F-MILK | BATCH-F-MILK | 6 |
-| pick-dnl-line-cmuppyufz092zahswmpzgp636-F-VEG | dnl-line-cmuppyufz092zahswmpzgp636-F-VEG | BATCH-F-VEG | 3 |
-| pick-dnl-line-cmuppyugg0937ahswhnuucedx-F-RICE | dnl-line-cmuppyugg0937ahswhnuucedx-F-RICE | BATCH-F-RICE | 4 |
-
-### Depot (2 rows)
-
-| id | name | telephone | email | address | lat | lng |
-| --- | --- | --- | --- | --- | --- | --- |
-| depo1 | Peliyagoda | 011 293 9100 | peliyagoda@waypoint.lk | 148 Negombo Road, Peliyagoda | 6.9678 | 79.8832 |
-| depo2 | Kandy | 081 223 8450 | kandy@waypoint.lk | 27 William Gopallawa Mawatha, Kandy | 7.2906 | 80.6337 |
-
-### Dispatcher (1 row)
-
-| id | userId | employeeNo | lastLoginAt | isActive | email | address |
-| --- | --- | --- | --- | --- | --- | --- |
-| cmuppyujd0949ahsw6bow5lhr | cmuppyuae092pahswvmx7xq1j | DSP-001 | 2026-10-01 15:59 | true | nimal@waypoint.lk | 4 Depot Office, Peliyagoda |
-
-### DispatcherPhone (1 row)
-
-| phoneNumber | dispatcherId |
-| --- | --- |
-| 0112000000 | cmuppyujd0949ahsw6bow5lhr |
-
-### District (12 rows)
-
-| name | depotId | served | roadClass | freeFlowKmh | depotToDistrictKm | depotToDistrictMin | interStopKm | interStopMin |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Badulla | depo2 | true | hill | 42 | 130 | 186 | 16 | 23 |
-| Colombo | depo1 | true | urban | 30 | 12 | 24 | 4 | 8 |
-| Galle | depo1 | true | highway | 70 | 120 | 103 | 10 | 9 |
-| Gampaha | depo1 | true | suburban | 45 | 28 | 37 | 7 | 9 |
-| Kalutara | depo1 | true | suburban | 45 | 48 | 64 | 9 | 12 |
-
-### Driver (71 rows)
-
-| id | userId | licenseNo | idNo | joinDate | leavingDate | lastLoginAt | isActive | licenseExpiry | address |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyuiu0945ahsw76l1sfl2 | cmuppyuaq092vahswi6i7eszo | B1234567 | 199012345V | 2022-03-01 |  | 2026-10-01 15:59 | true | 2026-07-01 | 20 Lake Road, Peliyagoda |
-| cmuqqesy3007064hi57o3t9iq | cmuqqesxm006y64hima50g8fv | B2000001 | 199000001V | 2019-01-12 |  | 2026-10-02 18:52 | true | 2026-07-02 | 21 Lake Road, Peliyagoda |
-| cmuqqesz3007464hitp1wr57x | cmuqqesz0007264hi54ivxgs7 | B2000002 | 199000002V | 2019-01-23 |  | 2026-10-02 18:52 | true | 2026-07-03 | 22 Lake Road, Peliyagoda |
-| cmuqqeszk007864hibmysuhdq | cmuqqeszg007664hivydmijhp | B2000003 | 199000003V | 2019-02-03 |  | 2026-10-02 18:52 | true | 2026-07-04 | 23 Lake Road, Peliyagoda |
-| cmuqqet02007c64hiokpy6ty5 | cmuqqet00007a64hi818iid1m | B2000004 | 199000004V | 2019-02-14 |  | 2026-10-02 18:52 | true | 2026-07-05 | 24 Lake Road, Peliyagoda |
-
-### DriverEvent (7 rows)
-
-| id | clientId | driverId | tripId | type | payload | createdOnPhoneAt | seenPlanVersion | appliedAt |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuqj61180077128gsb2p9ps2 | seed-arrived-cmuppyufu092xahswqj3cytia | cmuppyuaq092vahswi6i7eszo | cmuppyufu092xahswqj3cytia | ARRIVED | {"stopId":"cmuppyuga0935ahswy6dkwz97"} | 2026-10-02 05:16 | 1 | 2026-10-02 05:36 |
-| cmuqj61180078128gr6a2maeb | seed-ack-cmuppyufu092xahswqj3cytia | cmuppyuaq092vahswi6i7eszo | cmuppyufu092xahswqj3cytia | ACKNOWLEDGEMENT | {"stopId":"cmuppyuga0935ahswy6dkwz97"} | 2026-10-02 05:31 | 1 | 2026-10-02 05:36 |
-| demo-ev-cmuppyugw093mahswbcrogboy | demo-ev-cmuppyugw093mahswbcrogboy | cmuppyuaq092vahswi6i7eszo | cmuppyugw093mahswbcrogboy | ARRIVED | {"stopId":"demo"} | 2026-10-04 03:30 | 1 | 2026-10-04 03:30 |
-| demo-ev-cmurbm3c6017s5qef0doy1efh | demo-ev-cmurbm3c6017s5qef0doy1efh | cmuqqesxm006y64hima50g8fv | cmurbm3c6017s5qef0doy1efh | ARRIVED | {"stopId":"demo"} | 2026-10-04 03:30 | 1 | 2026-10-04 03:30 |
-| demo-ev-cmurdd48w0016hcnoqn0hty95 | demo-ev-cmurdd48w0016hcnoqn0hty95 | cmuqqeth000bi64hi2feoby9x | cmurdd48w0016hcnoqn0hty95 | ARRIVED | {"stopId":"demo"} | 2026-10-04 03:30 | 1 | 2026-10-04 03:30 |
-
-### DriverIncident (2 rows)
-
-| id | driverId | tripId | vehicleId | incidentType | severity | message | lat | lng | lastStopId | raisedAt | acknowledgedAt | acknowledgedBy | resolvedAt | resolution | reassignedTripId |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyum3094wahswsooqn6qh | cmuppyuiu0945ahsw76l1sfl2 | cmuppyugw093mahswbcrogboy | VEH009 | sos | high | Breakdown on Baseline Road — requesting assis… | 6.941 | 79.863 | cmuppyuh3093uahsw2fzcy1bt | 2026-10-01 15:59 |  |  |  |  |  |
-| demo-drv-inc-1 | cmuppyuiu0945ahsw76l1sfl2 | cmurbm3c6017s5qef0doy1efh | VEH001 | delay | low | Held in traffic near the first shop | 6.94 | 79.86 |  | 2026-10-04 |  |  |  |  |  |
-
-### DriverPhone (71 rows)
-
-| phoneNumber | driverId |
-| --- | --- |
-| 0771234567 | cmuppyuiu0945ahsw76l1sfl2 |
-| 0772000001 | cmuqqesy3007064hi57o3t9iq |
-| 0772000002 | cmuqqesz3007464hitp1wr57x |
-| 0772000003 | cmuqqeszk007864hibmysuhdq |
-| 0772000004 | cmuqqet02007c64hiokpy6ty5 |
-
-### FieldFlag (2 rows)
-
-| id | raisedAt | storeId | orderId | tripId | itemId | qtyFlagged | reason | reasonDetail | severity | driverDecision | driverDecidedAt | driverNote | resolvedAt | photoKey | resolveStatus |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyulh094pahsw2cl1m2i8 | 2026-10-01 15:59 | OUT001 | cmuppyugz093oahsw05yw3ajt | cmuppyugw093mahswbcrogboy | F-MILK | 1 | damaged | One milk crate arrived with a split bottle. | medium | pending |  |  |  |  | false |
-| demo-flag-solved | 2026-10-04 | OUT002 | cmuppyufz092zahswmpzgp636 | cmuppyufu092xahswqj3cytia | F-MILK | 1 | damaged | Demo: one pack damaged, replacement sent | medium | accepted |  |  | 2026-10-04 |  | true |
-
-### Incident (5 rows)
-
-| id | type | tripId | status | timeline | createdAt |
-| --- | --- | --- | --- | --- | --- |
-| cmuqj611f007a128gjtmjla25 | breakdown | cmuppyugw093mahswbcrogboy | open | [{"at":"2026-10-02T05:36:34.754Z","text":"Bre… | 2026-10-02 05:36 |
-| demo-inc-delay | delay | cmuppyugw093mahswbcrogboy | open | [{"at":"2026-10-03T18:30:58.985Z","note":"Abo… | 2026-10-04 |
-| demo-inc-quiet | quiet_driver | cmuppyugw093mahswbcrogboy | open | [{"at":"2026-10-03T18:30:58.992Z","note":"No … | 2026-10-04 |
-| inc-delay | delay | cmurbm3c6017s5qef0doy1efh | open | [{"at":"2026-10-02T19:29:59.385Z","by":"dispa… | 2026-10-03 00:59 |
-| inc-quiet_driver | quiet_driver | cmuppyufu092xahswqj3cytia | open | [{"at":"2026-10-02T19:29:59.392Z","by":"dispa… | 2026-10-03 00:59 |
-
-### InventoryBatch (35 rows)
-
-| id | itemId | batchName | manufacturingDate | expiryDate | qty |
-| --- | --- | --- | --- | --- | --- |
-| BATCH-F-BREAD | F-BREAD | F-BREAD-2026-W40 | 2026-09-20 | 2027-09-20 | 80 |
-| BATCH-F-BUTTR | F-BUTTR | F-BUTTR-2026-W40 | 2026-09-20 | 2026-10-20 | 80 |
-| BATCH-F-CHEE | F-CHEE | F-CHEE-2026-W40 | 2026-09-20 | 2026-10-20 | 80 |
-| BATCH-F-CHKN | F-CHKN | F-CHKN-2026-W40 | 2026-09-20 | 2026-10-20 | 80 |
-| BATCH-F-CREAM | F-CREAM | F-CREAM-2026-W40 | 2026-09-20 | 2026-10-20 | 80 |
-
-### Item (35 rows)
-
-| id | itemName | isChilled | packLabel | packWeightKg | type |
-| --- | --- | --- | --- | --- | --- |
-| F-BREAD | Sandwich bread | false | crate of 20 | 9 | fresh |
-| F-BUTTR | Butter 500 g | true | carton of 20 | 10 | chilled_food |
-| F-CHEE | Cheddar cheese | true | crate of 8 | 8 | chilled_food |
-| F-CHKN | Chicken, whole | true | box of 10 | 12 | chilled_food |
-| F-CREAM | Fresh cream 200 ml | true | crate of 24 | 5.2 | chilled_food |
-
-### LoadFlag (1 row)
-
-| id | stopId | orderLineId | type | qty | note | photoKey | createdAt | resolvedAt |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuqj610v0074128gxubikgsf | cmuppyuga0935ahswy6dkwz97 | cmuppyufz0931ahswdhv6zo0f | missing | 1 | Demo: one pack short at dock. | load-flags/demo.png | 2026-10-02 05:36 | 2026-10-04 |
-
-### LoadSession (8 rows)
-
-| id | tripId | loaderIds | startedAt | finishedAt | departedAt | paused | ackedPlanVersion | ackedStopIds | takenOffOrderIds | newOrderIds |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyuh5093wahsw06ems7qm | cmuppyugw093mahswbcrogboy | [] | 2026-10-01 15:59 |  | 2026-10-04 03:30 | false | 1 | [] | [] | [] |
-| demo-session-cmurbm3c6017s5qef0doy1efh | cmurbm3c6017s5qef0doy1efh | ["cmuppyuam092tahswqfk3w0xp"] | 2026-10-03 18:30 | 2026-10-03 18:30 | 2026-10-04 03:30 | false | 1 | ["cmurbm3cb017u5qefenh1wrbk","cmurbm3cm01815q… | [] | [] |
-| demo-session-cmurdd47d000ohcno9w1d549o | cmurdd47d000ohcno9w1d549o | ["cmuppyuam092tahswqfk3w0xp"] | 2026-10-03 18:30 |  |  | false | 1 | ["cmurdd473000jhcno3famtc0w"] | [] | [] |
-| demo-session-cmurdd48w0016hcnoqn0hty95 | cmurdd48w0016hcnoqn0hty95 | ["cmuppyuam092tahswqfk3w0xp"] | 2026-10-03 18:30 | 2026-10-03 18:30 | 2026-10-04 03:30 | false | 1 | ["cmurdd48r0011hcnofawg5655"] | [] | [] |
-| demo-session-cmurdd49h001fhcno6lywr2zt | cmurdd49h001fhcno6lywr2zt | ["cmuppyuam092tahswqfk3w0xp"] | 2026-10-03 18:30 | 2026-10-03 18:30 | 2026-10-03 18:30 | false | 1 | ["cmurdd49c001ahcnolglchaek"] | [] | [] |
-
-### Loader (201 rows)
-
-| id | userId | employeeNo | idNo | shift | joinDate | leavingDate | lastLoginAt | isActive | address |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyuj60947ahswznphd535 | cmuppyuam092tahswqfk3w0xp | LDR-014 | 199512378V | morning | 2023-06-15 |  | 2026-10-01 15:59 | true | 8 Dock Lane, Peliyagoda |
-| cmuqqqwy800es1095o56a0hh1 | cmuqqqwxs00eq1095jemjge6x | LDR-L001 | 198000001V | morning | 2020-01-08 |  | 2026-10-02 18:52 | true | 9 Dock Lane, Peliyagoda |
-| cmuqqqwyf00ew10952szq7p51 | cmuqqqwyc00eu10950gtbad4c | LDR-L002 | 198000002V | night | 2020-01-15 |  | 2026-10-02 18:52 | true | 10 Dock Lane, Peliyagoda |
-| cmuqqqwym00f01095854lmlcn | cmuqqqwyi00ey1095pmgeszff | LDR-L003 | 198000003V | morning | 2020-01-22 |  | 2026-10-02 18:52 | true | 11 Dock Lane, Peliyagoda |
-| cmuqqqwyr00f410953j48twaa | cmuqqqwyo00f21095fyqw7rb5 | LDR-L004 | 198000004V | night | 2020-01-29 |  | 2026-10-02 18:52 | true | 12 Dock Lane, Peliyagoda |
-
-### LoaderFlag (2 rows)
-
-| id | raisedAt | loaderId | dnId | versionAt | scope | itemId | qtyFlagged | reason | reasonDetail | validationStatus | reviewedById | reviewedAt | reviewNote | photoKey |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyul8094nahswhsx413b7 | 2026-10-01 15:59 | cmuppyuj60947ahswznphd535 | DN-cmuppyugz093oahsw05yw3ajt | 2026-10-01 04:00 | item | F-MILK | 1 | crate crushed at dock | Outer crate split; 1 bottle leaking. Hold bac… | pending_dispatcher |  |  |  |  |
-| demo-loader-flag | 2026-10-04 | cmuppyuj60947ahswznphd535 | dn-cmuppyugg0937ahswhnuucedx | 2026-10-03 18:30 | item | F-BREAD | 1 | crate crushed | Demo dock flag | pending_dispatcher |  |  |  |  |
-
-### LoaderPhone (201 rows)
-
-| phoneNumber | loaderId |
-| --- | --- |
-| 0771000000 | cmuppyuj60947ahswznphd535 |
-| 0771000001 | cmuqqqwy800es1095o56a0hh1 |
-| 0771000002 | cmuqqqwyf00ew10952szq7p51 |
-| 0771000003 | cmuqqqwym00f01095854lmlcn |
-| 0771000004 | cmuqqqwyr00f410953j48twaa |
-
-### LoadingJob (13 rows)
-
-| id | tripId | depot | assignedById | assignedAt | bay | loadByTime | instructions | priority | status | startedAt | loadedAt | handedOverAt | totalWeightKg | totalVolumeM3 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyukk094dahsw0bl0d6do | cmuppyufu092xahswqj3cytia | depo1 | cmuppyujd0949ahsw6bow5lhr | 2026-10-01 15:59 | Bay-2 |  | Chill first. Confirm DN version before handin… | 1 | assigned |  |  |  | 420 | 4.8 |
-| demo-job-cmuppyugw093mahswbcrogboy | cmuppyugw093mahswbcrogboy | depo1 | cmuppyujd0949ahsw6bow5lhr | 2026-10-04 | Bay 2 |  | Load last shop first. | 0 | handed_over | 2026-10-03 18:30 |  | 2026-10-03 18:30 |  |  |
-| demo-job-cmurbm3c6017s5qef0doy1efh | cmurbm3c6017s5qef0doy1efh | depo1 | cmuppyujd0949ahsw6bow5lhr | 2026-10-04 | Bay 2 |  | Load last shop first. | 0 | handed_over | 2026-10-03 18:30 |  | 2026-10-03 18:30 |  |  |
-| demo-job-cmurdd46a000fhcno71sowl1j | cmurdd46a000fhcno71sowl1j | depo2 | cmuppyujd0949ahsw6bow5lhr | 2026-10-04 | Bay 2 |  | Load last shop first. | 0 | assigned |  |  |  |  |  |
-| demo-job-cmurdd47d000ohcno9w1d549o | cmurdd47d000ohcno9w1d549o | depo2 | cmuppyujd0949ahsw6bow5lhr | 2026-10-04 | Bay 2 |  | Load last shop first. | 0 | picking | 2026-10-03 18:30 |  |  |  |  |
-
-### LocationPing (21 rows)
-
-| id | clientUuid | tripId | driverId | lat | lng | accuracyM | speedKmh | recordedAt | receivedAt |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyulx094sahswy2i1nkmv | ping-cmuppyugw093mahswbcrogboy-1 | cmuppyugw093mahswbcrogboy | cmuppyuiu0945ahsw76l1sfl2 | 6.958 | 79.899 | 8 | 34 | 2026-10-01 15:47 | 2026-10-01 15:59 |
-| cmuppyulx094tahswhpbseka3 | ping-cmuppyugw093mahswbcrogboy-2 | cmuppyugw093mahswbcrogboy | cmuppyuiu0945ahsw76l1sfl2 | 6.941 | 79.863 | 6 | 18 | 2026-10-01 15:55 | 2026-10-01 15:59 |
-| cmuppyulx094uahswg2zq47ch | ping-cmuppyugw093mahswbcrogboy-3 | cmuppyugw093mahswbcrogboy | cmuppyuiu0945ahsw76l1sfl2 | 6.927 | 79.861 | 5 | 0 | 2026-10-01 15:59 | 2026-10-01 15:59 |
-| demo-ping-cmurbm3c6017s5qef0doy1efh-0 | demo-ping-cmurbm3c6017s5qef0doy1efh-0 | cmurbm3c6017s5qef0doy1efh | cmuqqesy3007064hi57o3t9iq | 6.9344 | 79.8428 | 8 | 32 | 2026-10-03 03:00 | 2026-10-04 |
-| demo-ping-cmurbm3c6017s5qef0doy1efh-1 | demo-ping-cmurbm3c6017s5qef0doy1efh-1 | cmurbm3c6017s5qef0doy1efh | cmuqqesy3007064hi57o3t9iq | 6.939 | 79.8507 | 8 | 32 | 2026-10-03 03:12 | 2026-10-04 |
-
-### Notification (3 rows)
-
-| id | userId | title | body | link | read | createdAt |
-| --- | --- | --- | --- | --- | --- | --- |
-| cmuppyuhf0943ahswo9dn7oq7 | cmuppyuak092rahsw8zmn6kd9 | Delivery moved to tomorrow | One order was moved from 2026-10-01 to 2026-1… | /store/updates | false | 2026-10-01 15:59 |
-| demo-note-1 | cmuqqesxm006y64hima50g8fv | Plan ready | Tomorrow has waiting orders to route. | /dispatch/plan | false | 2026-10-04 |
-| demo-note-2 | cmuqqesxm006y64hima50g8fv | Store report | A shop marked a short delivery. | /dispatch/board | true | 2026-10-04 |
-
-### Order (80 rows)
-
-| id | storeId | brand | deliveryDate | temp | status | units | weightKg | volumeM3 | urgentNote | movedFromDate | deferReason | deferredById | deferredYesterday | repeatSkip | createdAt | urgent | stockLevel | cancelledAt | cancelledById |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyufz092zahswmpzgp636 | OUT002 | Fresh | 2026-10-01 | chilled | delivered | 13 | 156.6 | 0.483 |  |  |  |  | false | false | 2026-10-01 15:59 | false |  |  |  |
-| cmuppyugg0937ahswhnuucedx | OUT003 | Fresh | 2026-10-01 | chilled | planned | 9 | 93 | 0.15 |  |  |  |  | false | false | 2026-10-01 15:59 | false |  |  |  |
-| cmuppyugm093eahswuoybokm8 | OUT004 | Fresh | 2026-10-01 | chilled | planned | 8 | 92.4 | 0.252 |  |  |  |  | false | false | 2026-10-01 15:59 | false |  |  |  |
-| cmuppyugz093oahsw05yw3ajt | OUT001 | Fresh | 2026-10-04 | chilled | planned | 8 | 92.4 | 0.252 |  |  |  |  | false | false | 2026-10-01 15:59 | false |  |  |  |
-| cmuppyuhb093yahswy576x4vf | OUT001 | Fresh | 2026-10-02 | chilled | deferred | 9 | 93 | 0.15 |  | 2026-10-01 | Fleet over capacity at Peliyagoda today |  | false | false | 2026-10-01 15:59 | false |  |  |  |
-
-### OrderLine (155 rows)
-
-| id | orderId | name | qty | pack | chilled | unitWeightKg | unitVolumeM3 | itemId |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyufz0931ahswdhv6zo0f | cmuppyufz092zahswmpzgp636 | Fresh milk 1 L | 6 | crate of 12 | true | 12.6 | 0.018 | F-MILK |
-| cmuppyufz0932ahswu3ys8w6m | cmuppyufz092zahswmpzgp636 | Sandwich bread | 4 | crate of 20 | false | 9 | 0.06 | F-BREAD |
-| cmuppyufz0933ahswj7snght7 | cmuppyufz092zahswmpzgp636 | Mixed vegetables | 3 | crate | false | 15 | 0.045 | F-VEG |
-| cmuppyugg0939ahswyeyryev9 | cmuppyugg0937ahswhnuucedx | Set yoghurt | 5 | tray of 24 | true | 2.6 | 0.006 | F-YOG |
-| cmuppyugg093aahswvm78bbm5 | cmuppyugg0937ahswhnuucedx | Samba rice 5 kg | 4 | bundle of 4 | false | 20 | 0.03 | F-RICE |
-
-### OutletPhone (242 rows)
-
-| id | storeId | phoneNo | label |
-| --- | --- | --- | --- |
-| cmuppyujm094aahswv2s7yck7 | OUT001 | 0112345678 | shop |
-| cmuppyujm094bahswjeq7au52 | OUT001 | 0778765432 | manager |
-| cmurbm35t01135qefqyoee37m | OUT001 | 0774100000 | manager |
-| cmurbm35t01145qefk3hbfrku | OUT001 | 0112345678 | warehouse |
-| cmurbm35t01155qefh43l73b3 | OUT002 | 0112345678 | shop |
-
-### RoadCondition (10920 rows)
-
-| id | date | districtName | disruptionIndex | raw |
-| --- | --- | --- | --- | --- |
-| cmuppysxs00ncahsw2r8bv37d | 2024-01-01 | Colombo | 100 | {"date":"2024-01-01","district":"Colombo","di… |
-| cmuppysxs00ndahswlwwt58zg | 2024-01-02 | Colombo | 81 | {"date":"2024-01-02","district":"Colombo","di… |
-| cmuppysxs00neahswpghdzrkz | 2024-01-03 | Colombo | 100 | {"date":"2024-01-03","district":"Colombo","di… |
-| cmuppysxs00nfahsw5gose2lb | 2024-01-04 | Colombo | 100 | {"date":"2024-01-04","district":"Colombo","di… |
-| cmuppysxs00ngahswk5p6huba | 2024-01-05 | Colombo | 98 | {"date":"2024-01-05","district":"Colombo","di… |
-
-### RouteLeg (22 rows)
-
-| id | tripId | seq | fromPoint | toOutlet | distanceKm | plannedDepartTime | plannedTravelMin | actualDepartTime | actualTravelMin | monsoon | trafficBand |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyulo094rahswhwwolxid | cmuppyugw093mahswbcrogboy | 1 | Peliyagoda depot | OUT001 | 12.4 |  | 28 |  | 31 | false | peak |
-| demo-leg-cmuppyufu092xahswqj3cytia-1 | cmuppyufu092xahswqj3cytia | 1 | Peliyagoda depot | Fort Market 2 | 4.8 |  | 7 |  |  | false | free |
-| demo-leg-cmuppyufu092xahswqj3cytia-2 | cmuppyufu092xahswqj3cytia | 2 | Fort Market 2 | Palm Fresh 3 | 1.6 |  | 5 |  |  | false | free |
-| demo-leg-cmuppyufu092xahswqj3cytia-3 | cmuppyufu092xahswqj3cytia | 3 | Palm Fresh 3 | Harbour Stores 4 | 1.6 |  | 5 |  |  | false | free |
-| demo-leg-cmurbm3c6017s5qef0doy1efh-1 | cmurbm3c6017s5qef0doy1efh | 1 | Peliyagoda depot | Lakeview Grocers 1 | 5.8 |  | 9 |  |  | false | free |
-
-### ServiceAllowance (9 rows)
-
-| id | brand | dockType | minutes |
-| --- | --- | --- | --- |
-| cmuqj60lk0000128gw1yqbr2i | Fresh | rear_dock | 15 |
-| cmuqj60me0001128gu6qpfps3 | Fresh | street | 16 |
-| cmuqj60mf0002128g9vllxkbz | Fresh | mall_bay | 18 |
-| cmuqj60mh0003128g2fxuk6e6 | Style | rear_dock | 38 |
-| cmuqj60mi0004128g0yc8z9l1 | Style | street | 46 |
-
-### Session (3 rows)
-
-| id | userId | createdAt | expiresAt |
-| --- | --- | --- | --- |
-| 5b83eaa77ecbe497028ca9724cbe5ebccf3e5d5335ba4… | cmuppyuak092rahsw8zmn6kd9 | 2026-10-02 09:20 | 2026-10-02 21:20 |
-| 5faae9eb61c2577b02440ba00990c36641b699d950b36… | cmuppyuae092pahswvmx7xq1j | 2026-10-02 08:21 | 2026-10-02 20:21 |
-| 60baccd069f0df7e1221fc14cb3f9810f6595df901654… | cmuppyuak092rahsw8zmn6kd9 | 2026-10-02 10:05 | 2026-10-02 22:05 |
-
-### Store (120 rows)
-
-| id | displayName | brand | districtId | depotId | dockType | parkingConstraint | mallWindow | windowOpenMin | windowCloseMin | lat | lng | daysSinceLastServed | address | email |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| OUT001 | Lakeview Grocers 1 | Fresh | Colombo | depo1 | street | van_only |  | 480 | 1020 | 6.9344 | 79.8428 | 0 | 12 Temple Road, Colombo | out001@shops.waypoint.lk |
-| OUT002 | Fort Market 2 | Fresh | Colombo | depo1 | street | van_only |  | 480 | 1020 | 6.939 | 79.8507 | 2 | 13 Temple Road, Colombo | out002@shops.waypoint.lk |
-| OUT003 | Palm Fresh 3 | Fresh | Colombo | depo1 | street | van_only |  | 480 | 1020 | 6.925 | 79.848 |  | 14 Temple Road, Colombo | out003@shops.waypoint.lk |
-| OUT004 | Harbour Stores 4 | Fresh | Colombo | depo1 | street | normal |  | 480 | 1020 | 6.911 | 79.8486 |  | 15 Temple Road, Colombo | out004@shops.waypoint.lk |
-| OUT005 | Green Basket 5 | Fresh | Colombo | depo1 | rear_dock | normal |  | 480 | 1020 | 6.893 | 79.856 |  | 16 Temple Road, Colombo | out005@shops.waypoint.lk |
-
-### StoreReceipt (4 rows)
-
-| id | stopId | lineResults | chilledWasCold | createdAt | signaturePhotoKey | signedByUserId | signedAt |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuqj61100076128glu8kkexy | cmuppyuga0935ahswy6dkwz97 | [{"name":"Fresh milk 1 L","issue":null,"order… | true | 2026-10-02 05:36 | signatures/demo.png | cmuqj60pz000c128ge5cvtrg1 | 2026-10-02 05:36 |
-| rcpt-cmurbm3ci017z5qefxiuzjga6 | cmurbm3ci017z5qefxiuzjga6 | [{"name":"Fresh milk 1 L","issue":null,"order… | true | 2026-10-04 | receipts/cmurbm3ci017z5qefxiuzjga6/signature.png | cmuqj60pq000a128g56n7kgeu | 2026-10-04 |
-| rcpt-cmurdd49n001hhcnoc6n9d4lc | cmurdd49n001hhcnoc6n9d4lc | [{"name":"Samba rice 5 kg","issue":null,"orde… | true | 2026-10-04 | receipts/cmurdd49n001hhcnoc6n9d4lc/signature.png | cmuqj60tv004q128gbxiypnf0 | 2026-10-04 |
-| rcpt-cmurdd4l90038hcnojoz6zp0q | cmurdd4l90038hcnojoz6zp0q | [{"name":"Samba rice 5 kg","issue":null,"orde… | true | 2026-10-04 | receipts/cmurdd4l90038hcnojoz6zp0q/signature.png | cmuqj60q8000k128guroox2vq | 2026-10-04 |
-
-### StoreSavedItem (24 rows)
-
-| storeId | itemId | createdAt |
-| --- | --- | --- |
-| OUT001 | F-BUTTR | 2026-10-04 |
-| OUT001 | F-CHEE | 2026-10-04 |
-| OUT001 | F-CHKN | 2026-10-04 |
-| OUT002 | F-BUTTR | 2026-10-04 |
-| OUT002 | F-CHEE | 2026-10-04 |
-
-### TrafficSpeed (576 rows)
-
-| id | districtName | hour | monsoon | speedIndex | raw |
-| --- | --- | --- | --- | --- | --- |
-| cmuppysr9007cahsw44d1hxr8 | Colombo | 0 | false | 94 | {"hour":"0","monsoon":"0","district":"Colombo… |
-| cmuppysr9007dahswoim9hfa3 | Colombo | 1 | false | 94 | {"hour":"1","monsoon":"0","district":"Colombo… |
-| cmuppysr9007eahswaifwaser | Colombo | 2 | false | 94 | {"hour":"2","monsoon":"0","district":"Colombo… |
-| cmuppysr9007fahsw526lgjhc | Colombo | 3 | false | 92 | {"hour":"3","monsoon":"0","district":"Colombo… |
-| cmuppysr9007gahswrf3v0x6b | Colombo | 4 | false | 89 | {"hour":"4","monsoon":"0","district":"Colombo… |
-
-### Trip (17 rows)
-
-| id | vehicleId | depotId | brand | districtId | serviceDate | tripNumber | status | planVersion | plannedMinutes | plannedLitres | publishedAt | assignedDriverId | csvRouteId | tripStartingDate | tripEndingDate | startingTime | estimatedStartingTime | endingTime | fuelLitresAtEnd |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyufu092xahswqj3cytia | VEH008 | depo1 | Fresh | Colombo | 2026-10-01 | 1 | published | 1 |  |  | 2026-10-01 15:59 |  |  |  |  |  |  |  |  |
-| cmuppyugw093mahswbcrogboy | VEH009 | depo1 | Fresh | Colombo | 2026-10-04 | 1 | on_road | 1 |  |  | 2026-10-01 15:59 | cmuppyuaq092vahswi6i7eszo | RTE-COL-01 | 2026-10-01 |  | 2026-10-04 03:30 |  |  |  |
-| cmurbm3c6017s5qef0doy1efh | VEH001 | depo1 | Fresh | Colombo | 2026-10-04 | 1 | on_road | 1 |  |  | 2026-10-02 18:27 |  | DEMO-DISPATCH-BREAKDOWN |  |  | 2026-10-04 03:30 |  |  |  |
-| cmurdd45e0006hcnoqbv61d1t | VEH039 | depo2 | Fresh | Kandy | 2026-10-03 | 1 | planning | 1 |  |  |  |  | DEMO-STATUS-Kandy-planning |  |  |  |  |  |  |
-| cmurdd46a000fhcno71sowl1j | VEH039 | depo2 | Fresh | Kandy | 2026-10-03 | 2 | published | 1 |  |  | 2026-10-02 19:41 |  | DEMO-STATUS-Kandy-published |  |  |  |  |  |  |
-
-### TripStop (22 rows)
-
-| id | tripId | orderId | sequence | status | etaMin | arrivedAt | storeConfirmedAt | driverAckAt | plannedArrivalTime | leaveOutletTime | serviceMin | unloadingTime | estimatedUnloadingTime | estimatedTripStopTime | tripStopTime | tripStartTime | estimatedTripStartTime | waitAlertedAt |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyuga0935ahswy6dkwz97 | cmuppyufu092xahswqj3cytia | cmuppyufz092zahswmpzgp636 | 1 | delivered | 480 | 2026-10-02 05:36 | 2026-10-02 05:36 |  |  |  |  |  |  |  |  |  |  |  |
-| cmuppyugk093cahsw5xnjkm20 | cmuppyufu092xahswqj3cytia | cmuppyugg0937ahswhnuucedx | 2 | upcoming | 505 |  |  |  |  |  |  |  |  |  |  |  |  |  |
-| cmuppyugr093kahsw20cxgj68 | cmuppyufu092xahswqj3cytia | cmuppyugm093eahswuoybokm8 | 3 | upcoming | 530 |  |  |  |  |  |  |  |  |  |  |  |  |  |
-| cmuppyuh3093uahsw2fzcy1bt | cmuppyugw093mahswbcrogboy | cmuppyugz093oahsw05yw3ajt | 1 | arrived | 551 | 2026-10-04 03:42 |  |  |  |  |  |  |  |  |  |  |  |  |
-| cmurbm3ci017z5qefxiuzjga6 | cmurbm3c6017s5qef0doy1efh | cmurbm3cb017u5qefenh1wrbk | 1 | confirmed | 14 | 2026-10-02 18:44 | 2026-10-02 18:48 | 2026-10-04 03:42 |  |  |  |  |  |  |  |  |  |  |
-
-### User (394 rows)
-
-| id | loginId | role | name | depotId | storeId | passwordHash | pinHash | notificationPrefs |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cmuppyuae092pahswvmx7xq1j | nimal | dispatcher | Nimal (Dispatcher) | depo1 |  | (password or PIN hash) |  | {"delayAlerts":true,"planChanges":false,"inci… |
-| cmuppyuak092rahsw8zmn6kd9 | sunil | store | Sunil (Store manager) |  | OUT001 | (password or PIN hash) |  | {"delayAlerts":false,"planChanges":true,"inci… |
-| cmuppyuam092tahswqfk3w0xp | sampath | loader | Sampath (Loader) | depo1 |  |  |  | {"delayAlerts":true,"planChanges":true,"incid… |
-| cmuppyuaq092vahswi6i7eszo | kasun | driver | Kasun (Driver) | depo1 |  |  | (password or PIN hash) | {"delayAlerts":true,"planChanges":true,"incid… |
-| cmuqj60pq000a128g56n7kgeu | OUT001 | store | OUT001 manager |  | OUT001 | (password or PIN hash) |  | {"delayAlerts":true,"planChanges":true,"incid… |
-
-### Vehicle (60 rows)
-
-| id | numberPlate | depotId | type | temp | weightCapKg | volumeCapM3 | fuelType | kmPerL | weeklyFuelQuotaL | status | outOfServiceReason | returnDate | driverId | lastServiceAt |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| VEH001 | WP LQ-1001 | depo1 | truck | reefer | 5510 | 26.4 | diesel | 4.7 | 340 | available |  |  | cmuqqesxm006y64hima50g8fv | 2026-09-01 |
-| VEH002 | WP LQ-1002 | depo1 | truck | reefer | 3990 | 21.1 | diesel | 6.1 | 610 | available |  |  | cmuqqesz0007264hi54ivxgs7 | 2026-08-31 |
-| VEH003 | WP LQ-1003 | depo1 | truck | reefer | 5510 | 26.4 | diesel | 4.7 | 480 | available |  |  | cmuqqeszg007664hivydmijhp | 2026-08-30 |
-| VEH004 | WP LQ-1004 | depo1 | truck | reefer | 6840 | 33.4 | diesel | 4.4 | 430 | available |  |  | cmuqqet00007a64hi818iid1m | 2026-08-29 |
-| VEH005 | WP LQ-1005 | depo1 | truck | reefer | 6840 | 33.4 | diesel | 4.4 | 490 | available |  |  | cmuqqet0f007e64hizsweeisw | 2026-08-28 |
-
-### _TripExtraDistricts (0 rows)
-
-No rows.
