@@ -105,7 +105,7 @@ The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, th
 ### Landing page and sign-in
 
 - Signed-in visitors skip the landing page and go straight to their workspace. Every "Sign in" and workspace card goes to the role chooser, because the Figma has no role parameter.
-- **Sync Dock sign-in (L1):** the design has a shared dock password on the keypad, and no loader ID. The API signs a loader in by loader ID and depot only, so the screen has a "Loader ID" field (judges sign in as `sampath`) and the keypad code is optional and not checked.
+- **Sync Dock sign-in (L1):** the design has a shared dock password on the keypad, and no loader ID. The API signs a loader in by loader ID and depot, so the screen has a "Loader ID" field. The keypad code is the loader's own PIN: it is checked when the loader has one (seeded L001… use 1234), and a loader without one (judges' `sampath`) signs in with ID and depot and can set a PIN in Account settings.
 - Depot cards show the depot name only; "12 trips today" has no data behind it yet.
 - "Forgot password?" is drawn but not wired. "Keep me signed in" and "Remember this phone" only remember the login id on the device, because the API sets the session length.
 
