@@ -3,5 +3,3 @@ apps/web/public/maps/*.pmtiles
 docs
 .claude
 backups
-# The competition CSVs stay off git but the seed needs them.
-!data/*.csv

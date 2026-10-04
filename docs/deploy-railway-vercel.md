@@ -34,7 +34,7 @@ railway domain -s api -p 3001
 
 `RAILWAY_DOCKERFILE_PATH` is required: `railway up` does not pick up `railway.json`, and without it Railpack fails with "No start command detected".
 
-`railway up` uploads the working tree. The competition CSVs are gitignored, so they only reach the image because `.railwayignore` re-includes `data/*.csv`. A GitHub-connected Railway service would build without them and the seed would warn about empty outlets and vehicles.
+`railway up` uploads the working tree, including the competition CSVs in `data/` that the seed reads. They are tracked in git, so a GitHub-connected Railway service would also have them.
 
 Check `https://<api>.up.railway.app/api/health` returns `{"ok":true,"db":true}`. Every start runs `prisma migrate deploy` and the seed (an upsert), so redeploys are safe.
 
@@ -74,6 +74,8 @@ On a phone on mobile data, open the production URL, sign in with a seeded user (
 - Web: `vercel deploy --prod`
 
 ## Notes
+
+- Railway's Config as Code (`railway.json`) stops working on 2026-12-01. `railway config migrate` writes `.railway/railway.ts`, but its output only keeps the health check: the Dockerfile path, builder and watch patterns become comments, and the restart policy is dropped. Before applying it, make sure `RAILWAY_DOCKERFILE_PATH` is still set on `api`, add the restart policy back, run `railway config plan`, and only then `railway config migrate --apply`. Note that `--apply` also clears the service's Config File setting on Railway.
 
 - Live notices stream through a Vercel function (`app/api/notices/live`), which Hobby cuts off after a few minutes. The browser reconnects by itself.
 - Cost: Vercel Hobby is free for non-commercial use. Railway has a one-time trial credit, then the Hobby plan (about $5 to $10 a month for API, Postgres and MinIO).
