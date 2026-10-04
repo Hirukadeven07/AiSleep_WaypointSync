@@ -44,6 +44,15 @@ const tripSelect = {
         select: {
           id: true,
           urgentNote: true,
+          fieldFlags: {
+            orderBy: { raisedAt: 'asc' },
+            select: {
+              tripId: true,
+              reason: true,
+              qtyFlagged: true,
+              item: { select: { itemName: true } },
+            },
+          },
           store: {
             select: {
               id: true,
