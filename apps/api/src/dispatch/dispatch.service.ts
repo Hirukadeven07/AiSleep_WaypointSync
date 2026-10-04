@@ -25,6 +25,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { BREAK_EVENT_TYPES, foldBreaks } from '../driver/driver-breaks';
 import { alertLongWaits } from '../driver/driver-notices';
+import { IncidentsService } from '../incidents/incidents.service';
 import { NoticeHub } from '../notifications/notice-hub';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { tripAreaLabel } from '../plan/plan.mapper';
@@ -84,6 +85,7 @@ export class DispatchService {
     private readonly clock: ClockService,
     @Inject(NOTIFIER) private readonly notifier: Notifier,
     private readonly hub: NoticeHub,
+    private readonly incidents: IncidentsService,
   ) {}
 
   /** The stores a delay would reach (their ETA misses the window or is within 15 minutes of it) and the message they would get. */
@@ -142,30 +144,13 @@ export class DispatchService {
     return { sent: stores.length };
   }
 
-  /** Dispatch has dealt with a driver's SOS. Clears the alert on the board and on the driver's phone. */
+  /**
+   * Dispatch has dealt with a driver's SOS (the Home card's "Handled"). It is the same clearing the
+   * Incidents page's "Mark handled" does, so both leave the SOS resolved on the board, in the
+   * Incidents list and on the driver's phone.
+   */
   async resolveSos(me: Me, id: string, note?: string): Promise<{ ok: true }> {
-    if (!me.depotId) throw new ForbiddenException('This account has no depot');
-    const sos = await this.prisma.driverIncident.findFirst({
-      where: {
-        id,
-        incidentType: 'sos',
-        OR: [{ trip: { depotId: me.depotId } }, { vehicle: { depotId: me.depotId } }],
-      },
-    });
-    if (!sos) throw new NotFoundException('SOS not found');
-    if (!sos.resolvedAt) {
-      const now = this.clock.now();
-      await this.prisma.driverIncident.update({
-        where: { id },
-        data: {
-          resolvedAt: now,
-          acknowledgedAt: sos.acknowledgedAt ?? now,
-          acknowledgedBy: sos.acknowledgedBy ?? me.id,
-          resolution: note?.trim() || 'Handled by dispatch',
-        },
-      });
-    }
-    return { ok: true };
+    return this.incidents.resolveSos(me, id, note);
   }
 
   /** The dispatcher's unseen notifications, newest first, grouped by where they lead. */
@@ -529,7 +514,6 @@ export class DispatchService {
       .sort((a, b) => a.getTime() - b.getTime());
 
     const late = trips.filter((t) => t.live === 'late');
-    const missingTrips = trips.filter((t) => t.missingCount > 0).length;
     const dispatched = trips.filter((t) =>
       ['on_road', 'breakdown', 'completed'].includes(t.status),
     ).length;
@@ -546,33 +530,19 @@ export class DispatchService {
         incidentId: d.id,
       });
     }
-    const sosOpen = sosRows.length;
-    // Open incidents as the Incidents page lists them (logged in the last 7 days, not resolved),
-    // so Home and that page agree; SOS alerts are counted on top.
-    const weekAgo = new Date(day);
-    weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
-    const logged = await this.prisma.incident.groupBy({
-      by: ['type'],
-      where: {
-        trip: { depotId },
-        createdAt: { gte: weekAgo },
-        status: { notIn: ['resolved', 'closed'] },
-      },
-      _count: { _all: true },
-    });
-    const loggedOpen = logged.reduce((n, g) => n + g._count._all, 0);
-    const loggedBreakdowns = logged.find((g) => g.type === 'breakdown')?._count._all ?? 0;
-    const otherOpen = loggedOpen - loggedBreakdowns;
-    // A trip can be broken down today without a logged incident; count whichever is higher.
-    const breakdowns = Math.max(
-      loggedBreakdowns,
-      trips.filter((t) => t.live === 'breakdown').length,
-    );
+    // The same open incidents the Incidents page lists (logged, missing items and today's SOS),
+    // from one shared source, so this count and that page's "N active" always match.
+    const kinds = await this.incidents.openKinds(depotId);
+    const kindCount = (k: string) => kinds.filter((x) => x === k).length;
+    const sosOpen = kindCount('sos');
+    const breakdowns = kindCount('breakdown');
+    const missingOpen = kindCount('missing_items');
+    const otherOpen = kinds.length - sosOpen - breakdowns - missingOpen;
     const incidentParts = [
       sosOpen > 0 ? `${sosOpen} SOS` : null,
       breakdowns > 0 ? `${breakdowns} ${breakdowns === 1 ? 'breakdown' : 'breakdowns'}` : null,
       otherOpen > 0 ? `${otherOpen} other` : null,
-      missingTrips > 0 ? `${missingTrips} missing ${missingTrips === 1 ? 'item' : 'items'}` : null,
+      missingOpen > 0 ? `${missingOpen} missing ${missingOpen === 1 ? 'item' : 'items'}` : null,
     ].filter(Boolean);
 
     const minutesNow = this.clock.minutesNow();
@@ -593,7 +563,7 @@ export class DispatchService {
         avgLateMin: late.length
           ? Math.round(late.reduce((sum, t) => sum + (t.lateMin ?? 0), 0) / late.length)
           : 0,
-        openIncidents: sosOpen + breakdowns + otherOpen + missingTrips,
+        openIncidents: kinds.length,
         incidentsText: incidentParts.join(' · '),
       },
       counts: {

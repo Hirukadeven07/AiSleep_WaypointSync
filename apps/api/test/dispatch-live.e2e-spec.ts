@@ -130,6 +130,16 @@ describe('live day (e2e)', () => {
       { status: 'delivered', arrivedAt: at('09:05') },
       { status: 'upcoming' },
     ]);
+    // Home counts the incidents the Incidents page lists, so the breakdown is a logged incident.
+    await prisma.incident.create({
+      data: {
+        type: 'breakdown',
+        tripId: trip.broke,
+        status: 'open',
+        createdAt: at('09:10'),
+        timeline: [{ at: at('09:10').toISOString(), text: 'Dispatch logged the incident' }],
+      },
+    });
     // Not synced: last event from the phone was 47 minutes ago.
     await makeTrip('sync', 'DL-V4', 'on_road', [{ status: 'upcoming', etaMin: 580 }]);
     await makeTrip(
@@ -177,6 +187,7 @@ describe('live day (e2e)', () => {
     process.env.DEMO_NOW = previousDemoNow;
     if (prisma) {
       await prisma.driverEvent.deleteMany({ where: { clientId: { startsWith: 'dl-' } } });
+      await prisma.incident.deleteMany({ where: { trip: { vehicleId: { in: VEHICLES } } } });
       await prisma.trip.deleteMany({ where: { vehicleId: { in: VEHICLES } } });
       await prisma.order.deleteMany({ where: { storeId: { in: STORES } } });
       await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
