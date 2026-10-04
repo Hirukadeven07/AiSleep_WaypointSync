@@ -5,7 +5,9 @@ import { useEffect } from 'react';
 import type { Brand, LiveStop, LiveTrip } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { clock } from '@/components/plan/format';
+import { buildPdf, openPdf } from '@/lib/pdf';
 import { timeOf, toneOf } from './live-format';
+import { tripReportFilename, tripReportLines, tripReportTitle } from './trip-report';
 
 const HERO: Record<Brand, string> = {
   Fresh: 'bg-fresh-tint',
@@ -338,10 +340,13 @@ export function TripDrawer({
             <>
               <button
                 type="button"
-                disabled
+                onClick={() => {
+                  const title = tripReportTitle(trip);
+                  openPdf(buildPdf(tripReportLines(trip), title), tripReportFilename(trip), title);
+                }}
                 className="flex min-w-px flex-1 items-center justify-center rounded-pill border border-border bg-surface px-[18px] py-3 text-[14px] font-semibold leading-5 text-ink"
               >
-                Download trip report
+                View trip report
               </button>
               {nextTripId && trip.nextTrip && (
                 <button
