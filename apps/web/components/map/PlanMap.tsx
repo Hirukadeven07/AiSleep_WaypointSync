@@ -14,6 +14,7 @@ import { m3Text, orderWindow } from '@/components/plan/format';
 import { districtTone } from './districts';
 import { IslandMap, type IslandMapHandle, type IslandMarker, type MapPath, type MapView } from './IslandMap';
 import { MapControls } from './MapControls';
+import { MapLegend } from './MapLegend';
 import { depotLabel } from '@/lib/depots';
 
 const DOT: Record<PlanMapPin['brand'], string> = {
@@ -431,41 +432,37 @@ function VehiclePick({
 function Legend() {
   const row = 'flex items-center gap-2 text-[12px] leading-4 text-ink';
   return (
-    <div className="absolute bottom-4 left-4 w-[200px] rounded-card bg-surface p-3 shadow">
-      <p className="mb-2 text-[12px] font-semibold text-muted">Legend</p>
-      <ul className="flex flex-col gap-1.5">
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-fresh" /> Fresh
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-style" /> Style
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-tech" /> Tech
-        </li>
-        <li className={row}>
-          <span className="size-2.5 animate-ping rounded-full bg-fresh" /> Shop with an order
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-faint" /> No order
-        </li>
-        <li className={row}>
-          <span className="h-0.5 w-4 bg-slate" /> Planned line
-        </li>
-        <li className={row}>
-          <span className="flex size-3.5 items-center justify-center rounded-full bg-chilled text-[8px] font-bold text-surface">
-            C
-          </span>
-          Chilled
-        </li>
-        <li className={row}>
-          <span className="flex size-3.5 items-center justify-center rounded-full bg-scrim text-[8px] font-bold text-surface">
-            V
-          </span>
-          Van only
-        </li>
-      </ul>
-      <p className="mt-2 text-[10px] leading-3 text-muted">Map data © OpenStreetMap · Boundaries © geoBoundaries</p>
-    </div>
+    <MapLegend width="w-[200px]">
+      <li className={row}>
+        <span className="size-2.5 rounded-full bg-fresh" /> Fresh
+      </li>
+      <li className={row}>
+        <span className="size-2.5 rounded-full bg-style" /> Style
+      </li>
+      <li className={row}>
+        <span className="size-2.5 rounded-full bg-tech" /> Tech
+      </li>
+      <li className={row}>
+        <span className="size-2.5 animate-ping rounded-full bg-fresh" /> Shop with an order
+      </li>
+      <li className={row}>
+        <span className="size-2.5 rounded-full bg-faint" /> No order
+      </li>
+      <li className={row}>
+        <span className="h-0.5 w-4 bg-slate" /> Planned line
+      </li>
+      <li className={row}>
+        <span className="flex size-3.5 items-center justify-center rounded-full bg-chilled text-[8px] font-bold text-surface">
+          C
+        </span>
+        Chilled
+      </li>
+      <li className={row}>
+        <span className="flex size-3.5 items-center justify-center rounded-full bg-scrim text-[8px] font-bold text-surface">
+          V
+        </span>
+        Van only
+      </li>
+    </MapLegend>
   );
 }
