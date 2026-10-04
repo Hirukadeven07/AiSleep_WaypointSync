@@ -149,7 +149,7 @@ erDiagram
 | `FlagSeverity` | `low`, `medium`, `high` | `FieldFlag.severity` |
 | `SosSeverity` | `low`, `high`, `critical` | `DriverIncident.severity` |
 
-Some status-like columns are plain text, not enums: `DriverEvent.type` (`SOS_ALERT`, `ARRIVED`, `ACKNOWLEDGEMENT`, `ROAD_ISSUE`, `FUEL_READING`, checked by the API), `Incident.status`, `DeliveryNote.status` and `DriverIncident.incidentType`.
+Some status-like columns are plain text, not enums: `DriverEvent.type` (`SOS_ALERT`, `SOS_CLEARED`, `ARRIVED`, `ACKNOWLEDGEMENT`, `ROAD_ISSUE`, `FUEL_READING`, `BREAK_START`, `BREAK_END`, `LOCATION_PING`; the list is `DRIVER_EVENT_TYPES` in `packages/contracts`, checked by the API), `Incident.status`, `DeliveryNote.status` and `DriverIncident.incidentType`.
 
 ## Tables
 

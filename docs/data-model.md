@@ -91,7 +91,7 @@ Order → DeliveryNote (versioned) → DeliveryNoteLine → DeliveryNotePick →
 | `StoreReceipt` | 1:1 `stopId`. `lineResults` JSON + signature keys. Signed by a `User`. |
 | `FieldFlag` | Raised by the **outlet**, not the driver. Driver only sets `driverDecision`. `resolveStatus` stays false until a replacement of that item is ordered, or the flag is marked solved. |
 | `LoaderFlag` | Dock issue on a DN version. Dispatcher `validationStatus`. |
-| `DriverEvent` | Phone sync audit. Unique `clientId`. Types: SOS_ALERT, ARRIVED, ACKNOWLEDGEMENT, ROAD_ISSUE, FUEL_READING. |
+| `DriverEvent` | Phone sync audit. Unique `clientId`. Types (`DRIVER_EVENT_TYPES` in contracts): SOS_ALERT, SOS_CLEARED, ARRIVED, ACKNOWLEDGEMENT, ROAD_ISSUE, FUEL_READING, BREAK_START, BREAK_END, LOCATION_PING. |
 | `Incident` | Legacy dispatcher ticket on a trip (`breakdown` / `delay` / …). Not the same as `DriverIncident`. |
 | `DriverIncident` | SOS / on-road incident from the driver profile. Optional reassigned trip. |
 
