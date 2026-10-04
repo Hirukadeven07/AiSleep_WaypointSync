@@ -21,7 +21,7 @@ export const WAIT_ALERT_MIN = 10;
 export const BREAK_ALLOWANCE_MIN = 45;
 
 /**
- * LOCATION_PING payload. Sent every few minutes while the trip is on the road, and every 30 s while
+ * LOCATION_PING payload. Sent every second while the trip is on the road, and every 30 s while
  * the SOS screen is open (`sos: true`, which also moves the open SOS alert's position). Closing
  * SOS stops the SOS pings.
  */

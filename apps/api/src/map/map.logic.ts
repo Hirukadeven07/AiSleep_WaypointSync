@@ -5,8 +5,12 @@ const DONE = new Set(['delivered', 'confirmed', 'partial', 'deferred']);
 
 /** Same threshold the live day uses before a trip is called late. */
 export const LATE_MIN = 5;
-/** Same threshold the live day uses before an on-road trip is "Not synced". */
-export const SYNC_STALE_MIN = 20;
+/**
+ * A trip on the road that has sent nothing for this many minutes is "Not synced", on the map and
+ * in the live day. Phones send their position every second while on the road, so 5 quiet minutes
+ * means the phone has lost signal or stopped.
+ */
+export const SYNC_STALE_MIN = 5;
 
 /**
  * Used only when the district table is still empty, so the island matches the
