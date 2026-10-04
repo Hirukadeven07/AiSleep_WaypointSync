@@ -1,5 +1,12 @@
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import type { LogIncidentRequest, RecoveryAction } from '@waypoint/contracts';
+
+/** POST /incidents/:id/acknowledge. `explicit` is the Acknowledge button; opening sends nothing. */
+export class AcknowledgeDto {
+  @IsOptional()
+  @IsBoolean()
+  explicit?: boolean;
+}
 
 export class ResolveDto {
   @IsIn(['replacement', 'tomorrow', 'split', 'defer_one'])

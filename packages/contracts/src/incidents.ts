@@ -78,6 +78,10 @@ export interface IncidentDetail extends IncidentSummary {
   resolution: { title: string; text: string; tripId: string | null } | null;
   /** Whether a resolution can be chosen (a breakdown that is not resolved). */
   recoverable: boolean;
+  /** What "Notify store managers" sends, and to how many stores, shown before sending. */
+  notify: { message: string; stores: number } | null;
+  /** The dispatcher pressed Acknowledge (the trip carries on as it is). */
+  acknowledged: boolean;
 }
 
 export interface ResolveRequest {

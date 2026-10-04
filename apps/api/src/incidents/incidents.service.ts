@@ -86,6 +86,9 @@ const STORE_DELAY: Record<IncidentKind, (plate: string) => string> = {
   missing_items: (p) =>
     `Some items for your delivery on ${p} are short. We will tell you what is coming and when.`,
 };
+/** Timeline line for the Acknowledge button; its presence hides the button. */
+const ACKNOWLEDGED_TEXT = 'You acknowledged it; the trip carries on as it is';
+
 const KIND_HEAD: Record<IncidentKind, string> = {
   breakdown: 'Breakdown',
   delay: 'Delay',
@@ -131,6 +134,15 @@ type Missing = {
   flags: (Prisma.LoadFlagGetPayload<object> & { stop: TripRow['stops'][number] })[];
 };
 
+/** "12 min", "3 h", "2 days": an age or a duration people can read at a glance. */
+const durationText = (min: number) => {
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h`;
+  const days = Math.floor(h / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+};
+
 const stateOf = (status: string): IncidentState =>
   status === 'resolved' || status === 'closed'
     ? 'resolved'
@@ -173,6 +185,11 @@ export class IncidentsService {
     return Math.max(0, Math.round((this.clock.now().getTime() - d.getTime()) / 60000));
   }
 
+  /** "12 min ago", "3 h ago", "2 days ago". */
+  private ago(d: Date) {
+    return `${durationText(this.minutesSince(d))} ago`;
+  }
+
   private summary(i: IncidentRow): IncidentSummary {
     const t = i.trip;
     const kind = i.type as IncidentKind;
@@ -193,7 +210,7 @@ export class IncidentsService {
       line:
         state === 'resolved'
           ? `${resolution?.resolution?.line ?? 'Resolved'} · ${timeOf(new Date(resolution?.at ?? i.createdAt))}`
-          : `Reported by ${reporter} · ${timeOf(i.createdAt)} · ${this.minutesSince(i.createdAt)} min ago`,
+          : `Reported by ${reporter} · ${timeOf(i.createdAt)} · ${this.ago(i.createdAt)}`,
       brand: t.brand,
       state,
       stopsAffected: state !== 'resolved' && remaining > 0 ? remaining : null,
@@ -310,9 +327,12 @@ export class IncidentsService {
   ): Promise<Candidate[]> {
     const depotId = this.depotOf(me);
     const nowMin = this.clock.minutesNow();
+    // Trips on the breakdown's day, and today's: an old breakdown must not offer a truck that is
+    // on the road right now.
+    const days = [trip.serviceDate, new Date(`${this.clock.today()}T00:00:00Z`)];
     const [vehicles, today] = await Promise.all([
       this.prisma.vehicle.findMany({ where: { depotId } }),
-      this.prisma.trip.findMany({ where: { depotId, serviceDate: trip.serviceDate } }),
+      this.prisma.trip.findMany({ where: { depotId, serviceDate: { in: days } } }),
     ]);
     const views = sortStopsByWindow(remaining.map((s) => toStopView(s.order)));
     const weight = remaining.reduce((n, s) => n + s.order.weightKg, 0);
@@ -415,7 +435,7 @@ export class IncidentsService {
     return {
       ...s,
       subtitle: `${KIND_HEAD[s.kind]}  ·  reported ${timeOf(row.createdAt)}${byDispatch ? ' by dispatch' : driver ? ` by ${driver.name} (driver)` : ''}`,
-      status: `${s.state === 'resolved' ? 'Resolved' : 'Active'} · ${minutes} min`,
+      status: `${s.state === 'resolved' ? 'Resolved' : 'Active'} · ${durationText(minutes)}`,
       stops:
         done?.resolution && (s.state === 'resolved' || remaining.length === 0)
           ? done.resolution.stops
@@ -448,6 +468,16 @@ export class IncidentsService {
           }
         : null,
       recoverable,
+      notify:
+        s.state === 'resolved'
+          ? null
+          : {
+              message: (STORE_DELAY[row.type as IncidentKind] ?? STORE_DELAY.delay)(
+                t.vehicle.numberPlate ?? t.vehicleId,
+              ),
+              stores: new Set(remaining.map((x) => x.order.storeId)).size,
+            },
+      acknowledged: log.some((e) => e.text === ACKNOWLEDGED_TEXT),
     };
   }
 
@@ -464,7 +494,7 @@ export class IncidentsService {
     return {
       ...s,
       subtitle: `${KIND_HEAD.missing_items}  ·  reported ${timeOf(m.flags[0].createdAt)} by the loader`,
-      status: `Active · ${this.minutesSince(m.flags[0].createdAt)} min`,
+      status: `Active · ${durationText(this.minutesSince(m.flags[0].createdAt))}`,
       stops: m.flags.map((f) => ({
         id: f.id,
         storeName: f.stop.order.store.displayName ?? f.stop.order.store.id,
@@ -486,6 +516,8 @@ export class IncidentsService {
       })),
       resolution: null,
       recoverable: false,
+      notify: null,
+      acknowledged: false,
     };
   }
 
@@ -533,9 +565,17 @@ export class IncidentsService {
     const open = await this.prisma.incident.findFirst({
       where: { tripId: trip.id, type: dto.type, status: { notIn: ['resolved', 'closed'] } },
     });
-    if (open) return this.detail(me, open.id);
     const now = this.clock.now();
     const note = dto.note?.trim();
+    // One open incident per kind and trip: a second report adds its note to the open one.
+    if (open) {
+      if (note) {
+        await this.save(open.id, open.timeline, [
+          { at: now.toISOString(), text: `Dispatch added: ${note}` },
+        ]);
+      }
+      return this.detail(me, open.id);
+    }
     const created = await this.prisma.incident.create({
       data: {
         type: dto.type,
@@ -586,16 +626,27 @@ export class IncidentsService {
     return this.detail(me, created.id);
   }
 
-  async acknowledge(me: Me, id: string): Promise<IncidentDetail> {
+  /**
+   * Opening an incident marks it seen once ("You opened the incident"); the claim on the status
+   * keeps two views opening it together from both adding the line. `explicit` is the Acknowledge
+   * button: "You acknowledged it" is recorded once and the trip carries on as it is.
+   */
+  async acknowledge(me: Me, id: string, explicit = false): Promise<IncidentDetail> {
     if (id.startsWith('missing:')) return this.detail(me, id);
     const row = await this.load(me, id);
-    if (stateOf(row.status) === 'open') {
-      await this.save(
-        id,
-        row.timeline,
-        [{ at: this.clock.now().toISOString(), text: 'You opened the incident' }],
-        'acknowledged',
-      );
+    const now = this.clock.now().toISOString();
+    const claimed = await this.prisma.incident.updateMany({
+      where: { id, status: { notIn: ['acknowledged', 'resolved', 'closed'] } },
+      data: { status: 'acknowledged' },
+    });
+    const add: Entry[] = [];
+    if (claimed.count === 1) add.push({ at: now, text: 'You opened the incident' });
+    if (explicit && !entries(row.timeline).some((e) => e.text === ACKNOWLEDGED_TEXT)) {
+      add.push({ at: now, text: ACKNOWLEDGED_TEXT });
+    }
+    if (add.length > 0) {
+      const fresh = await this.load(me, id);
+      await this.save(id, fresh.timeline, add);
     }
     return this.detail(me, id);
   }
@@ -670,7 +721,9 @@ export class IncidentsService {
       await this.tellStore(
         storeId,
         'Delivery delayed',
-        (STORE_DELAY[row.type as IncidentKind] ?? STORE_DELAY.delay)(t.vehicle.numberPlate ?? t.vehicleId),
+        (STORE_DELAY[row.type as IncidentKind] ?? STORE_DELAY.delay)(
+          t.vehicle.numberPlate ?? t.vehicleId,
+        ),
       );
     }
     await this.save(id, row.timeline, [

@@ -424,6 +424,15 @@ describe('incidents (e2e)', () => {
       .send({ tripId: sent.id, type: 'delay' })
       .expect(200);
     expect(again.body.id).toBe(late.body.id);
+    // A second report with a note adds the note to the open incident.
+    const noted = await agent
+      .post('/api/incidents')
+      .send({ tripId: sent.id, type: 'delay', note: 'Road works on the bypass' })
+      .expect(200);
+    expect(noted.body.id).toBe(late.body.id);
+    expect(noted.body.timeline.map((e: { text: string }) => e.text)).toContain(
+      'Dispatch added: Road works on the bypass',
+    );
     const list = (await agent.get('/api/incidents').expect(200)).body;
     expect(list.active.some((i: { id: string }) => i.id === late.body.id)).toBe(true);
 
