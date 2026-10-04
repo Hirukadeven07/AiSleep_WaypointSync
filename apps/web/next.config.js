@@ -28,7 +28,12 @@ const nextConfig = {
   },
   async rewrites() {
     const api = process.env.API_INTERNAL_URL || 'http://localhost:3001';
-    return [{ source: '/api/:path*', destination: `${api}/api/:path*` }];
+    const rules = [{ source: '/api/:path*', destination: `${api}/api/:path*` }];
+    // Hosts with a file size cap (Vercel: 100 MB) serve the basemap from object storage instead of public/.
+    if (process.env.BASEMAP_URL) {
+      rules.push({ source: '/maps/sri-lanka.pmtiles', destination: process.env.BASEMAP_URL });
+    }
+    return rules;
   },
 };
 
