@@ -13,10 +13,10 @@ export class StartLoadingDto implements StartLoadingRequest {
   @MaxLength(40)
   loaderId: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(20)
-  pin: string;
+  pin?: string;
 }
 
 export class FlagDto implements FlagRequest {
