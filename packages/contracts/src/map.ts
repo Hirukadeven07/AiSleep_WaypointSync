@@ -112,10 +112,8 @@ export interface LocateTrip {
   stopsDone: number;
   stopsTotal: number;
   lastStop: LocateLastStop | null;
-  /** Latest vehicle ping. The live map draws the truck here while it is between stops. */
-  position: { lat: number; lng: number; recordedAt: string } | null;
   stops: LocateStop[];
-  /** Latest phone ping. Null until the driver app has sent one. */
+  /** Latest phone ping. The live map draws the truck here while it is between stops. */
   position: { lat: number; lng: number; recordedAt: string } | null;
   /** First ping inside the depot circle, once the driver is back. */
   backAt: string | null;
