@@ -265,7 +265,7 @@ docker compose --profile public up -d
 
 ## Database backups
 
-Dumps stay on the VM for now (the `backups/` folder is gitignored). Copying them off the VM (R2, S3, or `scp`) is still TODO.
+For the self-hosted VM: dumps stay on the VM in `backups/` (gitignored). The Railway deployment uses Railway Postgres backups instead (see [docs/deploy-railway-vercel.md](docs/deploy-railway-vercel.md)).
 
 On the VM, from the repo root, with the Compose stack running:
 
@@ -301,4 +301,3 @@ Prefer restoring into a throwaway database or a staging clone, not blindly onto 
 - `packages/*` are built to CommonJS in `dist` so both Nest and Next can consume them.
 - `pnpm test` runs unit tests only. The auth e2e test (`pnpm --filter @waypoint/api test:e2e`) needs a running, seeded database.
 - CSV column names are matched loosely (case and separators ignored). Check `apps/api/prisma/seed/load-csv.ts` against the real files and adjust aliases if a column is missed.
-- Driver PWA icon is a placeholder SVG.
