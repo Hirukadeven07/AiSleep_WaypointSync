@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ForceLightTheme } from '@/components/landing/ForceLightTheme';
 import { SignedInRedirect } from '@/components/landing/SignedInRedirect';
 
 // Landing page from the Day 5 Figma ("Start / Landing", node 666:2).
@@ -31,7 +32,7 @@ function PillLink({
   return (
     <Link
       href={href}
-      className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-pill px-5 py-3 text-[15px] font-semibold text-ink ${
+      className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-pill px-5 py-3 text-[15px] font-semibold leading-5 text-scrim ${
         tone === 'white' ? 'bg-white' : 'bg-olive'
       }`}
     >
@@ -178,7 +179,8 @@ const PRINCIPLES = [
 
 export default function LandingPage() {
   return (
-    <main className="mx-auto w-full max-w-[1440px] bg-white px-4 pt-4">
+    <main className="mx-auto w-full max-w-[1440px] bg-surface px-4 pt-4 leading-[normal]">
+      <ForceLightTheme />
       <SignedInRedirect />
 
       {/* Hero */}
@@ -217,7 +219,7 @@ export default function LandingPage() {
           </div>
 
           <div className="flex flex-col gap-[22px] lg:absolute lg:left-[71%] lg:top-[420px]">
-            <p className="text-[18px] text-white/[0.92] sm:text-[20px]">
+            <p className="text-[18px] leading-[1.5] text-white/[0.92] sm:text-[20px]">
               Planning, loading, delivery
               <br />
               and store confirmation
@@ -230,7 +232,7 @@ export default function LandingPage() {
               </PillLink>
               <a
                 href="#how-it-works"
-                className="flex items-center gap-2 whitespace-nowrap rounded-pill bg-white px-5 py-3 text-[15px] font-semibold text-ink"
+                className="flex items-center gap-2 whitespace-nowrap rounded-pill bg-white px-5 py-3 text-[15px] font-semibold leading-5 text-scrim"
               >
                 How it works
                 <Arrow />
@@ -238,7 +240,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-x-10 gap-y-2 whitespace-pre text-[14px] font-medium text-white/75 sm:gap-x-16 lg:absolute lg:bottom-[40px] lg:left-10 lg:gap-24">
+          <div className="flex flex-wrap gap-x-10 gap-y-2 whitespace-pre text-[14px] font-medium text-white/75 sm:gap-x-16 lg:absolute lg:bottom-[38px] lg:left-10 lg:gap-24">
             <p>{'+  Dispatch'}</p>
             <p>{'+  Dock'}</p>
             <p>{'+  Driver'}</p>
