@@ -340,7 +340,13 @@ export function TripOverview() {
             full?.vehicle?.plate,
             vehicleLabel(full?.vehicle?.type),
             `${doneCount} of ${plural(stops.length, 'stop')} done`,
-            atDepot ? 'at the depot' : trip.status === 'on_road' ? 'on the road' : null,
+            atDepot
+              ? trip.status === 'ready'
+                ? 'loaded, not started'
+                : 'at the depot'
+              : trip.status === 'on_road'
+                ? 'on the road'
+                : null,
           ]
             .filter(Boolean)
             .join(' · ')}

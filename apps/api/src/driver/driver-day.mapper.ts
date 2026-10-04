@@ -67,6 +67,8 @@ export interface DriverDayTripRow {
   tripNumber: number;
   status: TripStatus;
   planVersion: number;
+  /** Set when the driver taps Start trip. */
+  startingTime?: Date | null;
   stops: DriverDayStopRow[];
 }
 
@@ -156,6 +158,7 @@ function mapTrip(trip: DriverDayTripRow, serviceDate: string): DriverDayTrip {
     tripNumber: trip.tripNumber as DriverDayTrip['tripNumber'],
     status: trip.status,
     planVersion: trip.planVersion,
+    startedAt: iso(trip.startingTime ?? null),
     stops: [...trip.stops]
       .sort((a, b) => a.sequence - b.sequence)
       .map((stop) => mapStop(stop, trip.id)),

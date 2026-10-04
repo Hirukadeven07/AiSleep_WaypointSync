@@ -15,7 +15,7 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { ownTripWhere, tripDriverId } from '../driver/driver-trips';
-import { depotPoint, insideDepotCircle, stopIsDone } from '../map/map.logic';
+import { stopIsDone } from '../map/map.logic';
 import {
   NOTIFIER,
   type NotificationInput,
@@ -451,6 +451,57 @@ export class SyncService {
         return { stale, notifications: [] };
       }
 
+      case 'START_TRIP': {
+        const found =
+          (await this.lookupTripForDriver(tx, me.id, event.tripId ?? null)) ??
+          (await this.activeTripForDriver(me.id, tx));
+        if (!found) throw new RejectedEvent('NO_ACTIVE_TRIP');
+        const current = await tx.trip.findUnique({
+          where: { id: found.id },
+          select: { id: true, status: true, startingTime: true },
+        });
+        if (!current) throw new RejectedEvent('NO_ACTIVE_TRIP');
+        if (current.status !== 'on_road' && current.status !== 'ready') {
+          throw new RejectedEvent('TRIP_NOT_READY');
+        }
+        const stale = await this.shouldMarkStale(tx, event, current.id);
+        await this.recordEvent(tx, me, event, current.id);
+        if (current.status === 'ready') {
+          await tx.trip.update({
+            where: { id: current.id },
+            data: { status: 'on_road', startingTime: current.startingTime ?? happenedAt },
+          });
+        }
+        return { stale, notifications: [] };
+      }
+
+      case 'END_TRIP': {
+        const found =
+          (await this.lookupTripForDriver(tx, me.id, event.tripId ?? null)) ??
+          (await this.activeTripForDriver(me.id, tx));
+        if (!found) throw new RejectedEvent('NO_ACTIVE_TRIP');
+        const current = await tx.trip.findUnique({
+          where: { id: found.id },
+          select: { id: true, status: true, endingTime: true, stops: { select: { status: true } } },
+        });
+        if (!current) throw new RejectedEvent('NO_ACTIVE_TRIP');
+        if (current.status !== 'on_road' && current.status !== 'completed') {
+          throw new RejectedEvent('TRIP_NOT_READY');
+        }
+        if (current.stops.some((stop) => !stopIsDone(stop.status))) {
+          throw new RejectedEvent('TRIP_NOT_READY');
+        }
+        const stale = await this.shouldMarkStale(tx, event, current.id);
+        await this.recordEvent(tx, me, event, current.id);
+        if (current.status === 'on_road') {
+          await tx.trip.update({
+            where: { id: current.id },
+            data: { status: 'completed', endingTime: current.endingTime ?? happenedAt },
+          });
+        }
+        return { stale, notifications: [] };
+      }
+
       case 'LOCATION_PING': {
         const { lat, lng, accuracyM, speedKmh, sos } = payload;
         const optional = (n: unknown) => n == null || (typeof n === 'number' && Number.isFinite(n));
@@ -494,7 +545,6 @@ export class SyncService {
             recordedAt: happenedAt,
           },
         });
-        await this.markDepotArrival(tx, trip.id, lat as number, lng as number, happenedAt);
         return { stale: false, notifications: [] };
       }
 
@@ -565,37 +615,6 @@ export class SyncService {
       if (trip) return trip.vehicle;
     }
     return tx.vehicle.findUnique({ where: { driverId }, select });
-  }
-
-  /**
-   * The first ping inside 500 m of the depot, after every stop is done, is the time the driver got back.
-   * A later ping inside the circle does not move that time.
-   */
-  private async markDepotArrival(
-    tx: Prisma.TransactionClient,
-    tripId: string,
-    lat: number,
-    lng: number,
-    at: Date,
-  ) {
-    const trip = await tx.trip.findUnique({
-      where: { id: tripId },
-      select: {
-        id: true,
-        status: true,
-        endingTime: true,
-        depot: { select: { id: true, name: true, lat: true, lng: true } },
-        stops: { select: { status: true } },
-      },
-    });
-    if (!trip || trip.endingTime || trip.status !== 'on_road') return;
-    if (trip.stops.length === 0 || trip.stops.some((stop) => !stopIsDone(stop.status))) return;
-    const yard = depotPoint(trip.depot.id, trip.depot.name, trip.depot);
-    if (!yard || !insideDepotCircle({ lat, lng }, yard)) return;
-    await tx.trip.update({
-      where: { id: trip.id },
-      data: { status: 'completed', endingTime: at },
-    });
   }
 
   private async storeNotifications(

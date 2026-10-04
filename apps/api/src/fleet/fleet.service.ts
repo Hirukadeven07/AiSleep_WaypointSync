@@ -140,7 +140,8 @@ export class FleetService {
           t.tone === 'not_synced' ||
           t.tone === 'breakdown',
       );
-      const loading = mine.find((t) => t.status === 'loading' || t.status === 'ready');
+      const loading = mine.find((t) => t.status === 'loading');
+      const loaded = mine.find((t) => t.status === 'ready');
       const doneTrips = fleetTrips.filter((t) => t.tone === 'completed');
 
       let status: FleetStatus = 'at_depot';
@@ -165,6 +166,8 @@ export class FleetService {
           doneTrips.length > 0
             ? `Trip ${doneTrips[doneTrips.length - 1].tripNumber} done · Trip ${loading.tripNumber} loading`
             : `Trip ${loading.tripNumber} loading${dock ? ` at dock ${dock}` : ''}`;
+      } else if (loaded) {
+        today = `Trip ${loaded.tripNumber} loaded · waiting for the driver`;
       } else if (unstarted.length > 0) {
         today = `Trip ${unstarted[0].tripNumber} waiting to load`;
       } else if (doneTrips.length > 0) {

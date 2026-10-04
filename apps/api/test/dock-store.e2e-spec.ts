@@ -183,6 +183,7 @@ describe('loader dock and store (e2e)', () => {
           createdAt: { gte: startedAt },
         },
       });
+      await prisma.driverEvent.deleteMany({ where: { tripId: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.trip.deleteMany({ where: { id: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.order.deleteMany({ where: { storeId: { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] } } });
       await prisma.user.update({ where: { loginId: 'sunil' }, data: { storeId: sunilStoreId } });
@@ -308,7 +309,38 @@ describe('loader dock and store (e2e)', () => {
         where: { id: ids.loadTrip },
         include: { loadingJob: true },
       });
-      expect(trip.status).toBe('on_road');
+      expect(trip.status).toBe('ready');
+      expect(trip.startingTime).toBeNull();
+
+      const kasun = await prisma.user.findUniqueOrThrow({ where: { loginId: 'kasun' } });
+      await prisma.trip.update({
+        where: { id: ids.loadTrip },
+        data: { assignedDriverId: kasun.id },
+      });
+      const driver = await login({ role: 'driver', loginId: 'kasun', secret: '1234' });
+      const startedAt = MORNING;
+      const clientId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      await prisma.driverEvent.deleteMany({ where: { clientId } });
+      const synced = await driver
+        .post('/api/sync')
+        .send({
+          events: [
+            {
+              clientId,
+              driverId: kasun.id,
+              tripId: ids.loadTrip,
+              type: 'START_TRIP',
+              payload: {},
+              createdOnPhoneAt: startedAt,
+              seenPlanVersion: 2,
+            },
+          ],
+        })
+        .expect(200);
+      expect(synced.body.applied).toEqual([clientId]);
+      const moving = await prisma.trip.findUniqueOrThrow({ where: { id: ids.loadTrip } });
+      expect(moving.status).toBe('on_road');
+      expect(moving.startingTime?.toISOString()).toBe(new Date(startedAt).toISOString());
       expect(trip.loadingJob?.status).toBe('handed_over');
 
       // Loading order is LIFO, so loadOrder[0] is E2E-B; its first line by name is Bread (3).

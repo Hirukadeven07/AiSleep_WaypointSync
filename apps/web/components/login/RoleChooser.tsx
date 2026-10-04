@@ -28,8 +28,8 @@ export function RoleChooser() {
   }, [router]);
 
   return (
-    <main className="min-h-screen bg-surface p-4 lg:flex lg:h-screen lg:gap-4">
-      <section className="relative flex min-h-[420px] flex-col overflow-hidden rounded-hero bg-scrim px-6 py-7 sm:px-10 lg:min-h-0 lg:pb-12 lg:w-[540px] lg:shrink-0">
+    <main className="min-h-screen bg-surface p-4 lg:flex lg:items-start lg:gap-4">
+      <section className="relative flex min-h-[420px] flex-col overflow-hidden rounded-hero bg-scrim px-6 py-7 sm:px-10 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:min-h-[560px] lg:w-[420px] lg:shrink-0 lg:pb-12 xl:w-[540px]">
         <SkylinePhoto variant="hero" />
         <nav className="relative flex h-11 items-center gap-3">
           <div className="flex items-center gap-[10px]">
@@ -66,7 +66,7 @@ export function RoleChooser() {
         </div>
       </section>
 
-      <section className="flex min-w-0 flex-1 flex-col gap-7 px-2 pb-6 pt-10 sm:px-8 lg:min-h-0 lg:pt-11">
+      <section className="flex min-w-0 flex-1 flex-col gap-7 px-2 pb-6 pt-10 sm:px-8 lg:min-h-[calc(100vh-2rem)] lg:pt-11">
         <div className="flex items-center gap-2">
           <span className="size-[9px] rounded-[2px] bg-olive-ink" />
           <p className="text-[14px] font-medium leading-[normal] text-ink">Choose your role</p>
@@ -80,12 +80,12 @@ export function RoleChooser() {
           </p>
         </div>
 
-        <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:min-h-0 lg:grid-rows-2">
+        <div className="grid flex-1 auto-rows-fr grid-cols-1 gap-4 sm:grid-cols-2">
           {WORKSPACES.map((w) => (
             <Link
               key={w.slug}
               href={`/login/${w.slug}`}
-              className={`flex min-h-[260px] min-w-0 flex-col rounded-card p-7 lg:min-h-0 ${w.tint}`}
+              className={`flex min-h-[240px] min-w-0 flex-col rounded-card p-7 ${w.tint}`}
             >
               <div className={`flex items-center gap-3 leading-[normal] ${w.ink}`}>
                 <span className="text-[14px] font-semibold">{w.index}</span>
@@ -97,8 +97,8 @@ export function RoleChooser() {
               </div>
               <div className="flex-1" />
               <div className="flex flex-col items-start gap-[10px]">
-                {/* Steps down at mid widths so "Store manager" stays inside a half-width card. */}
-                <p className="max-w-full text-[28px] font-medium leading-[normal] tracking-[-0.02em] text-ink [overflow-wrap:anywhere] sm:text-[32px] xl:text-[40px]">
+                {/* Steps down at mid widths so long titles stay inside a half-width card; wraps between words, never inside one. */}
+                <p className="max-w-full text-[28px] font-medium leading-[normal] tracking-[-0.02em] text-ink [overflow-wrap:break-word] sm:text-[32px] lg:text-[30px] xl:text-[36px] 2xl:text-[40px]">
                   {w.title}
                 </p>
                 <p className="text-[15px] leading-[1.5] text-slate">{w.blurb}</p>
@@ -112,7 +112,7 @@ export function RoleChooser() {
           {LOCAL_CHECK_URL && (
             <a
               href={LOCAL_CHECK_URL}
-              className="flex min-h-[260px] flex-col rounded-card border border-mist bg-surface p-7"
+              className="flex min-h-[240px] flex-col rounded-card border border-mist bg-surface p-7"
             >
               <div className="flex items-center gap-3 text-olive-ink">
                 <span className="text-[14px] font-semibold">[05]</span>

@@ -369,7 +369,7 @@ export class LoadsService {
       }),
       this.prisma.trip.update({
         where: { id: trip.id },
-        data: { status: 'on_road', startingTime: departedAt },
+        data: { status: 'ready' },
       }),
       ...(trip.loadingJob
         ? [
@@ -422,7 +422,7 @@ export class LoadsService {
     await this.notifier.notify({
       userId: driverId,
       title: 'Truck loaded',
-      body: `${plate} is loaded. Trip ${trip.tripNumber} can leave the depot.`,
+      body: `${plate} is loaded. Trip ${trip.tripNumber} starts when you tap Start trip.`,
       link: '/drive/next',
     });
   }
