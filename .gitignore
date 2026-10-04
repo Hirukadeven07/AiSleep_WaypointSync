@@ -11,3 +11,5 @@ coverage
 data/*.csv
 backups/
 waypoint*.sql
+.vercel
+.env.local

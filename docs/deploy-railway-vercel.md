@@ -1,57 +1,80 @@
 # Deploying to Railway (API) and Vercel (web)
 
-An alternative to [deploy-vm.md](deploy-vm.md) that needs no server and no custom domain. Both platforms give HTTPS on their own domains, so phone GPS works.
+An alternative to [deploy-vm.md](deploy-vm.md) that needs no server and no custom domain. Both platforms give HTTPS on their own domains, so phone GPS works. Everything below is done from the repo root with the `railway` and `vercel` CLIs, so no GitHub app access is needed.
 
 | Piece | Host |
 | --- | --- |
 | `apps/web` (Next.js) | Vercel, `https://<name>.vercel.app` |
-| `apps/api` (NestJS) | Railway, built from `apps/api/Dockerfile` (see `railway.json`) |
+| `apps/api` (NestJS) | Railway service `api`, built from `apps/api/Dockerfile` |
 | Postgres | Railway Postgres |
-| Photos | Railway MinIO template, with a volume |
+| Photos | Railway MinIO template (service `Bucket`), private bucket `photos` |
+| Basemap | Same MinIO, public-read bucket `maps` |
 
-The browser only talks to Vercel. Next.js rewrites `/api/*` to the Railway API (`API_INTERNAL_URL`), so session cookies stay first-party.
+The browser only talks to Vercel. Next.js rewrites `/api/*` to the Railway API (`API_INTERNAL_URL`) and `/maps/sri-lanka.pmtiles` to the `maps` bucket (`BASEMAP_URL`), so cookies stay first-party and no CORS is needed. The basemap (175 MB) is over Vercel's 100 MB file limit, which is why it lives in MinIO.
 
-## 1. Railway: database, storage, API
+## 1. Railway
 
-1. railway.com > New Project > **Deploy from GitHub repo** > pick this repo. Railway reads `railway.json` and builds the API Dockerfile.
-2. In that service: Settings > Source > **Branch**: the branch you deploy from (e.g. `main`).
-3. In the project: **+ Create > Database > PostgreSQL**.
-4. In the project: **+ Create > Template > MinIO**. Note the service name and its root user and password variables.
-5. API service > **Variables**:
+```bash
+npm i -g @railway/cli
+railway login
+railway link -p <project> -e production
+railway add -d postgres
+railway deploy -t SMKOEA            # MinIO template; creates "Bucket" and "Console"
+railway add -s api \
+  -v 'NODE_ENV=production' -v 'PORT=3001' -v 'SESSION_TTL_HOURS=12' \
+  -v 'DATABASE_URL=${{Postgres.DATABASE_URL}}' \
+  -v 'MINIO_ENDPOINT=${{Bucket.MINIO_PRIVATE_ENDPOINT}}' \
+  -v 'MINIO_ROOT_USER=${{Bucket.MINIO_ROOT_USER}}' \
+  -v 'MINIO_ROOT_PASSWORD=${{Bucket.MINIO_ROOT_PASSWORD}}' \
+  -v 'MINIO_BUCKET=photos' \
+  -v 'RAILWAY_DOCKERFILE_PATH=apps/api/Dockerfile'
+railway up -s api --detach
+railway domain -s api -p 3001
+```
 
-   | Variable | Value |
-   | --- | --- |
-   | `NODE_ENV` | `production` |
-   | `PORT` | `3001` |
-   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
-   | `SESSION_TTL_HOURS` | `12` |
-   | `MINIO_ENDPOINT` | `http://${{<MinIO service>.RAILWAY_PRIVATE_DOMAIN}}:9000` |
-   | `MINIO_ROOT_USER` | reference the MinIO service's root user variable |
-   | `MINIO_ROOT_PASSWORD` | reference the MinIO service's root password variable |
-   | `MINIO_BUCKET` | `photos` |
+`RAILWAY_DOCKERFILE_PATH` is required: `railway up` does not pick up `railway.json`, and without it Railpack fails with "No start command detected".
 
-   Leave `DATA_DIR` unset: the image carries `data/` and the seed finds it.
+`railway up` uploads the working tree. The competition CSVs are gitignored, so they only reach the image because `.railwayignore` re-includes `data/*.csv`. A GitHub-connected Railway service would build without them and the seed would warn about empty outlets and vehicles.
 
-6. API service > Settings > Networking > **Generate Domain** (port `3001`). Copy the URL.
-7. Check `https://<api>.up.railway.app/api/health` returns `{"ok":true,"db":true}`.
+Check `https://<api>.up.railway.app/api/health` returns `{"ok":true,"db":true}`. Every start runs `prisma migrate deploy` and the seed (an upsert), so redeploys are safe.
 
-Every start runs `prisma migrate deploy` and the seed (an upsert), so redeploys are safe.
+## 2. Basemap
 
-## 2. Vercel: web
+Create the `maps` bucket with public read and upload the file in parts (Railway's proxy rejects a single 175 MB request):
 
-1. vercel.com > Add New > Project > import this repo.
-2. **Root Directory**: `apps/web`. Framework, install and build commands come from `apps/web/vercel.json`.
-3. **Environment Variables**: `API_INTERNAL_URL` = the Railway URL from step 1.6, no trailing slash. Set it before the first build: rewrites are fixed at build time.
-4. Deploy, then Settings > Git > **Git Large File Storage: on**, and redeploy. Without it the Sri Lanka basemap (`public/maps/sri-lanka.pmtiles`, Git LFS) ships as a pointer file and the map is blank.
-5. Settings > Git > **Production Branch**: the branch you deploy from. Preview URLs sit behind Vercel login (Deployment Protection), so phones should use the production URL.
+```bash
+S3_ENDPOINT=<Bucket MINIO_PUBLIC_ENDPOINT> S3_ACCESS=<MINIO_ROOT_USER> S3_SECRET=<MINIO_ROOT_PASSWORD> \
+  node scripts/upload-basemap.mjs apps/web/public/maps/sri-lanka.pmtiles
+```
 
-## 3. Verify
+The first time, create the bucket and its policy in the MinIO Console (Buckets > Create `maps` > Access Policy: public). Re-run the script only when the basemap changes.
 
-On a phone on mobile data, open `https://<name>.vercel.app`, sign in with a seeded user (README logins, e.g. driver `kasun` / PIN `1234`), allow location, and check the map and a photo upload.
+## 3. Vercel
+
+```bash
+npm i -g vercel
+vercel login
+vercel link --project <name>      # project Root Directory: apps/web
+vercel env add API_INTERNAL_URL production    # https://<api>.up.railway.app, no trailing slash
+vercel env add BASEMAP_URL production         # https://<bucket public host>/maps/sri-lanka.pmtiles
+vercel deploy --prod
+```
+
+Set both variables before deploying: rewrites are fixed at build time. Install and build commands come from `apps/web/vercel.json`; `.vercelignore` keeps node_modules, `.env`, the CSVs and the basemap out of the upload. On Windows Git Bash, prefix `vercel api` calls with `MSYS_NO_PATHCONV=1`.
+
+Use the production alias (`https://<name>.vercel.app`). Per-deployment URLs sit behind Vercel login.
+
+## 4. Verify
+
+On a phone on mobile data, open the production URL, sign in with a seeded user (README logins, e.g. driver `kasun` / PIN `1234`), allow location, and check the map and a photo upload.
+
+## Updating
+
+- API: `railway up -s api --detach`
+- Web: `vercel deploy --prod`
 
 ## Notes
 
-- Pushes to the deploy branch redeploy both. Railway only rebuilds when API-side paths change (`watchPatterns` in `railway.json`).
 - Live notices stream through a Vercel function (`app/api/notices/live`), which Hobby cuts off after a few minutes. The browser reconnects by itself.
 - Cost: Vercel Hobby is free for non-commercial use. Railway has a one-time trial credit, then the Hobby plan (about $5 to $10 a month for API, Postgres and MinIO).
 - Backups: Railway Postgres > Backups, or run `pg_dump` against its public URL.
