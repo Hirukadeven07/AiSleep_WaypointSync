@@ -14,6 +14,7 @@ import {
   type TripSummary,
 } from '@/lib/driver-cache';
 import { signOutDriver } from '@/lib/driver-sign-out';
+import { useRestoreCheck } from '@/lib/session';
 import { useRoadPings } from '@/lib/use-road-pings';
 import { LiveNoticeAlerts } from '@/components/shell/LiveNotices';
 import { DriverSidebar } from '@/components/shell/DriverSidebar';
@@ -62,6 +63,8 @@ function ShellInner({ children }: { children: ReactNode }) {
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [online, setOnline] = useState(true);
+  // Back after signing out: hide the restored page while the session is checked.
+  const checking = useRestoreCheck('driver');
 
   const refresh = useCallback(async () => {
     try {
@@ -190,7 +193,7 @@ function ShellInner({ children }: { children: ReactNode }) {
 
   // The Figma has no frames for loading, wrong account or "no signal and nothing saved", so these
   // show only the blank canvas (and, offline, the Figma offline banner).
-  if (phase === 'loading' || phase === 'no-access') {
+  if (phase === 'loading' || phase === 'no-access' || checking) {
     return (
       <>
         {alerts}
