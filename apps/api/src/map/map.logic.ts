@@ -151,3 +151,13 @@ export function circleRing(
 export function headingBack(status: string, stopStatuses: string[]): boolean {
   return status === 'on_road' && stopStatuses.length > 0 && stopStatuses.every(stopIsDone);
 }
+
+/** The truck is drawn at its latest ping. A confirmed stop is used only when no ping has arrived. */
+export function vehiclePosition(
+  ping: { lat: number; lng: number } | null,
+  lastStop: { lat: number | null; lng: number | null } | null,
+): { lat: number; lng: number } | null {
+  if (ping) return { lat: ping.lat, lng: ping.lng };
+  if (lastStop?.lat != null && lastStop.lng != null) return { lat: lastStop.lat, lng: lastStop.lng };
+  return null;
+}

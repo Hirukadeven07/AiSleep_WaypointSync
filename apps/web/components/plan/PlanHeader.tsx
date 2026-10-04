@@ -1,6 +1,7 @@
 import type { PlanDay, PlanSummary } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { clock12, dayLabel } from './format';
+import { depotLabel } from '@/lib/depots';
 
 function Pill({
   icon,
@@ -58,7 +59,7 @@ export function PlanHeader({
           Plan tomorrow&apos;s trips
         </h1>
         <p className="whitespace-pre text-[14px] leading-5 text-muted">
-          {`${dayLabel(plan.date)}  ·  ${plan.depotId} depot  ·  orders close ${clock12(plan.cutoffMin)}`}
+          {`${dayLabel(plan.date)}  ·  ${depotLabel(plan.depotId)}  ·  orders close ${clock12(plan.cutoffMin)}`}
         </p>
       </div>
       <Pill icon="sparkle" onClick={onAutoAssign}>
@@ -160,7 +161,8 @@ export function SummaryStrip({
 }) {
   const used = Math.min(summary.capacityUsedPct, 100);
   return (
-    <section className="flex items-center gap-6 rounded-[20px] bg-surface px-[18px] py-3">
+    // Wraps onto a second line on narrower screens instead of widening the page.
+    <section className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-[20px] bg-surface px-[18px] py-3">
       <Stat value={String(summary.orderCount)} label="orders" />
       <Stat value={String(summary.waitingSinceYesterday)} label="waiting since yesterday" warn />
       <p className="flex items-center gap-2 whitespace-nowrap">

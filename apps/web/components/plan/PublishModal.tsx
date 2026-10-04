@@ -46,6 +46,37 @@ export function PublishModal({
   tripId?: string;
 }) {
   const n = check.problems.length;
+  const trips = `${check.tripCount} ${check.tripCount === 1 ? 'trip' : 'trips'}`;
+  if (n === 0) {
+    // Nothing open: confirm before the whole plan goes to loaders, drivers and stores.
+    return (
+      <Modal label="Publish the plan" width={520} onClose={edit.closeModal}>
+        <ModalIcon tone="bg-success-tint text-success">
+          <Icon name="check" size={22} />
+        </ModalIcon>
+        <h2 className="text-[24px] font-semibold leading-[30px] text-ink">Publish {trips}?</h2>
+        <p className="text-[14px] leading-[21px] text-muted">
+          Nothing is open. Publishing sends {trips} to loaders and drivers, and tells{' '}
+          {check.storeCount} {check.storeCount === 1 ? 'store' : 'stores'} their delivery window.
+        </p>
+        <div className="flex gap-[10px]">
+          <button
+            type="button"
+            onClick={edit.closeModal}
+            className="flex min-w-px flex-1 items-center justify-center rounded-pill border border-border bg-surface px-[18px] py-3 text-[14px] font-semibold leading-5 text-ink"
+          >
+            Back to plan
+          </button>
+          <SolidButton
+            onClick={() => void publishPlan(edit, false, tripId)}
+            className="min-w-px flex-1 bg-primary text-on-primary"
+          >
+            Publish {trips}
+          </SolidButton>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal label="Publish check" width={520} onClose={edit.closeModal}>
       <ModalIcon tone="bg-danger-tint text-danger">

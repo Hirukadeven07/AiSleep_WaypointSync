@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
+import { LOCAL_CHECK_URL } from '@/lib/local-check';
 import { Icon } from '@/components/ui/Icon';
 
 const PHOTO = '/login/skyline.webp';
@@ -16,7 +17,9 @@ export function SkylinePhoto({ variant }: { variant: 'panel' | 'sheet' | 'hero' 
         className={
           variant === 'sheet'
             ? 'absolute left-[-393%] top-[-31%] h-[182%] w-[607%] max-w-none'
-            : `absolute inset-0 size-full max-w-none object-cover [object-position:85%_50%] ${variant === 'hero' ? 'scale-110 blur-[7px]' : ''}`
+            : variant === 'hero'
+              ? 'absolute inset-0 size-full max-w-none object-cover blur-[7px] [object-position:85%_50%] lg:inset-auto lg:left-[-300px] lg:top-[-40px] lg:size-[1100px] lg:[object-position:50%_50%]'
+              : 'absolute inset-0 size-full max-w-none object-cover [object-position:85%_50%]'
         }
       />
       <div
@@ -37,12 +40,14 @@ export function SkylinePhoto({ variant }: { variant: 'panel' | 'sheet' | 'hero' 
 export function SwitchRole({ className = '' }: { className?: string }) {
   return (
     <span className={`flex items-center gap-2 ${className}`}>
-      <a
-        href="http://127.0.0.1:3099/"
-        className="flex items-center gap-[6px] rounded-pill bg-olive py-[9px] pl-3 pr-[14px] text-label font-semibold text-ink"
-      >
-        Check
-      </a>
+      {LOCAL_CHECK_URL && (
+        <a
+          href={LOCAL_CHECK_URL}
+          className="flex items-center gap-[6px] rounded-pill bg-olive py-[9px] pl-3 pr-[14px] text-label font-semibold text-ink"
+        >
+          Check
+        </a>
+      )}
       <Link
         href="/login?switch=1"
         className="flex items-center gap-[6px] rounded-pill py-[9px] pl-3 pr-[14px] text-label font-semibold text-ink"
@@ -83,7 +88,7 @@ export function TextInput({
     <input
       {...props}
       aria-invalid={invalid || undefined}
-      className={`w-full min-w-0 bg-transparent text-[15px] text-ink outline-none placeholder:text-muted/70 ${className}`}
+      className={`w-full min-w-0 bg-transparent text-[15px] leading-[21px] text-ink outline-none placeholder:text-muted/70 ${className}`}
     />
   );
 }
@@ -158,7 +163,7 @@ export function CheckRow({
       role="checkbox"
       aria-checked={checked}
       onClick={() => onChange(!checked)}
-      className="flex items-center gap-[10px] text-left text-body text-ink"
+      className="flex items-center gap-[10px] text-left text-body leading-5 text-ink"
     >
       <span
         className={`flex shrink-0 items-center justify-center rounded-[6px] text-[12px] font-bold ${

@@ -242,26 +242,45 @@ export class SyncService {
           update: {},
         });
         const vehicle = await this.driverVehicle(tx, me.id, tripId);
-        await tx.driverIncident.create({
-          data: {
-            driverId: driver.id,
-            tripId,
-            vehicleId: vehicle?.id ?? null,
-            incidentType: 'sos',
-            severity,
-            message,
-            lat,
-            lng,
-            raisedAt: happenedAt,
-          },
+        // One open SOS per driver: pressing again updates it instead of adding a second alert.
+        const open = await tx.driverIncident.findFirst({
+          where: { driverId: driver.id, incidentType: 'sos', resolvedAt: null },
+          orderBy: { raisedAt: 'desc' },
         });
+        if (open) {
+          await tx.driverIncident.update({
+            where: { id: open.id },
+            data: {
+              tripId: tripId ?? open.tripId,
+              vehicleId: vehicle?.id ?? open.vehicleId,
+              severity,
+              message: message ?? open.message,
+              lat: lat ?? open.lat,
+              lng: lng ?? open.lng,
+            },
+          });
+        } else {
+          await tx.driverIncident.create({
+            data: {
+              driverId: driver.id,
+              tripId,
+              vehicleId: vehicle?.id ?? null,
+              incidentType: 'sos',
+              severity,
+              message,
+              lat,
+              lng,
+              raisedAt: happenedAt,
+            },
+          });
+        }
 
         const depotId = vehicle?.depotId ?? me.depotId;
         const dispatchers = await tx.user.findMany({
           where: { role: 'dispatcher', ...(depotId ? { depotId } : {}) },
           select: { id: true },
         });
-        const body = `${me.name} raised an SOS${message ? `: ${message}` : '.'}`;
+        const body = `${me.name} raised an SOS${open ? ' again' : ''}${message ? `: ${message}` : '.'}`;
         return {
           stale,
           notifications: dispatchers.map((user) => ({
@@ -269,6 +288,36 @@ export class SyncService {
             title: 'Driver SOS',
             body,
             link: '/dispatch/incidents',
+          })),
+        };
+      }
+
+      case 'SOS_CLEARED': {
+        // The driver closed SOS ("I'm safe"): resolve their open SOS and tell dispatch.
+        const trip =
+          (await this.lookupTripForDriver(tx, me.id, event.tripId ?? null)) ??
+          (await this.activeTripForDriver(me.id, tx));
+        const tripId = trip?.id ?? null;
+        const stale = await this.shouldMarkStale(tx, event, tripId);
+        await this.recordEvent(tx, me, event, tripId);
+        const cleared = await tx.driverIncident.updateMany({
+          where: { driver: { userId: me.id }, incidentType: 'sos', resolvedAt: null },
+          data: { resolvedAt: happenedAt, resolution: 'The driver marked themselves safe' },
+        });
+        if (cleared.count === 0) return { stale, notifications: [] };
+        const vehicle = await this.driverVehicle(tx, me.id, tripId);
+        const depotId = vehicle?.depotId ?? me.depotId;
+        const dispatchers = await tx.user.findMany({
+          where: { role: 'dispatcher', ...(depotId ? { depotId } : {}) },
+          select: { id: true },
+        });
+        return {
+          stale,
+          notifications: dispatchers.map((user) => ({
+            userId: user.id,
+            title: 'Driver is safe',
+            body: `${me.name} closed the SOS and says they are safe.`,
+            link: '/dispatch',
           })),
         };
       }

@@ -8,6 +8,7 @@ export { Reason } from './reasons';
 export { TIME_BUDGET_MIN, TIME_BUDGET_GRACE_MIN, MAX_TRIPS_PER_VEHICLE_PER_DAY } from './constants';
 export { parseHhMm, formatMinutes, isoWeekKey } from './clock';
 export { findTravel, findAllowance } from './lookups';
+export { vehicleName, outletName, depotName } from './names';
 
 export type {
   Brand,

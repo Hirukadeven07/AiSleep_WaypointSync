@@ -156,7 +156,11 @@ function Card({
           On break since {timeOf(trip.onBreakSince)}
         </span>
       )}
-      {column === 'dispatched' && ['on_time', 'late', 'not_synced'].includes(trip.live) && (
+      {/* Vehicle actions (move a stop, breakdown) for trips on the road, and for sent or loading
+          trips still at the depot, so a stop can come off before the truck leaves. */}
+      {((column === 'dispatched' && ['on_time', 'late', 'not_synced'].includes(trip.live)) ||
+        column === 'loading' ||
+        (column === 'assigned' && trip.live === 'assigned')) && (
         <button
           type="button"
           aria-label="Vehicle actions"

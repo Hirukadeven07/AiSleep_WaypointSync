@@ -533,6 +533,19 @@ export function NextStop() {
             Store confirmed the receipt
             {stop.storeConfirmedAt ? ` at ${timeOf(stop.storeConfirmedAt)}` : ''}
           </p>
+          {stop.storeIssues?.length ? (
+            <ul className="flex flex-col gap-1 pt-1" aria-label="What the store reported">
+              {stop.storeIssues.map((issue, i) => (
+                <li key={i} className="flex items-center gap-2 text-[15px] leading-5 text-ink">
+                  <Icon name="alert" size={15} className="text-warning" />
+                  {issue.qty !== null ? `${issue.qty} × ` : ''}
+                  {issue.itemName} · {issue.reason.replace('_', ' ')}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[14px] leading-5 text-ink">Every line was received.</p>
+          )}
           <p className="text-[14px] leading-5 text-muted">Acknowledge it to see your next stop.</p>
         </section>
       )}

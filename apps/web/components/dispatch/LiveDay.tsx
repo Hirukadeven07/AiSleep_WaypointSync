@@ -9,6 +9,7 @@ import { GlancePanel } from './GlancePanel';
 import { useLiveDay } from './useLiveDay';
 import { useTripPanels } from './useTripPanels';
 import { BRAND_TAG, firstName, greeting, lastUpdate, time12, timeOf, toneOf } from './live-format';
+import { depotLabel } from '@/lib/depots';
 
 type Filter = 'all' | 'on_time' | 'late' | 'issue' | 'done';
 
@@ -76,9 +77,9 @@ function TripRow({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(e) => e.key === 'Enter' && onOpen()}
-      className={`flex shrink-0 cursor-pointer items-center gap-2 rounded-input p-3 ${zebra ? 'bg-wash' : ''}`}
+      className={`flex shrink-0 cursor-pointer items-center gap-3 rounded-input p-3 ${zebra ? 'bg-wash' : ''}`}
     >
-      <div className="flex w-[200px] shrink-0 flex-col gap-px overflow-hidden whitespace-nowrap">
+      <div className="flex w-[230px] shrink-0 flex-col gap-px overflow-hidden whitespace-nowrap">
         <p className="text-[14px] font-semibold leading-5 text-ink">
           {trip.plate ?? trip.vehicleId} · Trip {trip.tripNumber}
         </p>
@@ -86,7 +87,7 @@ function TripRow({
           {trip.driverName ?? 'No driver yet'}
         </p>
       </div>
-      <div className="flex w-[140px] shrink-0 items-center gap-[6px] overflow-hidden">
+      <div className="flex w-[150px] shrink-0 items-center gap-[6px] overflow-hidden">
         <span
           className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${BRAND_TAG[trip.brand]}`}
         >
@@ -96,15 +97,19 @@ function TripRow({
           {trip.district}
         </span>
       </div>
-      <div className="flex min-w-[150px] max-w-[280px] flex-1 items-center gap-[10px]">
-        <span className="h-2 min-w-[40px] flex-1 overflow-hidden rounded-[4px] bg-bg">
+      {/* As in the Figma: a 200px track and the stop count, clipped by the column on narrower consoles. */}
+      <div
+        className="flex min-w-px flex-1 items-center gap-[10px] overflow-hidden"
+        title={`${trip.stopsDone}/${trip.stopsTotal} stops`}
+      >
+        <span className="h-2 w-[200px] shrink-0 overflow-hidden rounded-[4px] bg-bg">
           <span className={`block h-2 rounded-[4px] ${tone.fill}`} style={{ width: `${pct}%` }} />
         </span>
         <span className="whitespace-nowrap text-[12px] font-semibold leading-[17px] text-ink">
           {trip.stopsDone}/{trip.stopsTotal} stops
         </span>
       </div>
-      <div className="flex w-[110px] shrink-0">
+      <div className="flex w-[140px] shrink-0">
         <span
           className={`flex items-center gap-[6px] whitespace-nowrap rounded-pill px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] ${tone.chip}`}
         >
@@ -112,7 +117,7 @@ function TripRow({
           {tone.label}
         </span>
       </div>
-      <div className="min-w-[160px] flex-1 truncate text-[12px] leading-[17px] text-muted">
+      <div className="w-[170px] shrink-0 truncate text-[12px] leading-[17px] text-muted">
         {lastUpdate(trip)}
       </div>
       <div className="flex h-[38px] w-[44px] shrink-0 items-center justify-center">
@@ -165,7 +170,7 @@ export function LiveDay() {
               {me ? `, ${firstName(me.name)}` : ''}
             </h1>
             <p className="whitespace-pre text-[14px] leading-5 text-muted">
-              {`${dayLabel(day.date)}  ·  ${day.depotId} depot${day.liveSince ? `  ·  Live since ${time12(day.liveSince)}` : ''}`}
+              {`${dayLabel(day.date)}  ·  ${depotLabel(day.depotId)}${day.liveSince ? `  ·  Live since ${time12(day.liveSince)}` : ''}`}
             </p>
           </div>
           <span className="flex shrink-0 items-center gap-[6px] rounded-pill bg-success/[0.12] px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] text-success">
@@ -248,12 +253,12 @@ export function LiveDay() {
               ))}
           </div>
           <div className="h-2 shrink-0" />
-          <div className="flex shrink-0 gap-2 px-3 py-2 text-[12px] font-bold leading-[15px] tracking-[0.6px] text-muted">
-            <p className="w-[200px] shrink-0">VEHICLE &amp; DRIVER</p>
-            <p className="w-[140px] shrink-0">BRAND · AREA</p>
-            <p className="min-w-[150px] max-w-[280px] flex-1">PROGRESS</p>
-            <p className="w-[110px] shrink-0">STATUS</p>
-            <p className="min-w-[160px] flex-1">LAST UPDATE</p>
+          <div className="flex shrink-0 gap-3 px-3 py-2 text-[12px] font-bold leading-[15px] tracking-[0.6px] text-muted">
+            <p className="w-[230px] shrink-0">VEHICLE &amp; DRIVER</p>
+            <p className="w-[150px] shrink-0">BRAND · AREA</p>
+            <p className="min-w-px flex-1">PROGRESS</p>
+            <p className="w-[140px] shrink-0">STATUS</p>
+            <p className="w-[170px] shrink-0">LAST UPDATE</p>
             <p className="w-[44px] shrink-0" />
           </div>
           {rows.length === 0 && (

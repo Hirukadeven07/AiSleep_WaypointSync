@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { DISPATCH_PHONE, telHref } from '@/lib/driver-format';
 import { enqueueAction } from '@/lib/outbox';
 import { useDriver } from './DriverShell';
+import { depotName } from '@/lib/depots';
 
 function CallCard({
   href,
@@ -112,8 +113,12 @@ export function SosScreen() {
     void enqueueAction('SOS_ALERT', { location: null }, trip?.id ?? null, trip?.planVersion ?? null).catch(() => {});
   }, [trip]);
 
-  // Back to the driver screen the SOS button was pressed on (Home if unknown).
+  // Closing SOS ("I'm safe" or ×) clears the alert for dispatch, then goes back to the screen
+  // the SOS button was pressed on (Home if unknown). It goes through the outbox, so it works offline.
   const close = () => {
+    void enqueueAction('SOS_CLEARED', {}, trip?.id ?? null, trip?.planVersion ?? null).catch(
+      () => {},
+    );
     const from = new URLSearchParams(window.location.search).get('from') ?? '';
     const ok = from.startsWith('/drive') && !from.startsWith('/drive/sos') && !from.startsWith('//');
     router.replace(ok ? from : '/drive');
@@ -156,7 +161,7 @@ export function SosScreen() {
             primary
             href={telHref(DISPATCH_PHONE)}
             title="Call dispatcher"
-            subtitle={me?.depotId ? `Dispatch · ${me.depotId}` : 'Dispatch'}
+            subtitle={me?.depotId ? `Dispatch · ${depotName(me.depotId)}` : 'Dispatch'}
             number={DISPATCH_PHONE}
           />
           <CallCard href={telHref('119')} title="Police emergency" subtitle="Sri Lanka Police" number="119" />

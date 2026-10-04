@@ -5,7 +5,9 @@ import { useEffect } from 'react';
 import type { Brand, LiveStop, LiveTrip } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { clock } from '@/components/plan/format';
+import { buildPdf, openPdf } from '@/lib/pdf';
 import { timeOf, toneOf } from './live-format';
+import { tripReportFilename, tripReportLines, tripReportTitle } from './trip-report';
 
 const HERO: Record<Brand, string> = {
   Fresh: 'bg-fresh-tint',
@@ -43,7 +45,18 @@ function Marker({ n, tone }: { n: number; tone: string }) {
   );
 }
 
-function Stop({ stop, next, onRoad }: { stop: LiveStop; next: boolean; onRoad: boolean }) {
+function Stop({
+  stop,
+  next,
+  onRoad,
+  offline = false,
+}: {
+  stop: LiveStop;
+  next: boolean;
+  onRoad: boolean;
+  /** The phone is not syncing: ETAs are the plan, not where the truck is. */
+  offline?: boolean;
+}) {
   const finished = done(stop);
   const partial = stop.status === 'partial' || stop.issueNote !== null;
   const risk =
@@ -82,7 +95,7 @@ function Stop({ stop, next, onRoad }: { stop: LiveStop; next: boolean; onRoad: b
   } else {
     const eta =
       stop.etaMin !== null
-        ? `${next ? 'Arriving ~' : 'ETA '}${clock(stop.etaMin)} · window ${windowText(stop)}`
+        ? `${offline ? 'Planned ' : next ? 'Arriving ~' : 'ETA '}${clock(stop.etaMin)} · window ${windowText(stop)}`
         : `Window ${windowText(stop)}`;
     sub = eta;
     if (stop.missBy !== null) {
@@ -164,7 +177,13 @@ export function TripDrawer({
       : trip.live === 'breakdown'
         ? `Broke down. ${remaining} ${remaining === 1 ? 'stop' : 'stops'} still to deliver.`
         : trip.live === 'not_synced'
-          ? `Phone offline since ${timeOf(trip.lastAt)}. Deliveries recorded offline will appear here when it reconnects.`
+          ? `${
+              trip.lastSyncAt
+                ? `Phone offline since ${timeOf(trip.lastSyncAt)}.`
+                : trip.departedAt
+                  ? `No sync since it left at ${timeOf(trip.departedAt)}.`
+                  : 'The phone has not synced yet.'
+            } Times below are the plan; deliveries recorded offline appear when it reconnects.`
           : null;
 
   return (
@@ -256,7 +275,13 @@ export function TripDrawer({
 
         <div className="flex shrink-0 flex-col">
           {trip.stops.map((s) => (
-            <Stop key={s.id} stop={s} next={s.id === firstOpen?.id} onRoad={onRoad} />
+            <Stop
+              key={s.id}
+              stop={s}
+              next={s.id === firstOpen?.id}
+              onRoad={onRoad}
+              offline={trip.live === 'not_synced'}
+            />
           ))}
         </div>
 
@@ -315,10 +340,13 @@ export function TripDrawer({
             <>
               <button
                 type="button"
-                disabled
+                onClick={() => {
+                  const title = tripReportTitle(trip);
+                  openPdf(buildPdf(tripReportLines(trip), title), tripReportFilename(trip), title);
+                }}
                 className="flex min-w-px flex-1 items-center justify-center rounded-pill border border-border bg-surface px-[18px] py-3 text-[14px] font-semibold leading-5 text-ink"
               >
-                Download trip report
+                View trip report
               </button>
               {nextTripId && trip.nextTrip && (
                 <button

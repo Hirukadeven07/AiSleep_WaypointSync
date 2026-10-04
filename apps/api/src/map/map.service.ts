@@ -156,7 +156,7 @@ export class MapService {
     const day = dateOnly(date);
     const now = this.clock.now();
 
-    const [districts, depots, stores, rows, events, pings] = await Promise.all([
+    const [districts, depots, stores, rows, events, pings, pingRows] = await Promise.all([
       this.districts(),
       this.prisma.depot.findMany({ orderBy: { name: 'asc' } }),
       this.storeMarkers(depotId, date),
@@ -178,10 +178,14 @@ export class MapService {
         _max: { appliedAt: true },
         where: { trip: { depotId, serviceDate: day } },
       }),
+      this.prisma.locationPing.groupBy({
+        by: ['tripId'],
+        _max: { receivedAt: true },
+        where: { trip: { depotId, serviceDate: day } },
+      }),
       this.prisma.locationPing.findMany({
         where: { trip: { depotId, serviceDate: day } },
-        orderBy: { recordedAt: 'desc' },
-        select: { tripId: true, lat: true, lng: true, recordedAt: true, receivedAt: true },
+        select: { tripId: true, lat: true, lng: true, recordedAt: true },
       }),
     ]);
 
@@ -189,17 +193,15 @@ export class MapService {
     for (const event of events) {
       if (event.tripId && event._max.appliedAt) lastSeen.set(event.tripId, event._max.appliedAt);
     }
-    const latestPing = new Map<string, { lat: number; lng: number; recordedAt: Date }>();
     for (const ping of pings) {
+      const seen = ping._max.receivedAt;
       const prev = lastSeen.get(ping.tripId);
-      if (!prev || ping.receivedAt > prev) lastSeen.set(ping.tripId, ping.receivedAt);
-      if (!latestPing.has(ping.tripId)) {
-        latestPing.set(ping.tripId, {
-          lat: ping.lat,
-          lng: ping.lng,
-          recordedAt: ping.recordedAt,
-        });
-      }
+      if (seen && (!prev || seen > prev)) lastSeen.set(ping.tripId, seen);
+    }
+    const latestPing = new Map<string, { lat: number; lng: number; recordedAt: Date }>();
+    for (const ping of pingRows) {
+      const prev = latestPing.get(ping.tripId);
+      if (!prev || ping.recordedAt > prev.recordedAt) latestPing.set(ping.tripId, ping);
     }
 
     const trips: LocateTrip[] = [];

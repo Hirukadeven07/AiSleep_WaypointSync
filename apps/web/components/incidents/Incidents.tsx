@@ -173,12 +173,17 @@ export function Incidents() {
         <LogIncidentModal
           onClose={() => setLogging(false)}
           onLogged={async (incident) => {
+            // Already open for this trip: the note went onto that incident, not a new one.
+            const existing = list.active.some((i) => i.id === incident.id);
             setLogging(false);
             setFilter('active');
             setPicked(incident.id);
             setDetail(incident);
             await refresh();
-            setToast({ title: 'Incident logged', sub: incident.title });
+            setToast({
+              title: existing ? 'Added to the open incident' : 'Incident logged',
+              sub: incident.title,
+            });
           }}
         />
       )}

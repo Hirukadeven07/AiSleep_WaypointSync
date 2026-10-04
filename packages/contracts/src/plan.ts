@@ -67,8 +67,8 @@ export interface PlanTrip {
   minutes: number | null;
   budgetMin: number;
   /**
-   * Who drives it: the driver the dispatcher assigned, else the vehicle's registered driver.
-   * `driverAssigned` is true only for an explicit assignment.
+   * Who drives it: the vehicle's registered driver. `driverAssigned` is true only when a trip
+   * row still names a driver explicitly; the plan screen does not offer another driver.
    */
   driverId: string | null;
   driverName: string | null;
@@ -84,7 +84,7 @@ export interface PlanDriver {
   vehicleId: string | null;
 }
 
-/** POST /plan/trips/:id/driver. `null` goes back to the vehicle's registered driver. */
+/** POST /plan/trips/:id/driver. Only the vehicle's driver is accepted. `null` follows that driver. */
 export interface AssignDriverRequest {
   driverId: string | null;
 }
@@ -118,7 +118,7 @@ export interface PlanDay {
   orders: PlanOrder[];
   movedToLater: PlanOrder[];
   trips: PlanTrip[];
-  /** Active drivers at the depot, for the trip's driver picker. */
+  /** Active drivers at the depot. A trip shows the one registered on its vehicle. */
   drivers: PlanDriver[];
   districts: string[];
   summary: PlanSummary;

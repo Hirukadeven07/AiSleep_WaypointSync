@@ -1,7 +1,8 @@
 /**
  * Tomorrow's demo day at depo1 (Peliyagoda) for spine steps 1 to 5. The plan board shows tomorrow,
  * so every row here is dated tomorrow (Asia/Colombo, DEMO_NOW aware):
- * - more chilled orders than refrigerated trucks, so the day is overbooked on chilled;
+ * - chilled orders past the refrigerated trucks' space, so the day is overbooked on chilled and
+ *   auto-assign moves some to a later day;
  * - a draft trip over volume on a reefer, with a free reefer to move a stop to;
  * - ambient Style / Tech orders an ambient truck can take, and a van-only store's order;
  * - a store already moved once, so deferring it again is a repeat skip.
@@ -148,10 +149,19 @@ export async function seedSpineDemo(prisma: PrismaClient) {
     }
   }
 
-  // 2. More chilled orders than refrigerated trucks: the day is overbooked, limited by chilled.
+  // 2. Chilled demand past the refrigerated space (about 115% with the draft trip): the day is
+  //    overbooked, limited by chilled. Each order still fits one truck, so auto-assign places some.
   const chilledStores = fresh.filter((s) => !used.has(s.id));
   const chilledCount = Math.min(Math.max(reefers.length + 2, 4), chilledStores.length, 16);
-  for (const store of chilledStores.slice(0, chilledCount)) await order(store, CHILLED_PICKS);
+  const reeferM3 = vehicles
+    .filter((v) => v.temp === 'reefer')
+    .reduce((sum, v) => sum + v.volumeCapM3, 0);
+  const draftM3 = truck ? truck.volumeCapM3 * 1.25 : 0;
+  const perOrderM3 = chilledCount > 0 ? Math.max(0, reeferM3 * 1.15 - draftM3) / chilledCount : 0;
+  const breadQty = Math.floor(perOrderM3 / 0.06);
+  const chilledPicks =
+    breadQty > 0 ? [...CHILLED_PICKS, { catalogueId: 'F-BREAD', qty: breadQty }] : CHILLED_PICKS;
+  for (const store of chilledStores.slice(0, chilledCount)) await order(store, chilledPicks);
 
   // 3. Ambient orders for Style and Tech stores.
   const ambient = stores.filter(
@@ -180,7 +190,7 @@ export async function seedSpineDemo(prisma: PrismaClient) {
   }
 
   console.log(
-    `[seed] spine demo for ${tomorrow.toISOString().slice(0, 10)}: ${n} orders, draft trip ${truck ? 'on ' + (truck.numberPlate ?? truck.id) : 'skipped'}, ${chilledCount} chilled vs ${reefers.length} reefers${vanOnly ? ', van-only store' : ''}${repeat ? ', repeat-skip store' : ''}`,
+    `[seed] spine demo for ${tomorrow.toISOString().slice(0, 10)}: ${n} orders, draft trip ${truck ? 'on ' + (truck.numberPlate ?? truck.id) : 'skipped'}, ${chilledCount} chilled orders over ${Math.round(reeferM3)} m³ of refrigerated space${vanOnly ? ', van-only store' : ''}${repeat ? ', repeat-skip store' : ''}`,
   );
 }
 
@@ -193,17 +203,47 @@ export async function linkDemoDriver(prisma: PrismaClient) {
   const kasun = await prisma.user.findUnique({ where: { loginId: 'kasun' } });
   if (!kasun) return;
   const today = colomboDay(0);
-  const linked = await prisma.trip.updateMany({
+  // One trip per run: several demo seeds name kasun, so keep the first trip of each run (the one on
+  // the road first) and take him off the others. A driver cannot drive two trucks at once.
+  const mine = await prisma.trip.findMany({
+    where: { serviceDate: today, assignedDriverId: kasun.id, status: { notIn: ['completed'] } },
+    orderBy: [{ tripNumber: 'asc' }, { status: 'desc' }, { id: 'asc' }],
+    select: { id: true, tripNumber: true, status: true },
+  });
+  const keep = new Map<number, string>();
+  for (const t of [...mine].sort(
+    (a, b) => Number(b.status === 'on_road') - Number(a.status === 'on_road'),
+  )) {
+    if (!keep.has(t.tripNumber)) keep.set(t.tripNumber, t.id);
+  }
+  const extra = mine.filter((t) => keep.get(t.tripNumber) !== t.id).map((t) => t.id);
+  if (extra.length > 0) {
+    await prisma.trip.updateMany({
+      where: { id: { in: extra } },
+      data: { assignedDriverId: null },
+    });
+  }
+  // Runs still without a trip for him get today's on-road or published demo trip.
+  let linked = 0;
+  const demo = await prisma.trip.findMany({
     where: {
       depotId: DEPOT,
       serviceDate: today,
-      status: { in: ['published', 'on_road'] },
+      status: { in: ['on_road', 'published'] },
       assignedDriverId: null,
       csvRouteId: { in: [`DEMO-STATUS-${DEPOT}-on_road`, `DEMO-STATUS-${DEPOT}-published`] },
     },
-    data: { assignedDriverId: kasun.id },
+    select: { id: true, tripNumber: true },
   });
-  console.log(`[seed] demo driver kasun: ${linked.count} of today's trips assigned`);
+  for (const t of demo) {
+    if (keep.has(t.tripNumber)) continue;
+    await prisma.trip.update({ where: { id: t.id }, data: { assignedDriverId: kasun.id } });
+    keep.set(t.tripNumber, t.id);
+    linked += 1;
+  }
+  console.log(
+    `[seed] demo driver kasun: ${keep.size} trip(s) today (${linked} assigned, ${extra.length} unassigned)`,
+  );
 }
 
 /** Licence expiry for every driver without one: kasun's is close, so the profile shows the warning. */

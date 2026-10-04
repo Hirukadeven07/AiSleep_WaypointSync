@@ -6,6 +6,7 @@ import type { FleetTrip, FleetVehicle } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { initials } from '@/lib/initials';
 import { STATUS } from './Fleet';
+import { depotName } from '@/lib/depots';
 
 const TONE: Record<FleetTrip['tone'], string> = {
   on_time: 'bg-success/[0.12] text-success',
@@ -125,7 +126,7 @@ export function VehicleDrawer({
         <Row label="Weight limit" value={`${v.weightCapKg.toLocaleString('en-US')} kg`} />
         <Row label="Volume limit" value={`${v.volumeCapM3.toFixed(1)} m³`} />
         <Row label="Temperature" value={v.temp === 'reefer' ? 'Refrigerated' : 'Ambient only'} />
-        <Row label="Home depot" value={v.homeDepot} />
+        <Row label="Home depot" value={depotName(v.homeDepot)} />
         {v.driverName && (
           <div className="flex items-center gap-[10px]">
             <span className="flex size-9 items-center justify-center rounded-full bg-sand text-[12px] font-bold leading-[17px] text-primary">

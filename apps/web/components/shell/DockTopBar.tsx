@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { Me } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { AccountMenu } from './AccountMenu';
+import { depotLabel } from '@/lib/depots';
 
 export function useOnline() {
   const [online, setOnline] = useState(true);
@@ -41,7 +42,7 @@ export function DockTopBar({ me }: { me: Me }) {
         {online ? 'Synced' : 'Offline'}
       </span>
       <span className="rounded-pill bg-surface px-4 py-[10px] text-body font-semibold text-ink">
-        {me.depotId ?? '-'} depot
+        {depotLabel(me.depotId) || 'No depot'}
       </span>
       <AccountMenu
         me={me}

@@ -32,6 +32,7 @@ const TABS: PhoneTab[] = [
   { href: '/store/order', label: 'Order', icon: 'plus', fab: true },
   { href: '/store/updates', label: 'Updates', icon: 'inbox' },
   { href: '/store/receive', label: 'Receive', icon: 'check' },
+  { href: '/store/flags', label: 'Flags', icon: 'alert' },
 ];
 
 const REMINDER_DISMISSED = 'ws_store_reminder_dismissed';
@@ -122,7 +123,12 @@ function StoreShell({ me, children }: { me: Me; children: ReactNode }) {
   }, [reminderDue, today, left, settings.alerts, settings.sound]);
 
   const showReminder = reminderDue && dismissedDay !== today && pathname !== '/store/order';
-  const tabs = TABS.map((t) => (t.href === '/store/updates' ? { ...t, badge: unread } : t));
+  const openFlags = home.data?.openFlagCount ?? 0;
+  const tabs = TABS.map((t) => {
+    if (t.href === '/store/updates') return { ...t, badge: unread };
+    if (t.href === '/store/flags') return { ...t, badge: openFlags };
+    return t;
+  });
 
   return (
     <div className="lg:flex lg:min-h-dvh">

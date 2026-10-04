@@ -64,6 +64,15 @@ export interface DriverDayStop {
   storeConfirmedAt: string | null;
   driverAckAt: string | null;
   flags: DriverDayFlag[];
+  /** What the store reported when it checked the goods on this trip (missing, damaged, ...). */
+  storeIssues: DriverDayStoreIssue[];
+}
+
+/** One line the store flagged at receipt; the driver sees it before acknowledging. */
+export interface DriverDayStoreIssue {
+  itemName: string;
+  qty: number | null;
+  reason: string;
 }
 
 export interface DriverDayTrip {

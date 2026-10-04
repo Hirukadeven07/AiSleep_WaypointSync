@@ -34,14 +34,17 @@ export function PlanBoard() {
   const firstOver = plan.trips.find((t) => t.state === 'over');
   const modal = edit.modal;
 
-  /** Publishing with nothing open goes straight through; otherwise the check explains what is open. */
+  /**
+   * A trip's own Publish goes straight through when nothing is open. Publishing the whole plan
+   * always asks first, and the check explains anything still open.
+   */
   async function publish(tripId?: string) {
     try {
       const check = await api<PublishCheck>('/plan/publish/check', {
         method: 'POST',
         body: tripId ? { tripId } : {},
       });
-      if (check.problems.length === 0) await publishPlan(edit, false, tripId);
+      if (tripId && check.problems.length === 0) await publishPlan(edit, false, tripId);
       else edit.openModal({ kind: 'publish', check, tripId });
     } catch {
       edit.showToast({ kind: 'error', title: 'The plan could not be checked', sub: 'Try again.' });
@@ -68,7 +71,8 @@ export function PlanBoard() {
         onView={setView}
         onAutoAssign={autoAssign}
         onNewTrip={() => edit.openModal({ kind: 'newTrip' })}
-        onPublish={publish}
+        // Not `onPublish={publish}`: the click event would arrive as the trip id.
+        onPublish={() => void publish()}
       />
       <SummaryStrip
         summary={plan.summary}

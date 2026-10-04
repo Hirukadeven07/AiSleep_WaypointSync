@@ -256,11 +256,13 @@ export class DispatchService {
           store: { depotId },
         },
       }),
-      // Driver SOS alerts that dispatch has not resolved yet.
+      // Today's driver SOS alerts that are still open: an old one nobody closed does not haunt
+      // every later day.
       this.prisma.driverIncident.findMany({
         where: {
           incidentType: 'sos',
           resolvedAt: null,
+          raisedAt: { gte: new Date(`${date}T00:00:00+05:30`) },
           OR: [{ trip: { depotId } }, { vehicle: { depotId } }],
         },
         include: { driver: { include: { user: true, phones: true } }, vehicle: true },
@@ -527,7 +529,6 @@ export class DispatchService {
       .sort((a, b) => a.getTime() - b.getTime());
 
     const late = trips.filter((t) => t.live === 'late');
-    const breakdowns = trips.filter((t) => t.live === 'breakdown').length;
     const missingTrips = trips.filter((t) => t.missingCount > 0).length;
     const dispatched = trips.filter((t) =>
       ['on_road', 'breakdown', 'completed'].includes(t.status),
@@ -546,9 +547,31 @@ export class DispatchService {
       });
     }
     const sosOpen = sosRows.length;
+    // Open incidents as the Incidents page lists them (logged in the last 7 days, not resolved),
+    // so Home and that page agree; SOS alerts are counted on top.
+    const weekAgo = new Date(day);
+    weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
+    const logged = await this.prisma.incident.groupBy({
+      by: ['type'],
+      where: {
+        trip: { depotId },
+        createdAt: { gte: weekAgo },
+        status: { notIn: ['resolved', 'closed'] },
+      },
+      _count: { _all: true },
+    });
+    const loggedOpen = logged.reduce((n, g) => n + g._count._all, 0);
+    const loggedBreakdowns = logged.find((g) => g.type === 'breakdown')?._count._all ?? 0;
+    const otherOpen = loggedOpen - loggedBreakdowns;
+    // A trip can be broken down today without a logged incident; count whichever is higher.
+    const breakdowns = Math.max(
+      loggedBreakdowns,
+      trips.filter((t) => t.live === 'breakdown').length,
+    );
     const incidentParts = [
       sosOpen > 0 ? `${sosOpen} SOS` : null,
       breakdowns > 0 ? `${breakdowns} ${breakdowns === 1 ? 'breakdown' : 'breakdowns'}` : null,
+      otherOpen > 0 ? `${otherOpen} other` : null,
       missingTrips > 0 ? `${missingTrips} missing ${missingTrips === 1 ? 'item' : 'items'}` : null,
     ].filter(Boolean);
 
@@ -570,7 +593,7 @@ export class DispatchService {
         avgLateMin: late.length
           ? Math.round(late.reduce((sum, t) => sum + (t.lateMin ?? 0), 0) / late.length)
           : 0,
-        openIncidents: sosOpen + breakdowns + missingTrips,
+        openIncidents: sosOpen + breakdowns + otherOpen + missingTrips,
         incidentsText: incidentParts.join(' · '),
       },
       counts: {

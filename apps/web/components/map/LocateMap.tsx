@@ -9,6 +9,7 @@ import { timeOf, toneOf } from '@/components/dispatch/live-format';
 import { districtTone } from './districts';
 import { IslandMap, type IslandMapHandle, type IslandMarker, type MapCircle, type MapPath, type MapView } from './IslandMap';
 import { MapControls } from './MapControls';
+import { depotLabel } from '@/lib/depots';
 
 const BRANDS: { id: 'all' | Brand; label: string; className: string }[] = [
   { id: 'all', label: 'All', className: 'bg-scrim text-on-primary' },
@@ -16,6 +17,12 @@ const BRANDS: { id: 'all' | Brand; label: string; className: string }[] = [
   { id: 'Style', label: 'Style', className: 'bg-style-tint text-style' },
   { id: 'Tech', label: 'Tech', className: 'bg-tech-tint text-tech' },
 ];
+
+const ORDER_DOT: Record<Brand, string> = {
+  Fresh: 'bg-fresh',
+  Style: 'bg-style',
+  Tech: 'bg-tech',
+};
 
 const STOP_DOT: Record<LocateStop['kind'], string> = {
   delivered: 'bg-success',
@@ -97,25 +104,61 @@ export function LocateMap() {
   );
   const selected = trips.find((trip) => trip.id === selectedId) ?? null;
 
-  const truck = selected?.position ?? null;
   const view = useMemo<MapView>(() => {
-    if (truck) return { mode: 'point', lng: truck.lng, lat: truck.lat };
-    const last = selected?.lastStop;
-    if (last?.lat != null && last.lng != null) return { mode: 'point', lng: last.lng, lat: last.lat };
+    const here = selected?.position ?? selected?.lastStop;
+    if (here?.lat != null && here.lng != null) return { mode: 'point', lng: here.lng, lat: here.lat };
     return { mode: 'bounds', names: activeNames };
-  }, [selected, activeNames, truck]);
+  }, [selected, activeNames]);
 
   const markers = useMemo<IslandMarker[]>(() => {
     if (!data) return [];
+    const covered = new Set<string>();
+    if (selected) {
+      for (const stop of selected.stops) {
+        if (stop.lat == null || stop.lng == null) continue;
+        covered.add(`${stop.lat},${stop.lng}`);
+      }
+    }
     const pins: IslandMarker[] = [];
+    for (const store of data.stores ?? []) {
+      if (brand !== 'all' && store.brand !== brand) continue;
+      if (covered.has(`${store.lat},${store.lng}`)) continue;
+      pins.push({
+        id: `store:${store.storeId}`,
+        lat: store.lat,
+        lng: store.lng,
+        dotClass: store.hasOrder ? ORDER_DOT[store.brand] : 'bg-faint',
+        title: store.hasOrder ? `${store.storeName} · has an order` : `${store.storeName} · no order`,
+        size: 'pin',
+      });
+    }
     for (const depot of data.depots) {
       pins.push({
         id: `depot:${depot.id}`,
         lat: depot.lat,
         lng: depot.lng,
         dotClass: 'bg-scrim',
-        title: `${depot.name} depot`,
+        title: depotLabel(depot.name),
         size: 'depot',
+      });
+    }
+    for (const trip of trips) {
+      const here = trip.position ?? trip.lastStop;
+      if (here?.lat == null || here.lng == null) continue;
+      const next = trip.stops.find((stop) => stop.status === 'upcoming' || stop.status === 'at_risk');
+      pins.push({
+        id: `vehicle:${trip.id}`,
+        lat: here.lat,
+        lng: here.lng,
+        dotClass: 'bg-ink',
+        title: trip.plate ?? trip.vehicleId,
+        caption: trip.position
+          ? next
+            ? `On the way to ${next.storeName}`
+            : 'On the way'
+          : 'Last confirmed stop',
+        size: 'vehicle',
+        selected: trip.id === selectedId,
       });
     }
     if (!selected) return pins;
@@ -131,33 +174,8 @@ export function LocateMap() {
         size: 'pin',
       });
     }
-    const here = selected.position;
-    const last = selected.lastStop;
-    if (here) {
-      pins.push({
-        id: `truck:${selected.id}`,
-        lat: here.lat,
-        lng: here.lng,
-        dotClass: 'bg-scrim',
-        title: selected.plate ?? selected.vehicleId,
-        caption: 'Live',
-        size: 'vehicle',
-        selected: true,
-      });
-    } else if (last?.lat != null && last.lng != null) {
-      pins.push({
-        id: last.stopId,
-        lat: last.lat,
-        lng: last.lng,
-        dotClass: 'bg-scrim',
-        title: last.storeName,
-        caption: 'Last confirmed stop',
-        size: 'vehicle',
-        selected: true,
-      });
-    }
     return pins;
-  }, [data, selected]);
+  }, [data, selected, selectedId, brand, trips]);
 
   const paths = useMemo<MapPath[]>(() => {
     if (!route || route.tripId !== selectedId || route.line.length < 2) return [];
@@ -190,8 +208,8 @@ export function LocateMap() {
           <h1 className="text-[34px] font-medium leading-10 text-ink">Live map</h1>
           <p className="text-[14px] leading-5 text-muted">
             {data
-              ? `${dayLabel(data.date)}  ·  ${data.depotId} depot  ·  live positions from the driver's phone`
-              : 'Live positions from the driver\'s phone'}
+              ? `${dayLabel(data.date)}  ·  ${depotLabel(data.depotId)}  ·  trucks on the road show their latest ping`
+              : 'Trucks on the road show their latest ping'}
           </p>
         </div>
         {data && data.depots.length > 0 && (
@@ -205,7 +223,7 @@ export function LocateMap() {
             >
               {data.depots.map((depot) => (
                 <option key={depot.id} value={depot.id}>
-                  {depot.name} depot
+                  {depotLabel(depot.name)}
                 </option>
               ))}
             </select>
@@ -241,6 +259,7 @@ export function LocateMap() {
               circles={circles}
               onMarker={(id) => {
                 if (id.startsWith('depot:')) chooseDepot(id.slice('depot:'.length));
+                if (id.startsWith('vehicle:')) setSelectedId(id.slice('vehicle:'.length));
               }}
             />
           )}
@@ -308,14 +327,18 @@ export function LocateMap() {
 function TruckCard({ trip, route }: { trip: LocateTrip; route: LocateRoute | null }) {
   const eta = route?.returnEta ?? trip.returnEta;
   const backAt = route?.backAt ?? trip.backAt;
+  const nextStop = trip.stops.find((stop) => stop.status === 'upcoming' || stop.status === 'at_risk');
   return (
     <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-        {backAt ? 'Back at depot' : trip.position ? 'Live position' : 'Last confirmed stop'}
+        {backAt ? 'Back at depot' : eta ? 'Heading back' : trip.position ? 'On the way' : 'Last confirmed stop'}
       </p>
       <p className="mt-1 text-[15px] font-semibold text-ink">
-        {trip.plate ?? trip.vehicleId}
-        {trip.driverName ? ` · ${trip.driverName}` : ''}
+        {backAt || eta
+          ? `${trip.plate ?? trip.vehicleId}${trip.driverName ? ` · ${trip.driverName}` : ''}`
+          : trip.position
+            ? (nextStop?.storeName ?? trip.district)
+            : (trip.lastStop?.storeName ?? trip.plate ?? trip.vehicleId)}
       </p>
       {backAt && <p className="mt-1 text-[13px] text-ink">Arrived {timeOf(backAt)}</p>}
       {!backAt && eta && (
@@ -323,13 +346,16 @@ function TruckCard({ trip, route }: { trip: LocateTrip; route: LocateRoute | nul
           Back at the depot about {timeOf(eta.etaAt)} · {eta.minutes} min
         </p>
       )}
-      {!backAt && !trip.position && trip.lastStop && (
-        <p className="mt-2 text-[12px] leading-4 text-muted">
-          No phone position yet. Showing the last store the driver reached, {trip.lastStop.storeName}.
+      {!backAt && !eta && trip.position && (
+        <p className="mt-1 text-[13px] text-muted">
+          {trip.plate ?? trip.vehicleId} · ping {timeOf(trip.position.recordedAt)}
         </p>
       )}
-      {trip.position && !backAt && (
-        <p className="mt-2 text-[12px] leading-4 text-muted">Updated {timeOf(trip.position.recordedAt)}</p>
+      {!backAt && !trip.position && trip.lastStop && (
+        <p className="mt-2 text-[12px] leading-4 text-muted">
+          {trip.plate ?? trip.vehicleId} · arrived {timeOf(trip.lastStop.arrivedAt)}. This is the last store the
+          driver reached, not a live position.
+        </p>
       )}
     </article>
   );
@@ -357,6 +383,7 @@ function TripButton({
   onSelect: () => void;
 }) {
   const tone = toneOf(trip);
+  const nextStop = trip.stops.find((stop) => stop.status === 'upcoming' || stop.status === 'at_risk');
   return (
     <li>
       <button
@@ -383,10 +410,10 @@ function TripButton({
             : trip.returnEta
               ? `Heading back · about ${trip.returnEta.minutes} min`
               : trip.position
-                ? `Live · ${timeOf(trip.position.recordedAt)}`
+                ? `On the way${nextStop ? ` to ${nextStop.storeName}` : ''}`
                 : trip.lastStop
                   ? `Last stop ${trip.lastStop.storeName}`
-                  : 'No position yet'}
+                  : 'No stop confirmed yet'}
         </span>
       </button>
     </li>

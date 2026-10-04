@@ -34,7 +34,7 @@ export function DispatcherLogin() {
 
   return (
     <main className="relative min-h-screen bg-bg p-4 lg:flex lg:gap-4">
-      <section className="relative flex min-h-[300px] flex-1 flex-col gap-5 overflow-hidden rounded-shell p-8 sm:p-10 lg:min-h-0 lg:p-14">
+      <section className="relative flex min-h-[300px] flex-1 flex-col gap-5 overflow-hidden rounded-shell p-8 sm:p-10 lg:min-h-0 lg:w-[calc((100%-16px)*0.5402)] lg:flex-none lg:p-14">
         <SkylinePhoto variant="panel" />
         <div className="relative flex items-center gap-3">
           <img alt="" src="/landing/logo-mark.svg" className="size-[39.6px]" />
@@ -90,7 +90,7 @@ export function DispatcherLogin() {
             Keep me signed in on this computer
           </CheckRow>
           <FormError message={error} />
-          <SubmitButton busy={busy} className="py-[14px]">
+          <SubmitButton busy={busy} className="py-[14px] leading-[21px]">
             Sign in
           </SubmitButton>
           <div className="flex gap-3 rounded-note bg-info-tint p-[14px]">

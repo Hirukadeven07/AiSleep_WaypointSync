@@ -122,7 +122,31 @@ describe('buildDriverDay', () => {
       storeConfirmedAt: null,
       driverAckAt: null,
       flags: [],
+      storeIssues: [],
     });
+  });
+
+  it("lists only this trip's store issues, with the item name", () => {
+    const base = stopRow();
+    const stop = {
+      ...base,
+      order: {
+        ...base.order,
+        fieldFlags: [
+          { tripId: 'trip-1', reason: 'missing', qtyFlagged: 2, item: { itemName: 'Milk' } },
+          { tripId: 'old-trip', reason: 'damaged', qtyFlagged: 1, item: { itemName: 'Bread' } },
+          { tripId: 'trip-1', reason: 'damaged', qtyFlagged: null, item: null },
+        ],
+      },
+    };
+    const day = buildDriverDay(
+      DAY,
+      vehicleRow({ trips: [tripRow({ id: 'trip-1', stops: [stop] })] }),
+    );
+    expect(day.trips[0]!.stops[0]!.storeIssues).toEqual([
+      { itemName: 'Milk', qty: 2, reason: 'missing' },
+      { itemName: 'Whole delivery', qty: null, reason: 'damaged' },
+    ]);
   });
 
   it('uses the store id as the name and no navigate URL without coordinates', () => {
