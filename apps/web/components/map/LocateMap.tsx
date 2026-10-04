@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { Icon } from '@/components/ui/Icon';
 import { clock12, dayLabel } from '@/components/plan/format';
 import { timeOf, toneOf } from '@/components/dispatch/live-format';
+import { depotName } from '@/lib/depots';
 import { districtTone } from './districts';
 import { IslandMap, type IslandMapHandle, type IslandMarker, type MapView } from './IslandMap';
 import { MapControls } from './MapControls';
@@ -158,7 +159,7 @@ export function LocateMap() {
           <h1 className="text-[34px] font-medium leading-10 text-ink">Live map</h1>
           <p className="text-[14px] leading-5 text-muted">
             {data
-              ? `${dayLabel(data.date)}  ·  ${data.depotId} depot  ·  positions update at each completed stop`
+              ? `${dayLabel(data.date)}  ·  ${depotName(data.depotId)} depot  ·  positions update at each completed stop`
               : 'Positions update at each completed stop'}
           </p>
         </div>

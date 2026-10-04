@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/ui/Icon';
 import { DISPATCH_PHONE, telHref } from '@/lib/driver-format';
 import { enqueueAction } from '@/lib/outbox';
+import { depotName } from '@/lib/depots';
 import { useDriver } from './DriverShell';
 
 function CallCard({
@@ -156,7 +157,7 @@ export function SosScreen() {
             primary
             href={telHref(DISPATCH_PHONE)}
             title="Call dispatcher"
-            subtitle={me?.depotId ? `Dispatch · ${me.depotId}` : 'Dispatch'}
+            subtitle={me?.depotId ? `Dispatch · ${depotName(me.depotId)}` : 'Dispatch'}
             number={DISPATCH_PHONE}
           />
           <CallCard href={telHref('119')} title="Police emergency" subtitle="Sri Lanka Police" number="119" />

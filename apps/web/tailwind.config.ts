@@ -73,6 +73,7 @@ const config: Config = {
       },
       fontSize: {
         eyebrow: ['0.75rem', { lineHeight: '1rem', letterSpacing: '0.06em', fontWeight: '700' }], // 11-12, caps
+        micro: ['0.6875rem', { lineHeight: '0.875rem' }], // 11, nav labels
         caption: ['0.75rem', { lineHeight: '1.05rem' }], // 12
         label: ['0.8125rem', { lineHeight: '1.1375rem', fontWeight: '600' }], // 12-13 SemiBold
         body: ['0.9375rem', { lineHeight: '1.40625rem' }], // 14-15 / 150%
