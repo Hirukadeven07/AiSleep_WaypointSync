@@ -568,15 +568,25 @@ export const IslandMap = forwardRef<IslandMapHandle, Props>(function IslandMap(
     labels?.setData?.(labelPoints(featuresRef.current, tones));
   }, [tones, ready]);
 
+  // The camera moves only when the place to show really changes. A refresh hands in a new `view`
+  // object for the same place, and acting on that would pull the map back out while someone is
+  // zoomed in on it.
+  const viewKey =
+    view.mode === 'point' ? `p:${view.lng},${view.lat}` : `b:${[...view.names].sort().join('|')}`;
   useEffect(() => {
     const map = mapRef.current;
     if (!map || featuresRef.current.length === 0) return;
-    if (view.mode === 'point') {
-      map.flyTo({ center: [view.lng, view.lat], zoom: Math.max(map.getZoom(), 11), duration: 500 });
+    const current = viewRef.current;
+    if (current.mode === 'point') {
+      map.flyTo({
+        center: [current.lng, current.lat],
+        zoom: Math.max(map.getZoom(), 11),
+        duration: 500,
+      });
       return;
     }
-    map.fitBounds(focusBounds(featuresRef.current, view.names), { padding: 36, duration: 500 });
-  }, [view, ready]);
+    map.fitBounds(focusBounds(featuresRef.current, current.names), { padding: 36, duration: 500 });
+  }, [viewKey, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
