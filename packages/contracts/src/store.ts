@@ -67,6 +67,11 @@ export interface StoreIssue {
   resolveStatus: boolean;
 }
 
+/** One flagged line for this store, including when it was raised. */
+export interface StoreFlag extends StoreIssue {
+  raisedAt: string;
+}
+
 /** One stop on the trip for the store's progress strip; `isYou` marks this store's stop. */
 export interface StoreTrackStop {
   sequence: number;
@@ -113,6 +118,8 @@ export interface StoreHome {
   nextOrder: StoreOrderView | null;
   deferral: StoreOrderView | null;
   unreadNotices: number;
+  /** Flags for this store that are still unresolved. */
+  openFlagCount: number;
   phones: { label: 'shop' | 'manager' | 'warehouse'; phoneNo: string }[];
 }
 
