@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { WORKSPACES, rememberedRole } from '@/lib/roles';
 import { SkylinePhoto } from './parts';
+import { LOCAL_CHECK_URL } from '@/lib/local-check';
 
 const DEVICE_ICON: Record<string, IconName> = {
   dispatcher: 'monitor',
@@ -105,26 +106,28 @@ export function RoleChooser() {
               </div>
             </Link>
           ))}
-          <a
-            href="http://127.0.0.1:3099/"
-            className="flex min-h-[260px] flex-col rounded-card border border-mist bg-surface p-7"
-          >
-            <div className="flex items-center gap-3 text-olive-ink">
-              <span className="text-[14px] font-semibold">[05]</span>
-              <span className="text-[12px] font-bold tracking-[0.06em]">LOCAL CHECK</span>
-              <span className="flex-1" />
-              <span className="flex size-11 items-center justify-center rounded-full bg-olive text-ink">
-                <Icon name="arrow-up-right" size={16} />
-              </span>
-            </div>
-            <div className="flex-1" />
-            <div className="flex flex-col items-start gap-[10px]">
-              <p className="text-[34px] font-medium tracking-[-0.02em] text-ink sm:text-[40px]">Check</p>
-              <p className="text-[15px] leading-[1.5] text-slate">
-                Place a store order, or look up trips and logins, without signing in.
-              </p>
-            </div>
-          </a>
+          {LOCAL_CHECK_URL && (
+            <a
+              href={LOCAL_CHECK_URL}
+              className="flex min-h-[260px] flex-col rounded-card border border-mist bg-surface p-7"
+            >
+              <div className="flex items-center gap-3 text-olive-ink">
+                <span className="text-[14px] font-semibold">[05]</span>
+                <span className="text-[12px] font-bold tracking-[0.06em]">LOCAL CHECK</span>
+                <span className="flex-1" />
+                <span className="flex size-11 items-center justify-center rounded-full bg-olive text-ink">
+                  <Icon name="arrow-up-right" size={16} />
+                </span>
+              </div>
+              <div className="flex-1" />
+              <div className="flex flex-col items-start gap-[10px]">
+                <p className="text-[34px] font-medium tracking-[-0.02em] text-ink sm:text-[40px]">Check</p>
+                <p className="text-[15px] leading-[1.5] text-slate">
+                  Place a store order, or look up trips and logins, without signing in.
+                </p>
+              </div>
+            </a>
+          )}
         </div>
 
         <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted">
