@@ -13,6 +13,10 @@ Waypoint Sync is a delivery planning web app built for Rootcode's Tech-Triathlon
 
 Stack: TypeScript, pnpm workspaces, Next.js (App Router) + Tailwind, NestJS, PostgreSQL 16 + Prisma, MinIO, polling for live updates.
 
+## Live demo
+
+**https://waypoint-sync.vercel.app**: sign in with the [seeded logins](#seeded-logins) below. The web app runs on Vercel, and the API, Postgres and MinIO run on Railway ([docs/deploy-railway-vercel.md](docs/deploy-railway-vercel.md)).
+
 ## Quick start
 
 ```bash
@@ -46,9 +50,11 @@ pnpm dev                          # web on :3000, api on :3001
 Useful commands: `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm seed:reset`, `pnpm db:studio`.
 `packages/*` compile to `dist`; `pnpm dev`, `pnpm typecheck` and `pnpm test` build them first.
 
-## Public deployment (Cloudflare Tunnel)
+## Public deployment
 
-Set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`, then:
+The live demo runs on Railway (API, Postgres, MinIO) and Vercel (web), deployed with their CLIs. See [docs/deploy-railway-vercel.md](docs/deploy-railway-vercel.md).
+
+To expose a self-hosted stack instead, use Cloudflare Tunnel: set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`, then:
 
 ```bash
 docker compose --profile public up -d
@@ -186,6 +192,7 @@ The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, th
 - [Data model](docs/data-model.md)
 - [AI disclosure](docs/ai-disclosure.md)
 - [Screen map](docs/screen-map.md)
+- [Railway + Vercel deployment](docs/deploy-railway-vercel.md)
 - [VM deployment runbook](docs/deploy-vm.md)
 
 ## Setup notes
