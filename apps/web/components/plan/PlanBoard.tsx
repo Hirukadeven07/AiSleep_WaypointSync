@@ -98,8 +98,11 @@ export function PlanBoard() {
         ) : (
           <PlanMap
             date={plan.date}
-            refreshKey={`${plan.orders.length}:${plan.trips.map((t) => t.stops.length).join(',')}`}
+            refreshKey={`${plan.orders.length}:${plan.trips.map((t) => `${t.id}:${t.stops.length}`).join(',')}`}
+            trips={plan.trips.filter((trip) => trip.editable)}
             onOpenOrder={(id) => edit.openDrawer(id)}
+            onPlace={(orderId, storeName, tripId) => edit.place(orderId, storeName, tripId)}
+            onToast={edit.showToast}
           />
         )}
       </div>

@@ -1,5 +1,9 @@
 import {
+  circleRing,
+  distanceM,
   fallbackDistricts,
+  headingBack,
+  insideDepotCircle,
   isOnRoad,
   lastVisited,
   locateLive,
@@ -9,6 +13,31 @@ import {
 } from './map.logic';
 
 const at = (iso: string) => new Date(iso);
+
+describe('depot circle', () => {
+  const depot = { lat: 6.9678, lng: 79.8832 };
+
+  it('treats a point inside 500 m as back at the depot', () => {
+    expect(insideDepotCircle({ lat: 6.97, lng: 79.884 }, depot)).toBe(true);
+    expect(distanceM(depot, { lat: 6.97, lng: 79.884 })).toBeLessThan(500);
+  });
+
+  it('keeps a point a few kilometres away outside the circle', () => {
+    expect(insideDepotCircle({ lat: 6.9271, lng: 79.8612 }, depot)).toBe(false);
+  });
+
+  it('closes the ring it draws around the yard', () => {
+    const ring = circleRing(depot.lat, depot.lng, 500);
+    expect(ring[0]).toEqual(ring[ring.length - 1]);
+    expect(ring.length).toBeGreaterThan(8);
+  });
+
+  it('calls the driver heading back only after every stop is done', () => {
+    expect(headingBack('on_road', ['delivered', 'confirmed'])).toBe(true);
+    expect(headingBack('on_road', ['delivered', 'upcoming'])).toBe(false);
+    expect(headingBack('completed', ['delivered'])).toBe(false);
+  });
+});
 
 describe('fallbackDistricts', () => {
   it('paints the west coast for Peliyagoda and the hill country for Kandy', () => {

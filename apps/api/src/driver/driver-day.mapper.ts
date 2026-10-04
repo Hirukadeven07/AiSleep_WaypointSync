@@ -182,6 +182,7 @@ export function buildDriverDay(
     unreadNotices: extras.unreadNotices ?? 0,
     roadIssue: extras.roadIssue ?? null,
     break: extras.break ?? { onBreakSince: null, usedMin: 0, allowanceMin: BREAK_ALLOWANCE_MIN },
+    returnToDepot: null,
   };
   if (!vehicle) return { ...common, vehicle: null, trips: [], activeTripId: null };
 

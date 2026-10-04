@@ -225,13 +225,23 @@ export function NextStop() {
   }, [phase, refresh]);
 
   if (!trip || !stop) {
+    const back = fullDay(day)?.returnToDepot ?? null;
+    const due = back
+      ? new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Colombo',
+          hour: 'numeric',
+          minute: '2-digit',
+        }).format(new Date(back.etaAt))
+      : null;
     return (
       <div className="flex flex-col gap-4">
         <h1 className="text-[26px] font-semibold leading-8 text-ink">Next stop</h1>
         {!online && <OfflineBanner />}
         <p className="rounded-card bg-surface p-4 text-[15px] leading-5 text-muted">
           {trip
-            ? `All stops on Trip ${trip.tripNumber} are done. Head back to the depot.`
+            ? `All stops on Trip ${trip.tripNumber} are done. Head back to the depot.${
+                due ? ` About ${back?.minutes} min, due ${due}.` : ''
+              }`
             : 'No trip for you today yet. Dispatch sends it here once it is planned.'}
         </p>
         <Link href="/drive/stops" className="text-[15px] font-semibold text-slate">

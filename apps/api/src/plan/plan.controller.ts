@@ -9,6 +9,7 @@ import type {
   NewTripOptions,
   PlanDay,
   PlanMap,
+  PlanNextShops,
   PlanOrderDetail,
   PlanPublishResult,
   PlanStore,
@@ -163,6 +164,12 @@ export class PlanController {
   @Get('trips/:id/suggestions')
   suggestions(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<TripSuggestion[]> {
     return this.trips.suggestions(me, id);
+  }
+
+  /** Waiting orders that still fit this trip's delivery windows. The planning map ripples these. */
+  @Get('trips/:id/next')
+  nextShops(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<PlanNextShops> {
+    return this.trips.nextShops(me, id);
   }
 
   /** What would stop or warn on publish. `tripId` checks that trip only. Saves nothing. */

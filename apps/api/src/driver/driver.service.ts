@@ -16,6 +16,8 @@ import { BREAK_EVENT_TYPES, foldBreaks } from './driver-breaks';
 import { NoticeHub } from '../notifications/notice-hub';
 import { alertLongWaits } from './driver-notices';
 import { ownTripWhere } from './driver-trips';
+import { drivingRoute } from '../map/driving-route';
+import { depotPoint, headingBack, insideDepotCircle, stopIsDone } from '../map/map.logic';
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
 /** How many days ahead the driver sees published trips. */
@@ -134,12 +136,50 @@ export class DriverService {
     // The truck the driver is on today; their own vehicle when they have no trip.
     const activeId = pickActiveTripId(trips);
     const vehicle = trips.find((t) => t.id === activeId)?.vehicle ?? registered;
-    return buildDriverDay(serviceDate, vehicle ? { ...vehicle, trips } : null, {
+    const day = buildDriverDay(serviceDate, vehicle ? { ...vehicle, trips } : null, {
       upcoming,
       unreadNotices,
       roadIssue: activeId ? await this.openRoadIssue(activeId) : null,
       break: await this.breakToday(me.id, serviceDate),
     });
+    const active = activeId ? trips.find((trip) => trip.id === activeId) : undefined;
+    if (active && headingBack(active.status, active.stops.map((stop) => stop.status))) {
+      day.returnToDepot = await this.returnLeg(active.id, this.clock.now());
+    }
+    return day;
+  }
+
+  /** How long the drive back should take, from the latest ping or the last shop. */
+  private async returnLeg(tripId: string, now: Date) {
+    const [trip, ping] = await Promise.all([
+      this.prisma.trip.findUnique({
+        where: { id: tripId },
+        select: {
+          endingTime: true,
+          depot: { select: { id: true, name: true, lat: true, lng: true } },
+          stops: {
+            orderBy: { sequence: 'desc' },
+            select: { status: true, order: { select: { store: { select: { lat: true, lng: true } } } } },
+          },
+        },
+      }),
+      this.prisma.locationPing.findFirst({
+        where: { tripId },
+        orderBy: { recordedAt: 'desc' },
+        select: { lat: true, lng: true },
+      }),
+    ]);
+    if (!trip || trip.endingTime) return null;
+    const yard = depotPoint(trip.depot.id, trip.depot.name, trip.depot);
+    if (!yard) return null;
+    const last = trip.stops.find(
+      (stop) => stopIsDone(stop.status) && stop.order.store.lat != null && stop.order.store.lng != null,
+    );
+    const from = ping ?? (last ? { lat: last.order.store.lat!, lng: last.order.store.lng! } : null);
+    if (!from || insideDepotCircle(from, yard)) return null;
+    const leg = await drivingRoute([from, yard]);
+    if (!leg) return null;
+    return { minutes: leg.minutes, etaAt: new Date(now.getTime() + leg.minutes * 60_000).toISOString() };
   }
 
   /** Today's breaks (Asia/Colombo day), from the driver's own BREAK events. */

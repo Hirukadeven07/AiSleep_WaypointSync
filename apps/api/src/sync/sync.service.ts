@@ -15,6 +15,7 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { ownTripWhere, tripDriverId } from '../driver/driver-trips';
+import { depotPoint, insideDepotCircle, stopIsDone } from '../map/map.logic';
 import {
   NOTIFIER,
   type NotificationInput,
@@ -489,6 +490,7 @@ export class SyncService {
             recordedAt: happenedAt,
           },
         });
+        await this.markDepotArrival(tx, trip.id, lat as number, lng as number, happenedAt);
         return { stale: false, notifications: [] };
       }
 
@@ -559,6 +561,37 @@ export class SyncService {
       if (trip) return trip.vehicle;
     }
     return tx.vehicle.findUnique({ where: { driverId }, select });
+  }
+
+  /**
+   * The first ping inside 500 m of the depot, after every stop is done, is the time the driver got back.
+   * A later ping inside the circle does not move that time.
+   */
+  private async markDepotArrival(
+    tx: Prisma.TransactionClient,
+    tripId: string,
+    lat: number,
+    lng: number,
+    at: Date,
+  ) {
+    const trip = await tx.trip.findUnique({
+      where: { id: tripId },
+      select: {
+        id: true,
+        status: true,
+        endingTime: true,
+        depot: { select: { id: true, name: true, lat: true, lng: true } },
+        stops: { select: { status: true } },
+      },
+    });
+    if (!trip || trip.endingTime || trip.status !== 'on_road') return;
+    if (trip.stops.length === 0 || trip.stops.some((stop) => !stopIsDone(stop.status))) return;
+    const yard = depotPoint(trip.depot.id, trip.depot.name, trip.depot);
+    if (!yard || !insideDepotCircle({ lat, lng }, yard)) return;
+    await tx.trip.update({
+      where: { id: trip.id },
+      data: { status: 'completed', endingTime: at },
+    });
   }
 
   private async storeNotifications(

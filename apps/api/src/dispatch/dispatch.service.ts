@@ -42,7 +42,39 @@ const person = (name: string) => name.replace(/\s*\(.*\)\s*$/, '').trim();
 
 const driverInclude = { include: { driverProfile: { include: { phones: true } } } } as const;
 
-type ReceiptLine = { name: string; orderedQty: number; receivedQty: number; issue: string | null };
+type ReceiptLine = {
+  name: string;
+  orderedQty: number;
+  receivedQty: number;
+  issue: string | null;
+  issues?: { type: string; qty: number }[];
+};
+
+/** One note for the stop. A single problem stays "1 item damaged"; mixed counts are listed. */
+function receiptNote(lines: ReceiptLine[]): string | null {
+  const flagged = lines.filter(
+    (l) => l.issue || l.issues?.some((i) => i.qty > 0),
+  );
+  if (flagged.length === 0) return null;
+  const mixed = flagged.some((l) => (l.issues?.filter((i) => i.qty > 0).length ?? 0) > 1);
+  if (!mixed && flagged.every((l) => l.issue)) {
+    return `${flagged.length} ${flagged.length === 1 ? 'item' : 'items'} ${flagged[0]!.issue}`;
+  }
+  return flagged
+    .flatMap((l) =>
+      (l.issues ?? [])
+        .filter((i) => i.qty > 0)
+        .map((i) => `${i.qty} ${i.type === 'wrong_quantity' ? 'wrong qty' : i.type}`),
+    )
+    .join(', ');
+}
+
+function damagedQty(line: ReceiptLine): number {
+  const listed = line.issues?.find((i) => i.type === 'damaged' && i.qty > 0)?.qty;
+  if (listed) return listed;
+  if (line.issue === 'damaged') return Math.max(1, line.orderedQty - line.receivedQty);
+  return 0;
+}
 
 /** The live day: every trip that has been published, with where it is and what needs attention. */
 @Injectable()
@@ -301,7 +333,6 @@ export class DispatchService {
         const lines = (Array.isArray(s.receipt?.lineResults)
           ? s.receipt?.lineResults
           : []) as unknown as ReceiptLine[];
-        const issues = lines.filter((l) => l.issue);
         const open = !DONE.has(s.status);
         const miss = open && s.etaMin != null ? s.etaMin - s.order.store.windowCloseMin : 0;
         return {
@@ -314,9 +345,7 @@ export class DispatchService {
           etaMin: s.etaMin,
           arrivedAt: s.arrivedAt?.toISOString() ?? null,
           confirmed: s.storeConfirmedAt !== null,
-          issueNote: issues.length
-            ? `${issues.length} ${issues.length === 1 ? 'item' : 'items'} ${issues[0].issue}`
-            : null,
+          issueNote: receiptNote(lines),
           missBy: miss > 0 ? miss : null,
         };
       });
@@ -372,13 +401,14 @@ export class DispatchService {
         const lines = (Array.isArray(s.receipt?.lineResults)
           ? s.receipt?.lineResults
           : []) as unknown as ReceiptLine[];
-        const bad = lines.find((l) => l.issue === 'damaged');
+        const bad = lines.find((l) => damagedQty(l) > 0);
         if (bad) {
+          const qty = damagedQty(bad);
           attention.push({
             id: `damaged-${s.id}`,
             kind: 'damaged',
-            title: `1 item damaged on ${plate} (store report)`,
-            text: `${s.order.store.displayName ?? s.order.store.id} · ${bad.name} · ${Math.max(1, bad.orderedQty - bad.receivedQty)} of ${bad.orderedQty} damaged`,
+            title: `${qty} ${qty === 1 ? 'item' : 'items'} damaged on ${plate} (store report)`,
+            text: `${s.order.store.displayName ?? s.order.store.id} · ${bad.name} · ${qty} of ${bad.orderedQty} damaged`,
             tripId: t.id,
             phone: null,
           });

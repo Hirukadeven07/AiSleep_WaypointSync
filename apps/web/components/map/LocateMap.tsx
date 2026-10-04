@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Brand, LocateMap as LocateMapData, LocateStop, LocateTrip } from '@waypoint/contracts';
+import type { Brand, LocateMap as LocateMapData, LocateRoute, LocateStop, LocateTrip } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { Icon } from '@/components/ui/Icon';
 import { clock12, dayLabel } from '@/components/plan/format';
 import { timeOf, toneOf } from '@/components/dispatch/live-format';
 import { districtTone } from './districts';
-import { IslandMap, type IslandMapHandle, type IslandMarker, type MapView } from './IslandMap';
+import { IslandMap, type IslandMapHandle, type IslandMarker, type MapCircle, type MapPath, type MapView } from './IslandMap';
 import { MapControls } from './MapControls';
 import { depotLabel } from '@/lib/depots';
 
@@ -39,24 +39,48 @@ export function LocateMap() {
   const [depotId, setDepotId] = useState<string | null>(null);
   const [brand, setBrand] = useState<(typeof BRANDS)[number]['id']>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [route, setRoute] = useState<LocateRoute | null>(null);
 
   useEffect(() => {
     let cancel = false;
-    setError(false);
-    const query = depotId ? `?depot=${encodeURIComponent(depotId)}` : '';
-    api<LocateMapData>(`/dispatch/map${query}`)
+    const load = () => {
+      const query = depotId ? `?depot=${encodeURIComponent(depotId)}` : '';
+      api<LocateMapData>(`/dispatch/map${query}`)
+        .then((next) => {
+          if (cancel) return;
+          setData(next);
+          setError(false);
+          setDepotId((current) => current ?? next.depotId);
+        })
+        .catch(() => {
+          if (!cancel) setError(true);
+        });
+    };
+    load();
+    const timer = setInterval(load, 20_000);
+    return () => {
+      cancel = true;
+      clearInterval(timer);
+    };
+  }, [depotId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setRoute(null);
+      return;
+    }
+    let cancel = false;
+    api<LocateRoute>(`/dispatch/map/trips/${selectedId}`)
       .then((next) => {
-        if (cancel) return;
-        setData(next);
-        setDepotId((current) => current ?? next.depotId);
+        if (!cancel) setRoute(next);
       })
       .catch(() => {
-        if (!cancel) setError(true);
+        if (!cancel) setRoute(null);
       });
     return () => {
       cancel = true;
     };
-  }, [depotId]);
+  }, [selectedId, data?.asOf]);
 
   const tones = useMemo(() => {
     const map = new Map<string, ReturnType<typeof districtTone>>();
@@ -153,6 +177,25 @@ export function LocateMap() {
     return pins;
   }, [data, selected, selectedId, brand, trips]);
 
+  const paths = useMemo<MapPath[]>(() => {
+    if (!route || route.tripId !== selectedId || route.line.length < 2) return [];
+    return [{ id: route.tripId, coordinates: route.line, color: '#1d4e89', width: 4 }];
+  }, [route, selectedId]);
+
+  const circles = useMemo<MapCircle[]>(() => {
+    const depot = data?.depots.find((item) => item.id === (depotId ?? data.depotId));
+    if (!depot) return [];
+    return [
+      {
+        id: depot.id,
+        lat: depot.lat,
+        lng: depot.lng,
+        ring: yardRing(depot.lat, depot.lng, 500),
+        color: '#415a77',
+      },
+    ];
+  }, [data, depotId]);
+
   function chooseDepot(id: string) {
     setSelectedId(null);
     setDepotId(id);
@@ -212,6 +255,8 @@ export function LocateMap() {
               tones={tones}
               view={view}
               markers={markers}
+              paths={paths}
+              circles={circles}
               onMarker={(id) => {
                 if (id.startsWith('depot:')) chooseDepot(id.slice('depot:'.length));
                 if (id.startsWith('vehicle:')) setSelectedId(id.slice('vehicle:'.length));
@@ -220,31 +265,8 @@ export function LocateMap() {
           )}
           <LocateLegend />
           <MapControls mapRef={mapRef} />
-          {selected?.position && (
-            <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">On the way</p>
-              <p className="mt-1 text-[15px] font-semibold text-ink">
-                {selected.stops.find((stop) => stop.status === 'upcoming' || stop.status === 'at_risk')
-                  ?.storeName ?? selected.district}
-              </p>
-              <p className="mt-1 text-[13px] text-muted">
-                {selected.plate ?? selected.vehicleId} · ping {timeOf(selected.position.recordedAt)}
-              </p>
-            </article>
-          )}
-          {selected?.lastStop && !selected.position && (
-            <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                Last confirmed stop
-              </p>
-              <p className="mt-1 text-[15px] font-semibold text-ink">{selected.lastStop.storeName}</p>
-              <p className="mt-1 text-[13px] text-muted">
-                {selected.plate ?? selected.vehicleId} · arrived {timeOf(selected.lastStop.arrivedAt)}
-              </p>
-              <p className="mt-2 text-[12px] leading-4 text-muted">
-                This is the last store the driver reached, not a live position.
-              </p>
-            </article>
+          {selected && (
+            <TruckCard trip={selected} route={route?.tripId === selected.id ? route : null} />
           )}
         </section>
 
@@ -302,6 +324,55 @@ export function LocateMap() {
   );
 }
 
+function TruckCard({ trip, route }: { trip: LocateTrip; route: LocateRoute | null }) {
+  const eta = route?.returnEta ?? trip.returnEta;
+  const backAt = route?.backAt ?? trip.backAt;
+  const nextStop = trip.stops.find((stop) => stop.status === 'upcoming' || stop.status === 'at_risk');
+  return (
+    <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+        {backAt ? 'Back at depot' : eta ? 'Heading back' : trip.position ? 'On the way' : 'Last confirmed stop'}
+      </p>
+      <p className="mt-1 text-[15px] font-semibold text-ink">
+        {backAt || eta
+          ? `${trip.plate ?? trip.vehicleId}${trip.driverName ? ` · ${trip.driverName}` : ''}`
+          : trip.position
+            ? (nextStop?.storeName ?? trip.district)
+            : (trip.lastStop?.storeName ?? trip.plate ?? trip.vehicleId)}
+      </p>
+      {backAt && <p className="mt-1 text-[13px] text-ink">Arrived {timeOf(backAt)}</p>}
+      {!backAt && eta && (
+        <p className="mt-1 text-[13px] text-ink">
+          Back at the depot about {timeOf(eta.etaAt)} · {eta.minutes} min
+        </p>
+      )}
+      {!backAt && !eta && trip.position && (
+        <p className="mt-1 text-[13px] text-muted">
+          {trip.plate ?? trip.vehicleId} · ping {timeOf(trip.position.recordedAt)}
+        </p>
+      )}
+      {!backAt && !trip.position && trip.lastStop && (
+        <p className="mt-2 text-[12px] leading-4 text-muted">
+          {trip.plate ?? trip.vehicleId} · arrived {timeOf(trip.lastStop.arrivedAt)}. This is the last store the
+          driver reached, not a live position.
+        </p>
+      )}
+    </article>
+  );
+}
+
+function yardRing(lat: number, lng: number, radiusM: number): [number, number][] {
+  const latRad = (lat * Math.PI) / 180;
+  const mPerDegLat = 111_320;
+  const mPerDegLng = 111_320 * Math.cos(latRad);
+  const ring: [number, number][] = [];
+  for (let i = 0; i <= 64; i++) {
+    const θ = (i / 64) * 2 * Math.PI;
+    ring.push([lng + (radiusM * Math.sin(θ)) / mPerDegLng, lat + (radiusM * Math.cos(θ)) / mPerDegLat]);
+  }
+  return ring;
+}
+
 function TripButton({
   trip,
   selected,
@@ -334,11 +405,15 @@ function TripButton({
           {trip.brand} · {trip.district} · {trip.stopsDone}/{trip.stopsTotal} stops
         </span>
         <span className="mt-1 block text-[12px] text-ink">
-          {trip.position
-            ? `On the way${nextStop ? ` to ${nextStop.storeName}` : ''}`
-            : trip.lastStop
-              ? `Last stop ${trip.lastStop.storeName}`
-              : 'No stop confirmed yet'}
+          {trip.backAt
+            ? `Back at depot · ${timeOf(trip.backAt)}`
+            : trip.returnEta
+              ? `Heading back · about ${trip.returnEta.minutes} min`
+              : trip.position
+                ? `On the way${nextStop ? ` to ${nextStop.storeName}` : ''}`
+                : trip.lastStop
+                  ? `Last stop ${trip.lastStop.storeName}`
+                  : 'No stop confirmed yet'}
         </span>
       </button>
     </li>
@@ -368,17 +443,16 @@ function LocateLegend() {
       <p className="mb-2 text-[12px] font-semibold text-muted">Legend</p>
       <ul className="flex flex-col gap-1.5">
         <li className={row}>
-          <span className="size-2.5 rounded-full bg-fresh" /> Store with an order
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-faint" /> Store with no order
-        </li>
-        <li className={row}>
           <span className="size-3 rounded-[4px] bg-scrim" /> Depot
         </li>
         <li className={row}>
-          <span className="size-3 rounded-full bg-scrim ring-2 ring-ink ring-offset-1" /> Vehicle (last
-          confirmed stop)
+          <span className="size-3 rounded-full border border-slate" /> 500 m around the depot
+        </li>
+        <li className={row}>
+          <span className="size-3 rounded-full bg-scrim ring-2 ring-ink ring-offset-1" /> Selected vehicle
+        </li>
+        <li className={row}>
+          <span className="h-0.5 w-4 bg-[#1d4e89]" /> Road route
         </li>
         <li className={row}>
           <span className="size-2.5 rounded-full bg-success" /> Delivered stop

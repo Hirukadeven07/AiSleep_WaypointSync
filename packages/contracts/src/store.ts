@@ -132,10 +132,19 @@ export interface PlaceOrderRequest {
   urgentNote?: string;
 }
 
+/** How many units of one line are missing, damaged, or the wrong quantity. */
+export interface ReceiptIssueQty {
+  type: FlagType;
+  qty: number;
+}
+
 export interface ReceiptLine {
   orderLineId: string;
   receivedQty: number;
+  /** One problem for the whole short count. Ignored when `issues` is sent. */
   issue?: FlagType;
+  /** Separate counts, so one line can be partly missing and partly damaged. */
+  issues?: ReceiptIssueQty[];
 }
 
 export interface ReceiptRequest {

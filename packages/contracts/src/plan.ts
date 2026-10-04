@@ -165,6 +165,11 @@ export interface UnassignResult {
   fromTrip: PlanTrip | null;
 }
 
+/** GET /plan/trips/:id/next. Waiting orders that still fit this trip's delivery windows. */
+export interface PlanNextShops {
+  orderIds: string[];
+}
+
 export interface PlanOrderLine {
   id: string;
   name: string;

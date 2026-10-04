@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   LocateMap,
+  LocateRoute,
   LocateTrip,
   MapStore,
   Me,
@@ -11,9 +12,13 @@ import type {
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { DEPART_MIN } from '../plan/plan.service';
+import { drivingRoute, fallbackMinutes } from './driving-route';
 import {
+  DEPOT_ARRIVE_M,
   depotPoint,
   fallbackDistricts,
+  headingBack,
+  insideDepotCircle,
   isOnRoad,
   lastVisited,
   locateLive,
@@ -232,7 +237,17 @@ export class MapService {
 
       const visited = lastVisited(trip.stops);
       const next = trip.stops.find((s) => !stopIsDone(s.status));
-      const ping = latestPing.get(trip.id);
+      const ping = latestPing.get(trip.id) ?? null;
+      const yard = depotPoint(depot.id, depot.name, depot);
+      const backAt = trip.endingTime?.toISOString() ?? null;
+      const lastPoint =
+        visited && visited.order.store.lat != null && visited.order.store.lng != null
+          ? { lat: visited.order.store.lat, lng: visited.order.store.lng }
+          : null;
+      const returning =
+        !backAt && headingBack(trip.status, trip.stops.map((s) => s.status)) && yard
+          ? this.returnEstimate(ping ?? lastPoint, yard, now)
+          : null;
       trips.push({
         id: trip.id,
         vehicleId: trip.vehicleId,
@@ -254,9 +269,6 @@ export class MapService {
               arrivedAt: visited.arrivedAt.toISOString(),
             }
           : null,
-        position: ping
-          ? { lat: ping.lat, lng: ping.lng, recordedAt: ping.recordedAt.toISOString() }
-          : null,
         stops: trip.stops.map((s) => ({
           id: s.id,
           sequence: s.sequence,
@@ -275,6 +287,11 @@ export class MapService {
           windowCloseMin: s.order.store.windowCloseMin,
           issueNote: s.status === 'partial' ? 'Partial delivery' : null,
         })),
+        position: ping
+          ? { lat: ping.lat, lng: ping.lng, recordedAt: ping.recordedAt.toISOString() }
+          : null,
+        backAt,
+        returnEta: returning,
       });
     }
 
@@ -292,6 +309,86 @@ export class MapService {
       firstDepartMin,
       firstDepartBrand,
     };
+  }
+
+  /**
+   * Road path for one trip: from the truck through the stops still to do,
+   * or from the truck back to the depot once every stop is done.
+   */
+  async tripRoute(me: Me, tripId: string): Promise<LocateRoute> {
+    this.depotOf(me);
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        depot: true,
+        stops: {
+          orderBy: { sequence: 'asc' },
+          include: { order: { include: { store: true } } },
+        },
+      },
+    });
+    if (!trip) throw new NotFoundException('Trip not found');
+    const yard = depotPoint(trip.depot.id, trip.depot.name, trip.depot);
+    if (!yard) throw new NotFoundException('Depot has no location');
+
+    const ping = await this.prisma.locationPing.findFirst({
+      where: { tripId },
+      orderBy: { recordedAt: 'desc' },
+    });
+    const here = ping ? { lat: ping.lat, lng: ping.lng } : null;
+    const backAt = trip.endingTime?.toISOString() ?? null;
+    const open = trip.stops.filter(
+      (s) => !stopIsDone(s.status) && s.order.store.lat != null && s.order.store.lng != null,
+    );
+    const last = lastVisited(trip.stops);
+    const lastPoint =
+      last && last.order.store.lat != null && last.order.store.lng != null
+        ? { lat: last.order.store.lat, lng: last.order.store.lng }
+        : null;
+    const start = here ?? lastPoint ?? yard;
+
+    let points: { lat: number; lng: number }[];
+    let returnEta: LocateRoute['returnEta'] = null;
+    if (backAt || insideDepotCircle(start, yard)) {
+      points = [];
+    } else if (open.length === 0) {
+      points = [start, yard];
+      const leg = await drivingRoute(points);
+      if (leg) {
+        returnEta = {
+          minutes: leg.minutes,
+          etaAt: new Date(this.clock.now().getTime() + leg.minutes * 60_000).toISOString(),
+        };
+        return {
+          tripId,
+          line: leg.line,
+          returnEta,
+          backAt,
+          depot: { lat: yard.lat, lng: yard.lng, radiusM: DEPOT_ARRIVE_M },
+        };
+      }
+    } else {
+      points = [start, ...open.map((s) => ({ lat: s.order.store.lat!, lng: s.order.store.lng! }))];
+    }
+
+    const leg = points.length >= 2 ? await drivingRoute(points) : null;
+    return {
+      tripId,
+      line: leg?.line ?? [],
+      returnEta,
+      backAt,
+      depot: { lat: yard.lat, lng: yard.lng, radiusM: DEPOT_ARRIVE_M },
+    };
+  }
+
+  private returnEstimate(
+    from: { lat: number; lng: number } | null,
+    depot: { lat: number; lng: number },
+    now: Date,
+  ): { minutes: number; etaAt: string } | null {
+    if (!from || insideDepotCircle(from, depot)) return null;
+    const minutes = fallbackMinutes([from, depot]);
+    return { minutes, etaAt: new Date(now.getTime() + minutes * 60_000).toISOString() };
   }
 
   private depotOf(me: Me): string {

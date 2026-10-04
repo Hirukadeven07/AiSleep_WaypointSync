@@ -112,9 +112,23 @@ export interface LocateTrip {
   stopsDone: number;
   stopsTotal: number;
   lastStop: LocateLastStop | null;
-  /** Latest vehicle ping. The live map draws the truck here while it is between stops. */
-  position: { lat: number; lng: number; recordedAt: string } | null;
   stops: LocateStop[];
+  /** Latest phone ping. The live map draws the truck here while it is between stops. */
+  position: { lat: number; lng: number; recordedAt: string } | null;
+  /** First ping inside the depot circle, once the driver is back. */
+  backAt: string | null;
+  /** Estimate for the drive back, once every stop is done and the truck is still outside the depot circle. */
+  returnEta: { minutes: number; etaAt: string } | null;
+}
+
+/** GET /dispatch/map/trips/:id. The road the selected driver still has to drive. */
+export interface LocateRoute {
+  tripId: string;
+  /** [lng, lat] pairs. Empty when no road path could be built. */
+  line: [number, number][];
+  returnEta: { minutes: number; etaAt: string } | null;
+  backAt: string | null;
+  depot: { lat: number; lng: number; radiusM: number };
 }
 
 export interface LocateMap {

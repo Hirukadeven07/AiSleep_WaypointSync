@@ -130,7 +130,7 @@ export class PlanEditService {
       vehicle,
       sorted.map((s) => s.order),
     );
-    const all = [...issues, ...capacity];
+    const all = [...issues, ...capacity, ...this.windowWarnings(order, trip, sorted, lookup)];
     const blocks = all.filter((i) => i.severity === 'block');
     const warnings = all.filter((i) => i.severity === 'warn');
 
@@ -149,6 +149,24 @@ export class PlanEditService {
         minutes: computeTripMinutes(sorted, lookup, trip.depotId as Depot),
       },
     };
+  }
+
+  /** A warning for every stop whose planned arrival falls after its delivery window. */
+  private windowWarnings(order: OrderRow, trip: TripRow, sorted: ReturnType<typeof sortStopsByWindow>, lookup: Lookup): RuleIssue[] {
+    const etas = stopEtas(sorted, lookup, trip.depotId as Depot, DEPART_MIN[trip.brand]);
+    if (!etas) return [];
+    const name = new Map<string, string>();
+    for (const stop of trip.stops) {
+      name.set(stop.order.store.id, stop.order.store.displayName ?? stop.order.store.id);
+    }
+    name.set(order.store.id, order.store.displayName ?? order.store.id);
+    return etas
+      .filter((eta) => eta.atRisk)
+      .map((eta) => ({
+        code: 'WINDOW_AT_RISK' as ReasonCode,
+        severity: 'warn' as const,
+        message: `${name.get(eta.outletId) ?? eta.outletId} would arrive at ${eta.arriveClock}, after its delivery window.`,
+      }));
   }
 
   async check(me: Me, orderId: string, tripId: string): Promise<DropCheck> {
