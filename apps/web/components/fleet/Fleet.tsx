@@ -7,10 +7,10 @@ import { PlanToast } from '@/components/plan/PlanToast';
 import type { ToastState } from '@/components/plan/usePlanEdit';
 import { api } from '@/lib/api';
 import { usePoll } from '@/lib/poll';
-import { depotName } from '@/lib/depots';
 import { AddVehicleModal } from './AddVehicleModal';
 import { OutOfServiceModal } from './OutOfServiceModal';
 import { VehicleDrawer } from './VehicleDrawer';
+import { depotLabel } from '@/lib/depots';
 
 type Filter = 'all' | 'road' | 'depot' | 'out';
 
@@ -88,7 +88,7 @@ export function Fleet() {
           <div className="flex min-w-px flex-1 flex-col gap-[6px]">
             <h1 className="text-[40px] font-medium leading-[46px] text-ink">Fleet</h1>
             <p className="whitespace-pre text-[14px] leading-5 text-muted">
-              {`${day.counts.all} vehicles  ·  ${depotName(day.depotId)} depot  ·  ${dayLabel(day.date)}`}
+              {`${day.counts.all} vehicles  ·  ${depotLabel(day.depotId)}  ·  ${dayLabel(day.date)}`}
             </p>
           </div>
           <button

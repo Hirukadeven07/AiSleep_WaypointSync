@@ -37,13 +37,28 @@ export default function DockQueuePage() {
         />
       )}
 
-      <ul className="grid gap-md sm:grid-cols-2 lg:grid-cols-3">
-        {data?.map((t) => (
-          <li key={t.tripId}>
-            <QueueCard trip={t} />
-          </li>
-        ))}
-      </ul>
+      {/* Today's trips first, then tomorrow's plan (loaded the evening before), each under a heading. */}
+      {(
+        [
+          ['Today', data?.filter((t) => !t.later) ?? []],
+          ['Tomorrow', data?.filter((t) => t.later) ?? []],
+        ] as const
+      ).map(([day, trips]) =>
+        trips.length === 0 ? null : (
+          <div key={day} className="space-y-sm">
+            <h2 className="text-title font-semibold text-ink">
+              {day} <span className="text-label font-normal text-muted">· {trips.length}</span>
+            </h2>
+            <ul className="grid gap-md sm:grid-cols-2 lg:grid-cols-3">
+              {trips.map((t) => (
+                <li key={t.tripId}>
+                  <QueueCard trip={t} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ),
+      )}
     </section>
   );
 }

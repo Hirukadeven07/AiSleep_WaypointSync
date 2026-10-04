@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import type { IncidentDetail, IncidentList } from '@waypoint/contracts';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { BreakdownDto, LogIncidentDto, ResolveDto } from './dto';
+import { AcknowledgeDto, BreakdownDto, LogIncidentDto, ResolveDto } from './dto';
 import { IncidentsService } from './incidents.service';
 
 @Controller('incidents')
@@ -38,8 +38,12 @@ export class IncidentsController {
   /** Mark the incident as seen. */
   @Post(':id/acknowledge')
   @HttpCode(200)
-  acknowledge(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<IncidentDetail> {
-    return this.incidents.acknowledge(me, id);
+  acknowledge(
+    @CurrentUser() me: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AcknowledgeDto,
+  ): Promise<IncidentDetail> {
+    return this.incidents.acknowledge(me, id, dto?.explicit === true);
   }
 
   /** Tell the stores still waiting on the trip to expect a delay. */

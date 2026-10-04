@@ -34,8 +34,8 @@ export function LoaderLogin() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    // The API identifies a loader by id and depot. The dock password is sent along so the
-    // server can start enforcing it without another client change.
+    // The loader's id and depot, plus the keypad code: the server checks it as the loader's PIN
+    // when they have one set.
     void signIn({ role: 'loader', loginId: loginId.trim(), depotId, ...(code ? { secret: code } : {}) }, keep);
   }
 

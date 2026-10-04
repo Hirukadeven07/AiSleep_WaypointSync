@@ -1,8 +1,15 @@
 /**
- * STRETCH (Day 3) — greedy auto-assign. Spine does not depend on this.
+ * Greedy auto-assign. An order goes only where the dispatcher could put it without any problem
+ * the publish check would raise: no warning from the drop rules (other district, ambient goods on
+ * a refrigerated truck, ...), within the vehicle's weight and volume, and, when departure times
+ * are given, reached inside the store's delivery window. Anything else stays unassigned and is
+ * moved to a later day.
  */
-import { rankVehiclesForOrder } from './fit';
-import type { Lookup, Order, Outlet, StopView, TripView, Vehicle } from './types';
+import { rankVehiclesForOrder, type FitOption } from './fit';
+import { measureCapacity } from './rules/capacity';
+import { sortStopsByWindow } from './sequence';
+import { stopEtas } from './time';
+import type { Brand, Lookup, Order, Outlet, StopView, TripView, Vehicle } from './types';
 
 export type Assignment = {
   orderId: string;
@@ -18,7 +25,31 @@ export type AssignInput = {
   trips: TripView[];
   tripsTakenToday: Record<string, number>;
   lookup: Lookup;
+  /** Departure minute per brand (Fresh 03:30, others 08:00). Without it windows are not checked. */
+  departAtMin?: Partial<Record<Brand, number>>;
 };
+
+/** True when placing `candidate` with `option` raises nothing the publish check would flag. */
+function isCleanPlacement(
+  option: FitOption,
+  stopsBefore: StopView[],
+  candidate: StopView,
+  input: AssignInput,
+): boolean {
+  if (option.hardBlocked || option.issues.length > 0) return false;
+  const after = sortStopsByWindow([...stopsBefore, candidate]);
+  const capacity = measureCapacity(
+    option.vehicle,
+    after.map((stop) => stop.order),
+  );
+  if (capacity.overWeight || capacity.overVolume) return false;
+  const departAt = input.departAtMin?.[candidate.outlet.brand];
+  if (departAt !== undefined) {
+    const etas = stopEtas(after, input.lookup, option.vehicle.depot, departAt);
+    if (etas?.some((eta) => eta.atRisk)) return false;
+  }
+  return true;
+}
 
 function outletOf(outlets: Outlet[], order: Order): Outlet {
   const found = outlets.find((outlet) => outlet.id === order.outletId);
@@ -60,14 +91,22 @@ export function proposeAssignments(input: AssignInput): Assignment[] {
       tripsTakenToday: tripsTaken,
       lookup: input.lookup,
     });
-    const best = ranked.find((option) => !option.hardBlocked);
+    const candidate: StopView = { order, outlet };
+    const best = ranked.find((option) =>
+      isCleanPlacement(
+        option,
+        option.tripId ? (trips.find((view) => view.trip.id === option.tripId)?.stops ?? []) : [],
+        candidate,
+        input,
+      ),
+    );
 
     if (!best) {
       assignments.push({ orderId: order.id, vehicleId: '', tripId: null, assigned: false });
       continue;
     }
 
-    const stop: StopView = { order, outlet };
+    const stop = candidate;
     if (best.tripId) {
       const trip = trips.find((view) => view.trip.id === best.tripId);
       trip?.stops.push(stop);

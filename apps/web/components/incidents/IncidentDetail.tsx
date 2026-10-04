@@ -199,6 +199,8 @@ export function IncidentDetail({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "Notify store managers" first shows what will be sent; a second tap sends it.
+  const [confirmNotify, setConfirmNotify] = useState(false);
 
   // A different incident starts from the best replacement again.
   useEffect(() => {
@@ -207,6 +209,7 @@ export function IncidentDetail({
     setDeferStopId(null);
     setReason('');
     setError(null);
+    setConfirmNotify(false);
   }, [d.id]);
   // The chosen vehicle can stop being free while the page is open.
   useEffect(() => {
@@ -439,8 +442,8 @@ export function IncidentDetail({
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
-                      disabled={busy}
-                      onClick={() => run('notify')}
+                      disabled={busy || !d.notify || d.notify.stores === 0}
+                      onClick={() => setConfirmNotify(true)}
                       className="whitespace-nowrap rounded-pill border border-border bg-surface px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-ink disabled:opacity-50"
                     >
                       Notify store managers
@@ -496,21 +499,66 @@ export function IncidentDetail({
                 {!d.recoverable && (
                   <button
                     type="button"
-                    disabled={busy}
-                    onClick={() => run('notify')}
+                    disabled={busy || !d.notify || d.notify.stores === 0}
+                    onClick={() => setConfirmNotify(true)}
                     className="whitespace-nowrap rounded-pill border border-border bg-surface px-[14px] py-2 text-[12px] font-semibold leading-4 text-ink disabled:opacity-50"
                   >
                     Notify store managers
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={onAcknowledged}
-                  className="whitespace-nowrap rounded-pill border border-border bg-surface px-[14px] py-2 text-[12px] font-semibold leading-4 text-ink"
-                >
-                  Acknowledge
-                </button>
+                {!d.acknowledged && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      run('acknowledge', { explicit: true }, (next) => {
+                        onChange(next);
+                        onAcknowledged();
+                      })
+                    }
+                    className="whitespace-nowrap rounded-pill border border-border bg-surface px-[14px] py-2 text-[12px] font-semibold leading-4 text-ink disabled:opacity-50"
+                  >
+                    Acknowledge
+                  </button>
+                )}
               </div>
+              {confirmNotify && d.notify && (
+                <div
+                  role="dialog"
+                  aria-label="Notify store managers"
+                  className="flex flex-col gap-[10px] rounded-[14px] border border-border bg-surface p-[14px]"
+                >
+                  <p className="text-[13px] font-semibold leading-[18px] text-ink">
+                    Send this to {d.notify.stores} {d.notify.stores === 1 ? 'store' : 'stores'}{' '}
+                    still waiting on the trip?
+                  </p>
+                  <p className="rounded-[10px] bg-wash p-[10px] text-[13px] leading-[19px] text-ink">
+                    {d.notify.message}
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmNotify(false)}
+                      className="rounded-pill border border-border bg-surface px-[14px] py-2 text-[12px] font-semibold leading-4 text-ink"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        run('notify', undefined, (next) => {
+                          setConfirmNotify(false);
+                          onChange(next);
+                        })
+                      }
+                      className="rounded-pill bg-primary px-[14px] py-2 text-[12px] font-semibold leading-4 text-on-primary disabled:opacity-50"
+                    >
+                      Send to {d.notify.stores} {d.notify.stores === 1 ? 'store' : 'stores'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </Section>
           )}
         </div>

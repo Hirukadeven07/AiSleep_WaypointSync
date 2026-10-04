@@ -13,6 +13,7 @@ import { formatMinutes } from './clock';
 import { findAllowance, findTravel } from './lookups';
 import { Reason } from './reasons';
 import type { Depot, Lookup, Outlet, RuleIssue, StopView } from './types';
+import { outletName } from './names';
 
 export function tripMinutes({
   outboundMin,
@@ -58,6 +59,8 @@ export function computeTripMinutes(stops: StopView[], lookup: Lookup, depot: Dep
 export type StopEta = {
   orderId: string;
   outletId: string;
+  /** The store's name for messages; the id when it has none. */
+  outletName?: string;
   arriveMin: number;
   arriveClock: string;
   serviceStartMin: number;
@@ -107,6 +110,7 @@ export function stopEtas(
     result.push({
       orderId: stop.order.id,
       outletId: stop.outlet.id,
+      outletName: outletName(stop.outlet),
       arriveMin,
       arriveClock: formatMinutes(arriveMin),
       serviceStartMin,
@@ -126,6 +130,6 @@ export function windowRiskIssues(etas: StopEta[]): RuleIssue[] {
     .map((eta) => ({
       code: Reason.WINDOW_AT_RISK,
       severity: 'warn',
-      message: `Stop ${eta.outletId} ETA ${eta.arriveClock} is after the delivery window.`,
+      message: `${eta.outletName ?? eta.outletId} would be reached at ${eta.arriveClock}, after its delivery window.`,
     }));
 }

@@ -4,6 +4,7 @@
  */
 import { Reason } from '../reasons';
 import type { RuleIssue, StopView, Vehicle } from '../types';
+import { outletName, vehicleName } from '../names';
 
 export function checkChilled(vehicle: Vehicle, candidate: StopView): RuleIssue[] {
   if (candidate.order.chilled && vehicle.temp !== 'reefer') {
@@ -11,7 +12,7 @@ export function checkChilled(vehicle: Vehicle, candidate: StopView): RuleIssue[]
       {
         code: Reason.CHILLED_NEEDS_REEFER,
         severity: 'block',
-        message: `Order ${candidate.order.id} is chilled; vehicle ${vehicle.id} is ambient.`,
+        message: `${outletName(candidate.outlet)}'s order is chilled; ${vehicleName(vehicle)} is not refrigerated.`,
       },
     ];
   }
@@ -21,7 +22,7 @@ export function checkChilled(vehicle: Vehicle, candidate: StopView): RuleIssue[]
       {
         code: Reason.AMBIENT_ON_REEFER,
         severity: 'warn',
-        message: `Order ${candidate.order.id} is ambient; vehicle ${vehicle.id} is a reefer.`,
+        message: `${outletName(candidate.outlet)}'s order is not chilled; ${vehicleName(vehicle)} is a refrigerated truck.`,
       },
     ];
   }

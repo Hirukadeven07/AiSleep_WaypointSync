@@ -6,9 +6,9 @@ import type { Me } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { initials } from '@/lib/initials';
 import { signOutDriver } from '@/lib/driver-sign-out';
-import { depotName } from '@/lib/depots';
 import { AccountMenu } from './AccountMenu';
 import { DRIVER_TABS } from './driverTabs';
+import { depotLabel } from '@/lib/depots';
 
 /**
  * Desktop navigation for Sync Driver. From `lg` it replaces the phone tab bar, and the raised
@@ -77,7 +77,7 @@ export function DriverSidebar({ me }: { me: Me }) {
         <span className="min-w-0">
           <span className="block truncate text-body font-semibold leading-[18px] text-ink">{me.name}</span>
           <span className="block truncate text-caption font-medium leading-4 text-muted">
-            {me.depotId ? `${depotName(me.depotId)} depot` : 'Driver'}
+            {me.depotId ? depotLabel(me.depotId) : 'Driver'}
           </span>
         </span>
       </AccountMenu>

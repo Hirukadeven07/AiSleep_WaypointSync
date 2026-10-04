@@ -43,7 +43,18 @@ function Marker({ n, tone }: { n: number; tone: string }) {
   );
 }
 
-function Stop({ stop, next, onRoad }: { stop: LiveStop; next: boolean; onRoad: boolean }) {
+function Stop({
+  stop,
+  next,
+  onRoad,
+  offline = false,
+}: {
+  stop: LiveStop;
+  next: boolean;
+  onRoad: boolean;
+  /** The phone is not syncing: ETAs are the plan, not where the truck is. */
+  offline?: boolean;
+}) {
   const finished = done(stop);
   const partial = stop.status === 'partial' || stop.issueNote !== null;
   const risk =
@@ -82,7 +93,7 @@ function Stop({ stop, next, onRoad }: { stop: LiveStop; next: boolean; onRoad: b
   } else {
     const eta =
       stop.etaMin !== null
-        ? `${next ? 'Arriving ~' : 'ETA '}${clock(stop.etaMin)} · window ${windowText(stop)}`
+        ? `${offline ? 'Planned ' : next ? 'Arriving ~' : 'ETA '}${clock(stop.etaMin)} · window ${windowText(stop)}`
         : `Window ${windowText(stop)}`;
     sub = eta;
     if (stop.missBy !== null) {
@@ -164,7 +175,13 @@ export function TripDrawer({
       : trip.live === 'breakdown'
         ? `Broke down. ${remaining} ${remaining === 1 ? 'stop' : 'stops'} still to deliver.`
         : trip.live === 'not_synced'
-          ? `Phone offline since ${timeOf(trip.lastAt)}. Deliveries recorded offline will appear here when it reconnects.`
+          ? `${
+              trip.lastSyncAt
+                ? `Phone offline since ${timeOf(trip.lastSyncAt)}.`
+                : trip.departedAt
+                  ? `No sync since it left at ${timeOf(trip.departedAt)}.`
+                  : 'The phone has not synced yet.'
+            } Times below are the plan; deliveries recorded offline appear when it reconnects.`
           : null;
 
   return (
@@ -256,7 +273,13 @@ export function TripDrawer({
 
         <div className="flex shrink-0 flex-col">
           {trip.stops.map((s) => (
-            <Stop key={s.id} stop={s} next={s.id === firstOpen?.id} onRoad={onRoad} />
+            <Stop
+              key={s.id}
+              stop={s}
+              next={s.id === firstOpen?.id}
+              onRoad={onRoad}
+              offline={trip.live === 'not_synced'}
+            />
           ))}
         </div>
 

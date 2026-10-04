@@ -6,3 +6,7 @@ export const DEPOTS: readonly { id: string; name: string }[] = [
 
 export const depotName = (id: string | null | undefined) =>
   DEPOTS.find((d) => d.id === id)?.name ?? id ?? '';
+
+/** "Peliyagoda depot" from a depot id (depo1) or a stored name ("Peliyagoda Depot"). */
+export const depotLabel = (idOrName: string | null | undefined) =>
+  idOrName ? `${depotName(idOrName).replace(/\s*depot$/i, '')} depot` : '';

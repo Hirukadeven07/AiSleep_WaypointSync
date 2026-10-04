@@ -41,6 +41,14 @@ export class AuthService {
         if (!dto.depotId || user.depotId !== dto.depotId) {
           throw new UnauthorizedException('Invalid credentials');
         }
+        // A loader with a PIN must enter it on the dock keypad; one without a PIN signs in with
+        // their id and depot (the shared dock tablet), and can set a PIN in Account settings.
+        if (
+          user.pinHash &&
+          (!dto.secret || !(await argon2.verify(user.pinHash, dto.secret)))
+        ) {
+          throw new UnauthorizedException('Invalid credentials');
+        }
         break;
     }
 
