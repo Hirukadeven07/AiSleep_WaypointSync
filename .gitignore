@@ -6,9 +6,9 @@ dist
 next-env.d.ts
 coverage
 .DS_Store
-# Competition CSVs and database dumps stay off git. Schema migrations under
-# apps/api/prisma/migrations stay tracked.
-data/*.csv
+# Database dumps stay off git. Schema migrations under apps/api/prisma/migrations
+# stay tracked. The shared competition CSVs in data/ are tracked so a fresh
+# `docker compose up` seeds a full delivery day.
 backups/
 waypoint*.sql
 .vercel
