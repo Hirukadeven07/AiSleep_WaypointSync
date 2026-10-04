@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Brand, LocateMap as LocateMapData, LocateStop, LocateTrip } from '@waypoint/contracts';
+import type { Brand, LocateMap as LocateMapData, LocateRoute, LocateStop, LocateTrip } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { Icon } from '@/components/ui/Icon';
 import { clock12, dayLabel } from '@/components/plan/format';
 import { timeOf, toneOf } from '@/components/dispatch/live-format';
 import { districtTone } from './districts';
-import { IslandMap, type IslandMapHandle, type IslandMarker, type MapView } from './IslandMap';
+import { IslandMap, type IslandMapHandle, type IslandMarker, type MapCircle, type MapPath, type MapView } from './IslandMap';
 import { MapControls } from './MapControls';
 
 const BRANDS: { id: 'all' | Brand; label: string; className: string }[] = [
@@ -16,12 +16,6 @@ const BRANDS: { id: 'all' | Brand; label: string; className: string }[] = [
   { id: 'Style', label: 'Style', className: 'bg-style-tint text-style' },
   { id: 'Tech', label: 'Tech', className: 'bg-tech-tint text-tech' },
 ];
-
-const ORDER_DOT: Record<Brand, string> = {
-  Fresh: 'bg-fresh',
-  Style: 'bg-style',
-  Tech: 'bg-tech',
-};
 
 const STOP_DOT: Record<LocateStop['kind'], string> = {
   delivered: 'bg-success',
@@ -38,24 +32,48 @@ export function LocateMap() {
   const [depotId, setDepotId] = useState<string | null>(null);
   const [brand, setBrand] = useState<(typeof BRANDS)[number]['id']>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [route, setRoute] = useState<LocateRoute | null>(null);
 
   useEffect(() => {
     let cancel = false;
-    setError(false);
-    const query = depotId ? `?depot=${encodeURIComponent(depotId)}` : '';
-    api<LocateMapData>(`/dispatch/map${query}`)
+    const load = () => {
+      const query = depotId ? `?depot=${encodeURIComponent(depotId)}` : '';
+      api<LocateMapData>(`/dispatch/map${query}`)
+        .then((next) => {
+          if (cancel) return;
+          setData(next);
+          setError(false);
+          setDepotId((current) => current ?? next.depotId);
+        })
+        .catch(() => {
+          if (!cancel) setError(true);
+        });
+    };
+    load();
+    const timer = setInterval(load, 20_000);
+    return () => {
+      cancel = true;
+      clearInterval(timer);
+    };
+  }, [depotId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setRoute(null);
+      return;
+    }
+    let cancel = false;
+    api<LocateRoute>(`/dispatch/map/trips/${selectedId}`)
       .then((next) => {
-        if (cancel) return;
-        setData(next);
-        setDepotId((current) => current ?? next.depotId);
+        if (!cancel) setRoute(next);
       })
       .catch(() => {
-        if (!cancel) setError(true);
+        if (!cancel) setRoute(null);
       });
     return () => {
       cancel = true;
     };
-  }, [depotId]);
+  }, [selectedId, data?.asOf]);
 
   const tones = useMemo(() => {
     const map = new Map<string, ReturnType<typeof districtTone>>();
@@ -79,34 +97,17 @@ export function LocateMap() {
   );
   const selected = trips.find((trip) => trip.id === selectedId) ?? null;
 
+  const truck = selected?.position ?? null;
   const view = useMemo<MapView>(() => {
+    if (truck) return { mode: 'point', lng: truck.lng, lat: truck.lat };
     const last = selected?.lastStop;
     if (last?.lat != null && last.lng != null) return { mode: 'point', lng: last.lng, lat: last.lat };
     return { mode: 'bounds', names: activeNames };
-  }, [selected, activeNames]);
+  }, [selected, activeNames, truck]);
 
   const markers = useMemo<IslandMarker[]>(() => {
     if (!data) return [];
-    const covered = new Set<string>();
-    if (selected) {
-      for (const stop of selected.stops) {
-        if (stop.lat == null || stop.lng == null) continue;
-        covered.add(`${stop.lat},${stop.lng}`);
-      }
-    }
     const pins: IslandMarker[] = [];
-    for (const store of data.stores ?? []) {
-      if (brand !== 'all' && store.brand !== brand) continue;
-      if (covered.has(`${store.lat},${store.lng}`)) continue;
-      pins.push({
-        id: `store:${store.storeId}`,
-        lat: store.lat,
-        lng: store.lng,
-        dotClass: store.hasOrder ? ORDER_DOT[store.brand] : 'bg-faint',
-        title: store.hasOrder ? `${store.storeName} · has an order` : `${store.storeName} · no order`,
-        size: 'pin',
-      });
-    }
     for (const depot of data.depots) {
       pins.push({
         id: `depot:${depot.id}`,
@@ -120,7 +121,7 @@ export function LocateMap() {
     if (!selected) return pins;
     for (const stop of selected.stops) {
       if (stop.lat == null || stop.lng == null) continue;
-      if (selected.lastStop?.stopId === stop.id) continue;
+      if (!selected.position && selected.lastStop?.stopId === stop.id) continue;
       pins.push({
         id: stop.id,
         lat: stop.lat,
@@ -130,8 +131,20 @@ export function LocateMap() {
         size: 'pin',
       });
     }
+    const here = selected.position;
     const last = selected.lastStop;
-    if (last?.lat != null && last.lng != null) {
+    if (here) {
+      pins.push({
+        id: `truck:${selected.id}`,
+        lat: here.lat,
+        lng: here.lng,
+        dotClass: 'bg-scrim',
+        title: selected.plate ?? selected.vehicleId,
+        caption: 'Live',
+        size: 'vehicle',
+        selected: true,
+      });
+    } else if (last?.lat != null && last.lng != null) {
       pins.push({
         id: last.stopId,
         lat: last.lat,
@@ -144,7 +157,26 @@ export function LocateMap() {
       });
     }
     return pins;
-  }, [data, selected, brand]);
+  }, [data, selected]);
+
+  const paths = useMemo<MapPath[]>(() => {
+    if (!route || route.tripId !== selectedId || route.line.length < 2) return [];
+    return [{ id: route.tripId, coordinates: route.line, color: '#1d4e89', width: 4 }];
+  }, [route, selectedId]);
+
+  const circles = useMemo<MapCircle[]>(() => {
+    const depot = data?.depots.find((item) => item.id === (depotId ?? data.depotId));
+    if (!depot) return [];
+    return [
+      {
+        id: depot.id,
+        lat: depot.lat,
+        lng: depot.lng,
+        ring: yardRing(depot.lat, depot.lng, 500),
+        color: '#415a77',
+      },
+    ];
+  }, [data, depotId]);
 
   function chooseDepot(id: string) {
     setSelectedId(null);
@@ -158,8 +190,8 @@ export function LocateMap() {
           <h1 className="text-[34px] font-medium leading-10 text-ink">Live map</h1>
           <p className="text-[14px] leading-5 text-muted">
             {data
-              ? `${dayLabel(data.date)}  ·  ${data.depotId} depot  ·  positions update at each completed stop`
-              : 'Positions update at each completed stop'}
+              ? `${dayLabel(data.date)}  ·  ${data.depotId} depot  ·  live positions from the driver's phone`
+              : 'Live positions from the driver\'s phone'}
           </p>
         </div>
         {data && data.depots.length > 0 && (
@@ -205,6 +237,8 @@ export function LocateMap() {
               tones={tones}
               view={view}
               markers={markers}
+              paths={paths}
+              circles={circles}
               onMarker={(id) => {
                 if (id.startsWith('depot:')) chooseDepot(id.slice('depot:'.length));
               }}
@@ -212,19 +246,8 @@ export function LocateMap() {
           )}
           <LocateLegend />
           <MapControls mapRef={mapRef} />
-          {selected?.lastStop && (
-            <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                Last confirmed stop
-              </p>
-              <p className="mt-1 text-[15px] font-semibold text-ink">{selected.lastStop.storeName}</p>
-              <p className="mt-1 text-[13px] text-muted">
-                {selected.plate ?? selected.vehicleId} · arrived {timeOf(selected.lastStop.arrivedAt)}
-              </p>
-              <p className="mt-2 text-[12px] leading-4 text-muted">
-                This is the last store the driver reached, not a live position.
-              </p>
-            </article>
+          {selected && (
+            <TruckCard trip={selected} route={route?.tripId === selected.id ? route : null} />
           )}
         </section>
 
@@ -282,6 +305,48 @@ export function LocateMap() {
   );
 }
 
+function TruckCard({ trip, route }: { trip: LocateTrip; route: LocateRoute | null }) {
+  const eta = route?.returnEta ?? trip.returnEta;
+  const backAt = route?.backAt ?? trip.backAt;
+  return (
+    <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+        {backAt ? 'Back at depot' : trip.position ? 'Live position' : 'Last confirmed stop'}
+      </p>
+      <p className="mt-1 text-[15px] font-semibold text-ink">
+        {trip.plate ?? trip.vehicleId}
+        {trip.driverName ? ` · ${trip.driverName}` : ''}
+      </p>
+      {backAt && <p className="mt-1 text-[13px] text-ink">Arrived {timeOf(backAt)}</p>}
+      {!backAt && eta && (
+        <p className="mt-1 text-[13px] text-ink">
+          Back at the depot about {timeOf(eta.etaAt)} · {eta.minutes} min
+        </p>
+      )}
+      {!backAt && !trip.position && trip.lastStop && (
+        <p className="mt-2 text-[12px] leading-4 text-muted">
+          No phone position yet. Showing the last store the driver reached, {trip.lastStop.storeName}.
+        </p>
+      )}
+      {trip.position && !backAt && (
+        <p className="mt-2 text-[12px] leading-4 text-muted">Updated {timeOf(trip.position.recordedAt)}</p>
+      )}
+    </article>
+  );
+}
+
+function yardRing(lat: number, lng: number, radiusM: number): [number, number][] {
+  const latRad = (lat * Math.PI) / 180;
+  const mPerDegLat = 111_320;
+  const mPerDegLng = 111_320 * Math.cos(latRad);
+  const ring: [number, number][] = [];
+  for (let i = 0; i <= 64; i++) {
+    const θ = (i / 64) * 2 * Math.PI;
+    ring.push([lng + (radiusM * Math.sin(θ)) / mPerDegLng, lat + (radiusM * Math.cos(θ)) / mPerDegLat]);
+  }
+  return ring;
+}
+
 function TripButton({
   trip,
   selected,
@@ -313,7 +378,15 @@ function TripButton({
           {trip.brand} · {trip.district} · {trip.stopsDone}/{trip.stopsTotal} stops
         </span>
         <span className="mt-1 block text-[12px] text-ink">
-          {trip.lastStop ? `Last stop ${trip.lastStop.storeName}` : 'No stop confirmed yet'}
+          {trip.backAt
+            ? `Back at depot · ${timeOf(trip.backAt)}`
+            : trip.returnEta
+              ? `Heading back · about ${trip.returnEta.minutes} min`
+              : trip.position
+                ? `Live · ${timeOf(trip.position.recordedAt)}`
+                : trip.lastStop
+                  ? `Last stop ${trip.lastStop.storeName}`
+                  : 'No position yet'}
         </span>
       </button>
     </li>
@@ -343,17 +416,16 @@ function LocateLegend() {
       <p className="mb-2 text-[12px] font-semibold text-muted">Legend</p>
       <ul className="flex flex-col gap-1.5">
         <li className={row}>
-          <span className="size-2.5 rounded-full bg-fresh" /> Store with an order
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-faint" /> Store with no order
-        </li>
-        <li className={row}>
           <span className="size-3 rounded-[4px] bg-scrim" /> Depot
         </li>
         <li className={row}>
-          <span className="size-3 rounded-full bg-scrim ring-2 ring-ink ring-offset-1" /> Vehicle (last
-          confirmed stop)
+          <span className="size-3 rounded-full border border-slate" /> 500 m around the depot
+        </li>
+        <li className={row}>
+          <span className="size-3 rounded-full bg-scrim ring-2 ring-ink ring-offset-1" /> Selected vehicle
+        </li>
+        <li className={row}>
+          <span className="h-0.5 w-4 bg-[#1d4e89]" /> Road route
         </li>
         <li className={row}>
           <span className="size-2.5 rounded-full bg-success" /> Delivered stop

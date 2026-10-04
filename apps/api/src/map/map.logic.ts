@@ -100,3 +100,54 @@ export function isOnRoad(live: LiveStatus) {
 }
 
 export const stopIsDone = (status: string) => DONE.has(status);
+
+/** A ping inside this distance of the depot yard counts as arrived back. */
+export const DEPOT_ARRIVE_M = 500;
+
+/** Great-circle distance in metres. */
+export function distanceM(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6_371_000;
+  const φ1 = (a.lat * Math.PI) / 180;
+  const φ2 = (b.lat * Math.PI) / 180;
+  const Δφ = ((b.lat - a.lat) * Math.PI) / 180;
+  const Δλ = ((b.lng - a.lng) * Math.PI) / 180;
+  const h = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+export function insideDepotCircle(
+  point: { lat: number; lng: number },
+  depot: { lat: number; lng: number },
+  radiusM = DEPOT_ARRIVE_M,
+): boolean {
+  return distanceM(point, depot) <= radiusM;
+}
+
+/** Closed ring around a point, as [lng, lat], for a map circle of `radiusM` metres. */
+export function circleRing(
+  lat: number,
+  lng: number,
+  radiusM: number,
+  steps = 64,
+): [number, number][] {
+  const latRad = (lat * Math.PI) / 180;
+  const mPerDegLat = 111_320;
+  const mPerDegLng = 111_320 * Math.cos(latRad);
+  const ring: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const θ = (i / steps) * 2 * Math.PI;
+    ring.push([
+      lng + (radiusM * Math.sin(θ)) / mPerDegLng,
+      lat + (radiusM * Math.cos(θ)) / mPerDegLat,
+    ]);
+  }
+  return ring;
+}
+
+/** Every stop is finished and the trip is still on the road, so the driver is heading back. */
+export function headingBack(status: string, stopStatuses: string[]): boolean {
+  return status === 'on_road' && stopStatuses.length > 0 && stopStatuses.every(stopIsDone);
+}

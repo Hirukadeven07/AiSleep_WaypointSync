@@ -96,6 +96,11 @@ export interface DriverDayResponse {
   roadIssue: DriverDayRoadIssue | null;
   /** Today's breaks, from the driver's BREAK_START / BREAK_END events. */
   break: DriverDayBreak;
+  /**
+   * Set once every stop on the active trip is done and the truck is still outside the depot circle.
+   * Null while stops remain, or after the truck has arrived back.
+   */
+  returnToDepot: { minutes: number; etaAt: string } | null;
 }
 
 export interface DriverDayBreak {

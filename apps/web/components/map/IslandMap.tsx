@@ -32,6 +32,25 @@ export type IslandMarker = {
   badges?: string[];
   selected?: boolean;
   size?: 'pin' | 'vehicle' | 'depot';
+  /** `glow` marks a shop with an order. `ripple` marks a shop that can be added next. */
+  pulse?: 'glow' | 'ripple';
+};
+
+export type MapPath = {
+  id: string;
+  /** [lng, lat] pairs. */
+  coordinates: [number, number][];
+  color: string;
+  width?: number;
+};
+
+export type MapCircle = {
+  id: string;
+  lat: number;
+  lng: number;
+  /** Closed ring as [lng, lat]. */
+  ring: [number, number][];
+  color: string;
 };
 
 export type MapView =
@@ -58,6 +77,8 @@ type Props = {
   tones: ReadonlyMap<string, DistrictTone>;
   view: MapView;
   markers: IslandMarker[];
+  paths?: MapPath[];
+  circles?: MapCircle[];
   onMarker?: (id: string) => void;
   /** When set, a click on the island reports the coordinate instead of doing nothing. */
   picking?: boolean;
@@ -233,6 +254,12 @@ function markerElement(marker: IslandMarker) {
   button.type = 'button';
   button.title = marker.title;
   button.className = 'relative flex flex-col items-center';
+  if (marker.pulse) {
+    const halo = document.createElement('span');
+    const reach = marker.pulse === 'ripple' ? 'size-9' : 'size-6';
+    halo.className = `pointer-events-none absolute ${reach} animate-ping rounded-full ${marker.dotClass} opacity-70`;
+    button.appendChild(halo);
+  }
   const dot = document.createElement('span');
   const size =
     marker.size === 'depot' ? 'size-7 rounded-[10px]' : marker.size === 'vehicle' ? 'size-5' : 'size-3.5';
@@ -279,7 +306,7 @@ function focusBounds(features: Feature[], names: string[]) {
  * Store pins are placed from database latitude and longitude.
  */
 export const IslandMap = forwardRef<IslandMapHandle, Props>(function IslandMap(
-  { tones, view, markers, onMarker, picking, onPick },
+  { tones, view, markers, paths = [], circles = [], onMarker, picking, onPick },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
@@ -479,6 +506,37 @@ export const IslandMap = forwardRef<IslandMapHandle, Props>(function IslandMap(
         });
       }
 
+      created.addSource('overlay-lines', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      created.addLayer({
+        id: 'overlay-lines',
+        type: 'line',
+        source: 'overlay-lines',
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': ['get', 'width'],
+          'line-opacity': 0.9,
+        },
+      });
+      created.addSource('overlay-circles', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      created.addLayer({
+        id: 'overlay-circle-fill',
+        type: 'fill',
+        source: 'overlay-circles',
+        paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.12 },
+      });
+      created.addLayer({
+        id: 'overlay-circle-line',
+        type: 'line',
+        source: 'overlay-circles',
+        paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 0.7 },
+      });
+
       const current = viewRef.current;
       if (current.mode === 'point') created.flyTo({ center: [current.lng, current.lat], zoom: 11 });
       else created.fitBounds(focusBounds(featuresRef.current, current.names), { padding: 36, duration: 0 });
@@ -519,6 +577,33 @@ export const IslandMap = forwardRef<IslandMapHandle, Props>(function IslandMap(
     }
     map.fitBounds(focusBounds(featuresRef.current, view.names), { padding: 36, duration: 500 });
   }, [view, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const lines = map?.getSource('overlay-lines') as { setData?: (data: unknown) => void } | undefined;
+    const rings = map?.getSource('overlay-circles') as { setData?: (data: unknown) => void } | undefined;
+    if (!lines?.setData || !rings?.setData) return;
+    lines.setData({
+      type: 'FeatureCollection',
+      features: paths
+        .filter((path) => path.coordinates.length >= 2)
+        .map((path) => ({
+          type: 'Feature',
+          properties: { color: path.color, width: path.width ?? 3 },
+          geometry: { type: 'LineString', coordinates: path.coordinates },
+        })),
+    });
+    rings.setData({
+      type: 'FeatureCollection',
+      features: circles
+        .filter((circle) => circle.ring.length >= 4)
+        .map((circle) => ({
+          type: 'Feature',
+          properties: { color: circle.color },
+          geometry: { type: 'Polygon', coordinates: [circle.ring] },
+        })),
+    });
+  }, [paths, circles, ready]);
 
   useEffect(() => {
     const map = mapRef.current;

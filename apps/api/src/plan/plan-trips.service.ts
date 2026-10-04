@@ -321,4 +321,35 @@ export class PlanTripsService {
         weightKg: view.weightKg,
       }));
   }
+
+  /**
+   * Waiting orders of this trip's brand that the rules allow and that still fit the delivery windows.
+   * Empty until the trip already has a stop, so the map ripples the next shops only after one is chosen.
+   */
+  async nextShops(me: Me, tripId: string): Promise<{ orderIds: string[] }> {
+    const trip = await this.edit.loadTrip(me, tripId);
+    if (trip.stops.length === 0) return { orderIds: [] };
+    const lookup = await this.plan.loadLookup();
+    const rows = await this.prisma.order.findMany({
+      where: {
+        deliveryDate: trip.serviceDate,
+        status: 'waiting',
+        stop: null,
+        brand: trip.brand,
+        store: { depotId: trip.depotId },
+      },
+      include: orderInclude,
+    });
+    return {
+      orderIds: rows
+        .filter((order) => {
+          const result = this.edit.evaluate(order, trip, lookup);
+          return (
+            result.blocks.length === 0 &&
+            !result.warnings.some((warning) => warning.code === 'WINDOW_AT_RISK')
+          );
+        })
+        .map((order) => order.id),
+    };
+  }
 }
