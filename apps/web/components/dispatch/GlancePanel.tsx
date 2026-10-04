@@ -282,10 +282,12 @@ export function GlancePanel({ day, className = '' }: { day: LiveDay; className?:
         <p className="whitespace-nowrap text-[26px] font-semibold leading-8 text-on-primary">
           {t.minutesToCutoff > 0
             ? `Cut-off in ${untilText(t.minutesToCutoff)}`
-            : 'Orders are closed'}
+            : 'Ordering for the next day'}
         </p>
         <p className="text-[12px] leading-[17px] text-sand">
-          {t.ordersReceived} orders received so far · planning opens {clock12(t.cutoffMin)}
+          {t.minutesToCutoff > 0
+            ? `${t.ordersReceived} orders received so far · planning opens ${clock12(t.cutoffMin)}`
+            : `${t.ordersReceived} orders for the next day so far · new orders stay open`}
         </p>
         <Link
           href="/dispatch/plan"

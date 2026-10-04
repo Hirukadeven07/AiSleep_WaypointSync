@@ -121,6 +121,7 @@ export class PlanService {
 
     return {
       date,
+      today,
       depotId,
       cutoffMin: ORDER_CUTOFF_MIN,
       orders,

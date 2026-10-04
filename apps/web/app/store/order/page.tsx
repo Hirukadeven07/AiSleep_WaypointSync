@@ -13,7 +13,7 @@ import {
   type StoreOrderView,
 } from '@waypoint/contracts';
 import { api } from '@/lib/api';
-import { messageOf, reasonOf } from '@/lib/api-error';
+import { messageOf } from '@/lib/api-error';
 import { formatMinutes } from '@/lib/clock';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -68,7 +68,7 @@ function readDraft(storeId: string, catalogue: CatalogueItem[]): Record<string, 
   }
 }
 
-/** S2: place an order from the catalogue. The order date is today. Refused from 16:00. */
+/** S2: place an order from the catalogue. Before 16:00 it is for today; from 16:00 it is for the next day. */
 export default function OrderPage() {
   const [home, setHome] = useState<StoreHome>();
   const [catalogue, setCatalogue] = useState<CatalogueItem[]>();
@@ -122,7 +122,7 @@ export default function OrderPage() {
   if (!home || !catalogue || nowMin === undefined)
     return <p className="text-body text-muted">Loading…</p>;
 
-  const closed = nowMin >= home.cutoffMin;
+  const forToday = home.orderDate === home.today;
   const picks = catalogue.filter((c) => (qty[c.id] ?? 0) > 0);
   const units = picks.reduce((s, c) => s + qty[c.id]!, 0);
   const weight = picks.reduce((s, c) => s + c.unitWeightKg * qty[c.id]!, 0);
@@ -233,11 +233,7 @@ export default function OrderPage() {
       setRecent(await api<StoreOrderDetail[]>('/store/orders/recent').catch(() => recent));
       requestStoreRefresh();
     } catch (e) {
-      setToast({
-        message: messageOf(e),
-        tone: reasonOf(e) === 'AFTER_CUTOFF' ? 'warning' : 'danger',
-      });
-      if (reasonOf(e) === 'AFTER_CUTOFF') setHome((h) => (h ? { ...h, nowMin: h.cutoffMin } : h));
+      setToast({ message: messageOf(e), tone: 'danger' });
     } finally {
       setBusy(false);
     }
@@ -247,19 +243,18 @@ export default function OrderPage() {
     <section className="space-y-md pb-lg">
       <PageTitle eyebrow="Order" title="Place an order" />
 
-      {closed ? (
-        <div className="space-y-xs rounded-card bg-border p-lg">
-          <p className="text-title text-ink">Ordering is closed</p>
-          <p className="text-body text-muted">
-            Ordering closes at {formatMinutes(home.cutoffMin)}. You can order again tomorrow
-            morning.
-          </p>
-        </div>
-      ) : (
+      {forToday ? (
         <p
           className={`text-label ${home.cutoffMin - nowMin <= 60 ? 'font-semibold text-warning' : 'text-muted'}`}
         >
-          Closes at {formatMinutes(home.cutoffMin)} · {formatDuration(home.cutoffMin - nowMin)} left
+          This order is for today. Closes at {formatMinutes(home.cutoffMin)} ·{' '}
+          {formatDuration(home.cutoffMin - nowMin)} left. After that, new orders are for the next
+          day.
+        </p>
+      ) : (
+        <p className="text-label text-ink">
+          This order is for {formatDate(home.orderDate)}. The {formatMinutes(home.cutoffMin)} cutoff
+          has passed, so ordering has moved to the next day.
         </p>
       )}
 
@@ -301,7 +296,6 @@ export default function OrderPage() {
                   <p className="text-label text-ink">
                     Cancel this order of {o.units} {o.units === 1 ? 'unit' : 'units'} for{' '}
                     {formatDate(o.deliveryDate)}?
-                    {closed ? ' Ordering is closed, so it cannot be placed again today.' : ''}
                   </p>
                   <div className="flex gap-sm">
                     <button
@@ -424,12 +418,12 @@ export default function OrderPage() {
             </div>
             <Button
               className="w-full"
-              disabled={closed || busy || picks.length === 0 || (urgent && !stockLevel)}
+              disabled={busy || picks.length === 0 || (urgent && !stockLevel)}
               onClick={place}
             >
               {busy ? 'Placing…' : upcoming.length > 0 ? 'Place another order' : 'Place order'}
             </Button>
-            {upcoming.length > 0 && picks.length > 0 && !closed && (
+            {upcoming.length > 0 && picks.length > 0 && (
               <p className="text-center text-caption text-muted">
                 This is sent as a separate order, on top of what is already placed.
               </p>
@@ -475,7 +469,7 @@ export default function OrderPage() {
                 category.
               </p>
             )}
-            {!closed && again.length > 0 && (
+            {again.length > 0 && (
               <button
                 type="button"
                 onClick={orderAgain}
@@ -508,8 +502,7 @@ export default function OrderPage() {
               ))}
 
             <ul
-              className={`space-y-sm 2xl:grid 2xl:grid-cols-2 2xl:gap-sm 2xl:space-y-0 ${closed ? 'pointer-events-none opacity-50' : ''}`}
-              aria-disabled={closed}
+              className="space-y-sm 2xl:grid 2xl:grid-cols-2 2xl:gap-sm 2xl:space-y-0"
             >
               {visible.map((c) => {
                 const starred = savedSet.has(c.id);
@@ -536,7 +529,7 @@ export default function OrderPage() {
                       name={c.name}
                       value={qty[c.id] ?? 0}
                       max={MAX_QTY}
-                      disabled={closed || locked}
+                      disabled={locked}
                       onChange={(n) => setItemQty(c.id, n)}
                     />
                   </li>

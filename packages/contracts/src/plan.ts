@@ -112,6 +112,8 @@ export interface PlanSummary {
 
 export interface PlanDay {
   date: string; // YYYY-MM-DD
+  /** Today in Asia/Colombo, so the board can offer today and the next day. */
+  today: string;
   depotId: string;
   /** Orders close at this minute of the day. */
   cutoffMin: number;

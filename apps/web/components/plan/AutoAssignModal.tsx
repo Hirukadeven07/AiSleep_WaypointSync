@@ -66,9 +66,11 @@ function Change({
 /** Figma "Plan v2 / Auto-assign": what the proposal would do. Nothing is saved until Apply. */
 export function AutoAssignModal({
   proposal,
+  date,
   edit,
 }: {
   proposal: AutoAssignProposal;
+  date: string;
   edit: PlanEdit;
 }) {
   const [busy, setBusy] = useState(false);
@@ -78,7 +80,7 @@ export function AutoAssignModal({
   async function apply() {
     setBusy(true);
     try {
-      await api('/plan/auto-assign/apply', { method: 'POST', body: {} });
+      await api('/plan/auto-assign/apply', { method: 'POST', body: { date } });
       await edit.reload();
       edit.closeModal();
       edit.showToast({
