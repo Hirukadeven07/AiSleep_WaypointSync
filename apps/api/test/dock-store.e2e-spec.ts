@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import * as argon2 from 'argon2';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -209,9 +210,15 @@ describe('loader dock and store (e2e)', () => {
         const refused = await start(body).expect(400);
         expect(refused.body.reason).toBe('WRONG_LOADER_CREDENTIALS');
       }
-      expect(
-        await prisma.loadSession.findUnique({ where: { tripId: ids.loadTrip } }),
-      ).toBeNull();
+      expect(await prisma.loadSession.findUnique({ where: { tripId: ids.loadTrip } })).toBeNull();
+      // A loader with no PIN set is let in on the ID alone, and a PIN is then not asked for.
+      await prisma.user.update({ where: { loginId: 'sampath' }, data: { pinHash: null } });
+      await start({ loaderId: 'SAMPATH' }).expect(200);
+      await prisma.loadSession.delete({ where: { tripId: ids.loadTrip } });
+      await prisma.user.update({
+        where: { loginId: 'sampath' },
+        data: { pinHash: await argon2.hash('1234') },
+      });
 
       const started = await start({ loaderId: 'sampath', pin: '1234' }).expect(200);
       expect(started.body.status).toBe('loading');

@@ -489,7 +489,10 @@ export class LoadsService {
     return userId ? this.prisma.loader.findUnique({ where: { userId } }) : null;
   }
 
-  /** A loader ID plus that loader's own PIN, for someone at this depot. One message for every failure. */
+  /**
+   * A loader ID for someone at this depot, plus that loader's own PIN when they have one (a loader
+   * with no PIN set is let in on the ID alone). One message for every failure.
+   */
   private async verifyLoader(me: AuthUser, dto: StartLoadingRequest) {
     const wrong = () =>
       new BadRequestException({
@@ -505,9 +508,7 @@ export class LoadsService {
       user.role !== 'loader' ||
       user.depotId !== me.depotId ||
       user.loaderProfile?.isActive === false ||
-      !user.pinHash ||
-      !dto.pin ||
-      !(await argon2.verify(user.pinHash, dto.pin))
+      (user.pinHash && (!dto.pin || !(await argon2.verify(user.pinHash, dto.pin))))
     ) {
       throw wrong();
     }
