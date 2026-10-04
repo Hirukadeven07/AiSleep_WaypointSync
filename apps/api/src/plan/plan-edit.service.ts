@@ -6,6 +6,7 @@ import type {
   Me,
   PlanIssue,
   PlanOrderDetail,
+  PlanVehicleChoice,
   ReasonCode,
   UnassignResult,
 } from '@waypoint/contracts';
@@ -49,6 +50,10 @@ const issue = (i: RuleIssue): PlanIssue => ({
 });
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const KIND = { truck: 'Ambient', van: 'Van' } as const;
+const kg = (n: number) => Math.round(n).toLocaleString('en-US');
+const vehicleKind = (v: { type: string; temp: string }) =>
+  v.type === 'van' ? 'Van' : v.temp === 'reefer' ? 'Refrigerated truck' : 'Ambient truck';
+const CHOICE_RANK = { fits: 0, warn: 1, blocked: 2 } as const;
 
 /** Dispatcher edits to the plan: check a drop, place an order on a trip, take it off again, read one order. */
 @Injectable()
@@ -406,6 +411,99 @@ export class PlanEditService {
           : null,
       assignedTripId: stop?.tripId ?? null,
       suggestion,
+      vehicles: await this.vehicleChoices(order, lookup, stop?.tripId ?? null, fit?.row.id ?? null),
     };
+  }
+
+  /**
+   * Every truck and van the dispatcher could put the order on: each trip the vehicle already has
+   * that is still at the depot, and a new run while it has fewer than two. Each says whether the
+   * order fits there, so the dispatcher picks the vehicle rather than the plan picking it.
+   */
+  private async vehicleChoices(
+    order: OrderRow,
+    lookup: Lookup,
+    currentTripId: string | null,
+    bestTripId: string | null,
+  ): Promise<PlanVehicleChoice[]> {
+    const depotId = order.store.depotId;
+    const [vehicles, trips] = await Promise.all([
+      this.prisma.vehicle.findMany({
+        where: { depotId, status: 'available' },
+        include: { driver: { select: { id: true, name: true } } },
+        orderBy: { numberPlate: 'asc' },
+      }),
+      this.prisma.trip.findMany({
+        where: { depotId, serviceDate: order.deliveryDate },
+        include: tripInclude,
+        orderBy: { tripNumber: 'asc' },
+      }),
+    ]);
+
+    const choices: PlanVehicleChoice[] = [];
+    const judge = (row: TripRow) => {
+      const { blocks, warnings } = this.evaluate(order, row, lookup);
+      const sent =
+        row.status !== 'planning' && blocks.length === 0
+          ? 'Already sent: the dock must accept the change.'
+          : null;
+      return {
+        status: blocks.length > 0 ? 'blocked' : warnings.length > 0 || sent ? 'warn' : 'fits',
+        note: blocks[0]?.message ?? warnings[0]?.message ?? sent,
+      } as const;
+    };
+
+    for (const v of vehicles) {
+      const plate = v.numberPlate ?? v.id;
+      const mine = trips.filter((t) => t.vehicleId === v.id);
+      for (const row of mine.filter((t) => isAtDepot(t.status))) {
+        const load = row.stops.reduce((sum, s) => sum + s.order.weightKg, 0);
+        choices.push({
+          vehicleId: v.id,
+          vehicleType: v.type,
+          tripId: row.id,
+          tripNumber: row.tripNumber as 1 | 2,
+          label: `${plate} · Trip ${row.tripNumber}`,
+          detail: `${vehicleKind(v)} · ${row.brand} · ${row.stops.length} ${row.stops.length === 1 ? 'stop' : 'stops'} · ${kg(load)} of ${kg(v.weightCapKg)} kg`,
+          ...judge(row),
+          bestFit: row.id === bestTripId,
+          current: row.id === currentTripId,
+        });
+      }
+      const run = ([1, 2] as const).find((n) => !mine.some((t) => t.tripNumber === n));
+      if (mine.length >= 2 || !run) continue;
+      // A trip that does not exist yet: set up for the order's brand and district, no stops.
+      const blank = {
+        id: '',
+        vehicleId: v.id,
+        vehicle: v,
+        depotId,
+        brand: order.brand,
+        tripNumber: run,
+        status: 'planning',
+        district: order.store.district,
+        extraDistricts: [],
+        stops: [],
+      } as unknown as TripRow;
+      choices.push({
+        vehicleId: v.id,
+        vehicleType: v.type,
+        tripId: null,
+        tripNumber: run,
+        label: `${plate} · New trip ${run}`,
+        detail: `${vehicleKind(v)} · empty · ${kg(v.weightCapKg)} kg · ${v.volumeCapM3} m³`,
+        ...judge(blank),
+        bestFit: false,
+        current: false,
+      });
+    }
+
+    return choices.sort(
+      (a, b) =>
+        Number(b.current) - Number(a.current) ||
+        Number(b.bestFit) - Number(a.bestFit) ||
+        CHOICE_RANK[a.status] - CHOICE_RANK[b.status] ||
+        Number(a.tripId === null) - Number(b.tripId === null),
+    );
   }
 }

@@ -112,9 +112,9 @@ export function PlanBoard() {
           orderId={edit.drawerId}
           onClose={edit.closeDrawer}
           onMoveLater={() => edit.openModal({ kind: 'defer', orderId: edit.drawerId! })}
-          onAdd={(detail, tripId) => {
+          onAllocate={(detail, choice) => {
             edit.closeDrawer();
-            void edit.place(detail.order.id, detail.order.storeName, tripId);
+            void edit.allocate(detail.order.id, detail.order.storeName, choice);
           }}
         />
       )}
