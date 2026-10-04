@@ -1,5 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type {
+  AllocateRequest,
+  AssignResult,
   CreateTripRequest,
   Me,
   NewTripOptions,
@@ -136,6 +138,32 @@ export class PlanTripsService {
       include: tripInclude,
     });
     return this.plan.planTrip(trip, await this.plan.loadLookup(), depotId as Depot);
+  }
+
+  /**
+   * The dispatcher picked a truck or van for an order. A trip it already has takes the order
+   * directly; a new run is set up for the order's brand and district first, and removed again
+   * when the order cannot go on it, so a refused pick leaves no empty trip behind.
+   */
+  async allocate(me: Me, dto: AllocateRequest): Promise<AssignResult> {
+    if (dto.tripId) return this.edit.assign(me, dto.orderId, dto.tripId);
+    if (!dto.vehicleId || !dto.tripNumber) {
+      throw new BadRequestException('Pick a trip, or a vehicle and a run');
+    }
+    const order = await this.edit.loadOrder(me, dto.orderId);
+    const trip = await this.create(me, {
+      vehicleId: dto.vehicleId,
+      tripNumber: dto.tripNumber,
+      brand: order.brand,
+      districts: [order.store.district.name],
+      date: order.deliveryDate.toISOString().slice(0, 10),
+    });
+    try {
+      return await this.edit.assign(me, dto.orderId, trip.id);
+    } catch (e) {
+      await this.prisma.trip.delete({ where: { id: trip.id } });
+      throw e;
+    }
   }
 
   /**
