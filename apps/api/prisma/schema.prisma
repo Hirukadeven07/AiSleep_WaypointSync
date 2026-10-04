@@ -173,6 +173,8 @@ model Depot {
   address    String?
   lat        Float?
   lng        Float?
+  /// argon2 hash of the depot's shared dock password (6 digits on the dock keypad). Null until set.
+  dockPasswordHash String?
   districts  District[]
   stores     Store[]
   users      User[]

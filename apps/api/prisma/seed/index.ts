@@ -55,6 +55,8 @@ async function seedUsers() {
       role: 'loader' as const,
       name: 'Sampath (Loader)',
       depotId: 'depo1',
+      // His own PIN: he confirms himself with it at "Start loading".
+      pinHash: await argon2.hash('1234'),
     },
     {
       loginId: 'kasun',
@@ -245,7 +247,9 @@ async function seedFleetDrivers() {
 
 /**
  * 100 loaders per depot (L001… Peliyagoda, then Kandy). Last 10 at each depot have left.
- * Login is loader id + depot; dock keypad is not checked. sampath stays as the demo login.
+ * A loader does not sign in on their own: the dock tablet signs in with the depot's dock password
+ * (seedDockPasswords), and each loader confirms with loader id + PIN 1234 at "Start loading".
+ * sampath stays as the demo loader.
  */
 async function seedFleetLoaders() {
   const depots = await prisma.depot.findMany({ select: { id: true }, orderBy: { id: 'desc' } });
@@ -253,6 +257,7 @@ async function seedFleetLoaders() {
     console.warn('[seed] no depots - skipping fleet loaders');
     return;
   }
+  const pinHash = await argon2.hash('1234');
   let n = 0;
   for (const depot of depots) {
     for (let i = 1; i <= LOADERS_PER_DEPOT; i++) {
@@ -263,8 +268,8 @@ async function seedFleetLoaders() {
       const name = personName(given, n);
       const user = await prisma.user.upsert({
         where: { loginId },
-        update: { role: 'loader', name, depotId: depot.id },
-        create: { loginId, role: 'loader', name, depotId: depot.id },
+        update: { role: 'loader', name, depotId: depot.id, pinHash },
+        create: { loginId, role: 'loader', name, depotId: depot.id, pinHash },
       });
       const joinDate = new Date(Date.UTC(2020, 0, 1 + ((n * 7) % 1200)));
       await prisma.loader.upsert({
@@ -294,6 +299,22 @@ async function seedFleetLoaders() {
   console.log(
     `[seed] ${depots.length * LOADERS_PER_DEPOT} fleet loaders ready (${LOADERS_PER_DEPOT} per depot; last ${LOADER_LEAVERS_PER_DEPOT} at each depot left)`,
   );
+}
+
+/**
+ * The shared dock password of each depot, stored hashed on the Depot (6 digits on the dock keypad).
+ * depo1 Peliyagoda 123456, depo2 Kandy 654321; any other depot 123456. Set on every seed.
+ */
+async function seedDockPasswords() {
+  const depots = await prisma.depot.findMany({ select: { id: true } });
+  for (const depot of depots) {
+    const password = depot.id === 'depo2' ? '654321' : '123456';
+    await prisma.depot.update({
+      where: { id: depot.id },
+      data: { dockPasswordHash: await argon2.hash(password) },
+    });
+  }
+  console.log(`[seed] dock password set on ${depots.length} depots`);
 }
 
 /** One Peliyagoda truck out of service, with a reason and a return time tomorrow at 14:30 Colombo. */
@@ -377,6 +398,7 @@ async function main() {
     await fillStoreLocations(prisma);
     await fillNumberPlates(prisma);
     // The four demo logins are recreated on every seed, so a copied database always has them.
+    await seedDockPasswords();
     await seedUsers();
     await seedOutletManagers();
     await seedFleetDrivers();
@@ -404,6 +426,7 @@ async function main() {
   await fillNumberPlates(prisma);
   await warnIfCsvEmpty();
 
+  await seedDockPasswords();
   await seedUsers();
   await seedOutletManagers();
   await seedFleetDrivers();

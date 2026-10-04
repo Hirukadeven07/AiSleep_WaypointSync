@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  DOCK_PASSWORD_PATTERN,
   PASSWORD_MIN_LENGTH,
   PIN_PATTERN,
   type ChangePasswordRequest,
@@ -17,22 +18,25 @@ import { ThemeSwitch } from './ThemeSwitch';
 const inputClass =
   'w-full rounded-input border border-mist bg-surface px-3 py-2 text-body text-ink outline-none focus:border-slate';
 
-/** Drivers and loaders use a PIN; dispatchers and store managers a password (same split as sign-in). */
+/** Drivers use a PIN; the dock tablet a 6-digit dock password; dispatchers and stores a password. */
 const usesPin = (role: Me['role']) => role === 'driver' || role === 'loader';
 
 function SecretForm({ me }: { me: Me }) {
+  const dock = me.role === 'loader';
   const pin = usesPin(me.role);
-  const word = pin ? 'PIN' : 'password';
+  const word = dock ? 'dock password' : pin ? 'PIN' : 'password';
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [again, setAgain] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const rule = pin
+  const rule = dock
+    ? 'The new dock password is 6 digits. Loaders keep their own PINs.'
+    : pin
     ? 'The new PIN is 4 to 6 digits.'
     : `The new password has at least ${PASSWORD_MIN_LENGTH} characters.`;
-  const valid = pin ? PIN_PATTERN.test(next) : next.length >= PASSWORD_MIN_LENGTH;
+  const valid = dock ? DOCK_PASSWORD_PATTERN.test(next) : pin ? PIN_PATTERN.test(next) : next.length >= PASSWORD_MIN_LENGTH;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -51,7 +55,9 @@ function SecretForm({ me }: { me: Me }) {
       setAgain('');
       setNote({
         ok: true,
-        text: `Your ${word} is changed. Other devices signed in as you were signed out.`,
+        text: dock
+          ? 'The dock password is changed. Use it the next time a dock is unlocked.'
+          : `Your ${word} is changed. Other devices signed in as you were signed out.`,
       });
     } catch (err) {
       setNote({ ok: false, text: messageOf(err) });
@@ -67,7 +73,7 @@ function SecretForm({ me }: { me: Me }) {
         type="password"
         inputMode={pin ? 'numeric' : undefined}
         autoComplete="current-password"
-        placeholder={pin ? 'Current PIN (empty if you have none)' : 'Current password'}
+        placeholder={pin && !dock ? 'Current PIN (empty if you have none)' : `Current ${word}`}
         aria-label={`Current ${word}`}
         value={current}
         onChange={(e) => setCurrent(e.target.value)}
@@ -101,7 +107,7 @@ function SecretForm({ me }: { me: Me }) {
       )}
       <button
         type="submit"
-        disabled={busy || (!pin && !current) || !next || !again}
+        disabled={busy || ((!pin || dock) && !current) || !next || !again}
         className="rounded-pill bg-primary px-4 py-2 text-label font-semibold text-on-primary disabled:opacity-50"
       >
         {busy ? 'Saving…' : `Change ${word}`}
@@ -110,7 +116,7 @@ function SecretForm({ me }: { me: Me }) {
   );
 }
 
-/** Dispatchers and loaders work at one depot at a time; store and driver depots follow their store or truck. */
+/** Dispatchers work at one depot at a time; store, driver and dock depots follow their store, truck or dock password. */
 function DepotForm({ me }: { me: Me }) {
   const [depotId, setDepotId] = useState(me.depotId ?? DEPOTS[0]!.id);
   const [busy, setBusy] = useState(false);
@@ -148,9 +154,6 @@ function DepotForm({ me }: { me: Me }) {
           </button>
         ))}
       </div>
-      {me.role === 'loader' && (
-        <p className="text-caption text-muted">Next time you sign in, pick this depot.</p>
-      )}
       {error && <p className="text-caption text-danger">{error}</p>}
       <button
         type="button"
@@ -191,7 +194,7 @@ export function AccountSettings({ me, onClose }: { me: Me; onClose: () => void }
           <p className="text-body font-semibold text-ink">Appearance</p>
           <ThemeSwitch />
         </div>
-        {(me.role === 'dispatcher' || me.role === 'loader') && <DepotForm me={me} />}
+        {me.role === 'dispatcher' && <DepotForm me={me} />}
         <SecretForm me={me} />
       </section>
     </div>,

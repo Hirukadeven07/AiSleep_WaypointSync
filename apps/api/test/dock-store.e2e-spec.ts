@@ -194,12 +194,26 @@ describe('loader dock and store (e2e)', () => {
 
   describe('loader', () => {
     it('lists the published trip and loads it last stop first', async () => {
-      const loader = await login({ role: 'loader', loginId: 'sampath', depotId: 'depo1' });
+      const loader = await login({ role: 'loader', secret: '123456', depotId: 'depo1' });
       const queue = await loader.get('/api/loads').expect(200);
       const card = queue.body.find((t: { tripId: string }) => t.tripId === ids.loadTrip);
       expect(card.job).toMatchObject({ bay: 'Bay-9', status: 'assigned' });
 
-      const started = await loader.post(`/api/loads/${ids.loadTrip}/start`).expect(200);
+      // Each loader confirms their own ID and PIN; a wrong PIN, a stranger's ID or no PIN adds no one.
+      const start = (body: object) => loader.post(`/api/loads/${ids.loadTrip}/start`).send(body);
+      for (const body of [
+        { loaderId: 'sampath', pin: '9999' },
+        { loaderId: 'nobody', pin: '1234' },
+        { loaderId: 'nimal', pin: '1234' },
+      ]) {
+        const refused = await start(body).expect(400);
+        expect(refused.body.reason).toBe('WRONG_LOADER_CREDENTIALS');
+      }
+      expect(
+        await prisma.loadSession.findUnique({ where: { tripId: ids.loadTrip } }),
+      ).toBeNull();
+
+      const started = await start({ loaderId: 'sampath', pin: '1234' }).expect(200);
       expect(started.body.status).toBe('loading');
       expect(started.body.loadOrder.map((s: { sequence: number }) => s.sequence)).toEqual([2, 1]);
       expect(started.body.session.loaderNames).toContain('Sampath (Loader)');
@@ -218,7 +232,7 @@ describe('loader dock and store (e2e)', () => {
     });
 
     it('flags a line, locks on a plan change, and departs after acknowledging', async () => {
-      const loader = await login({ role: 'loader', loginId: 'sampath', depotId: 'depo1' });
+      const loader = await login({ role: 'loader', secret: '123456', depotId: 'depo1' });
       const sheet = (await loader.get(`/api/loads/${ids.loadTrip}`).expect(200)).body;
       const stop = sheet.loadOrder[0];
       const flagged = await loader

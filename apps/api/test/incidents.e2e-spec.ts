@@ -232,7 +232,7 @@ describe('incidents (e2e)', () => {
     const loader = request.agent(app.getHttpServer());
     await loader
       .post('/api/auth/login')
-      .send({ role: 'loader', loginId: 'sampath', depotId: 'depo1' })
+      .send({ role: 'loader', secret: '123456', depotId: 'depo1' })
       .expect(200);
     await loader.get('/api/incidents').expect(403);
   });

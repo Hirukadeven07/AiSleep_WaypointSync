@@ -29,7 +29,7 @@ describe('profile: depot, password and notification preferences (e2e)', () => {
     return agent;
   }
   const dispatcher = () => login({ role: 'dispatcher', loginId: 'nimal', secret: 'waypoint' });
-  const loader = () => login({ role: 'loader', loginId: 'sampath', depotId: 'depo1' });
+  const loader = () => login({ role: 'loader', secret: '123456', depotId: 'depo1' });
   const driver = () => login({ role: 'driver', loginId: 'kasun', secret: '1234' });
   const store = () => login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
 
@@ -83,20 +83,16 @@ describe('profile: depot, password and notification preferences (e2e)', () => {
   });
 
   describe('depot', () => {
-    it('lets the dispatcher and the loader switch depot', async () => {
+    it('lets the dispatcher switch depot', async () => {
       const desk = await dispatcher();
       const me = await desk.patch('/api/me/depot').send({ depotId: DEPOT }).expect(200);
       expect(me.body).toMatchObject({ role: 'dispatcher', depotId: DEPOT });
       expect((await desk.get('/api/me').expect(200)).body.depotId).toBe(DEPOT);
       await desk.patch('/api/me/depot').send({ depotId: 'depo1' }).expect(200);
-
-      const dock = await loader();
-      const moved = await dock.patch('/api/me/depot').send({ depotId: DEPOT }).expect(200);
-      expect(moved.body).toMatchObject({ role: 'loader', depotId: DEPOT });
-      await dock.patch('/api/me/depot').send({ depotId: 'depo1' }).expect(200);
     });
 
-    it('refuses the store and the driver, and an unknown depot', async () => {
+    it('refuses the dock, the store and the driver, and an unknown depot', async () => {
+      await (await loader()).patch('/api/me/depot').send({ depotId: DEPOT }).expect(403);
       await (await store()).patch('/api/me/depot').send({ depotId: DEPOT }).expect(403);
       await (await driver()).patch('/api/me/depot').send({ depotId: DEPOT }).expect(403);
       const desk = await dispatcher();
@@ -138,15 +134,29 @@ describe('profile: depot, password and notification preferences (e2e)', () => {
         .expect(401);
     });
 
-    it('lets a loader with no PIN set a first one, and refuses a missing current password', async () => {
-      await prisma.user.update({ where: { loginId: 'sampath' }, data: { pinHash: null } });
+    it('changes the depot dock password, which needs the current one and 6 digits', async () => {
       const dock = await loader();
-      await dock.post('/api/me/password').send({ newSecret: '2468' }).expect(200);
-      const saved = await prisma.user.findUniqueOrThrow({ where: { loginId: 'sampath' } });
-      expect(saved.pinHash).toBeTruthy();
-      // With a PIN now set, the current one is required.
-      const again = await dock.post('/api/me/password').send({ newSecret: '1357' }).expect(400);
-      expect(again.body.reason).toBe('WRONG_CURRENT_SECRET');
+      const noCurrent = await dock.post('/api/me/password').send({ newSecret: '246801' }).expect(400);
+      expect(noCurrent.body.reason).toBe('WRONG_CURRENT_SECRET');
+      const weak = await dock
+        .post('/api/me/password')
+        .send({ currentSecret: '123456', newSecret: '2468' })
+        .expect(400);
+      expect(weak.body.reason).toBe('WEAK_SECRET');
+      await dock
+        .post('/api/me/password')
+        .send({ currentSecret: '123456', newSecret: '246801' })
+        .expect(200);
+      // The new password unlocks the dock; the old one no longer does.
+      await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ role: 'loader', secret: '123456', depotId: 'depo1' })
+        .expect(401);
+      const fresh = await login({ role: 'loader', secret: '246801', depotId: 'depo1' });
+      await fresh
+        .post('/api/me/password')
+        .send({ currentSecret: '246801', newSecret: '123456' })
+        .expect(200);
 
       // The store manager's password is not changed by the other tests here.
       const shop = await store();

@@ -1,5 +1,23 @@
 import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
-import type { DepartRequest, FlagRequest, FlagType, TakenOffRequest } from '@waypoint/contracts';
+import type {
+  DepartRequest,
+  FlagRequest,
+  FlagType,
+  StartLoadingRequest,
+  TakenOffRequest,
+} from '@waypoint/contracts';
+
+export class StartLoadingDto implements StartLoadingRequest {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(40)
+  loaderId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(20)
+  pin: string;
+}
 
 export class FlagDto implements FlagRequest {
   @IsString()

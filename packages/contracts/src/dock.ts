@@ -115,6 +115,15 @@ export interface FlagRequest {
   note?: string;
 }
 
+/**
+ * POST /loads/:tripId/start. Each loader who works on a truck confirms themselves with their own
+ * loader ID and PIN; the first one starts loading, later ones are added to the trip's loader list.
+ */
+export interface StartLoadingRequest {
+  loaderId: string;
+  pin: string;
+}
+
 export interface TakenOffRequest {
   orderId: string;
 }
