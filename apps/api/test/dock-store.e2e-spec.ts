@@ -201,11 +201,13 @@ describe('loader dock and store (e2e)', () => {
       expect(card.job).toMatchObject({ bay: 'Bay-9', status: 'assigned' });
 
       // Each loader confirms their own ID and PIN; a wrong PIN, a stranger's ID or no PIN adds no one.
+      // The dock tablet's own account has no PIN, but it is not a loader who can join the load.
       const start = (body: object) => loader.post(`/api/loads/${ids.loadTrip}/start`).send(body);
       for (const body of [
         { loaderId: 'sampath', pin: '9999' },
         { loaderId: 'nobody', pin: '1234' },
         { loaderId: 'nimal', pin: '1234' },
+        { loaderId: 'dock-depo1' },
       ]) {
         const refused = await start(body).expect(400);
         expect(refused.body.reason).toBe('WRONG_LOADER_CREDENTIALS');
