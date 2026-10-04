@@ -207,12 +207,11 @@ The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, th
 - **SOS:** shows "Dispatch · <depot>" instead of the dispatcher's name. There is no desktop frame, so the same red page is centred. Opening it sends one alert through the offline outbox; there is no confirm step.
 - **Offline:** the banner counts "actions" because the outbox holds more than deliveries. When online with actions still waiting, the green line reads "Online · N waiting to sync" (the Figma only shows the all-synced state).
 - Loading, wrong-account and "no signal and nothing saved" have no Figma frame, so they show a blank canvas, a redirect to `/no-access`, and only the offline banner.
-- Still placeholders: Trip overview, Next stop, Waiting for store, Report issue, Break, Vehicle and the other driver screens.
 
 ### Plan board (dispatcher)
 
 - **One district per trip is a warning, not a block.** The build plan lists "one brand, one district" as a hard rule. Brand still blocks, but a trip may take stores from more than one district (the dispatcher picks them when creating the trip, and a store from another district shows a warning). This came in with multi-district trips (PR #43).
-- **Map view** is not built; the List / Map switch shows Map disabled.
+- **Map view:** the List / Map switch shows every depot store on the offline Sri Lanka basemap. Stores with an order that day are in their brand colour and the rest are grey, alongside the day's trips.
 - **Ready vs Draft** is derived: Draft means a trip has no stops yet or a domain warning other than fuel (fuel is judged per week, which the board does not total yet); Ready means clean. "Capacity used" is planned weight against the vehicles that have a trip. "Moved 2x" means a repeat-skip, because the data has no move counter. The Fresh run is assumed to leave at 03:30 and the other brands at 08:00 for the window-risk check.
 - **Publishing:** the Figma shows "Publish anyway" for an over-volume trip, but capacity problems block publishing (build plan and domain rules): the button is disabled and a line says why. Other warnings, such as a window at risk, can be published through. A trip with no stops is skipped.
 - **Refusals** (a rule broken on drop) have no Figma frame, so they reuse the drop-hint pill and toast in red. The drop hint sits on the bottom edge of the hovered trip rather than inside it.
