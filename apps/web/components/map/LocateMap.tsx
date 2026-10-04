@@ -81,8 +81,8 @@ export function LocateMap() {
   const selected = trips.find((trip) => trip.id === selectedId) ?? null;
 
   const view = useMemo<MapView>(() => {
-    const last = selected?.lastStop;
-    if (last?.lat != null && last.lng != null) return { mode: 'point', lng: last.lng, lat: last.lat };
+    const here = selected?.position ?? selected?.lastStop;
+    if (here?.lat != null && here.lng != null) return { mode: 'point', lng: here.lng, lat: here.lat };
     return { mode: 'bounds', names: activeNames };
   }, [selected, activeNames]);
 
@@ -118,10 +118,29 @@ export function LocateMap() {
         size: 'depot',
       });
     }
+    for (const trip of trips) {
+      const here = trip.position ?? trip.lastStop;
+      if (here?.lat == null || here.lng == null) continue;
+      const next = trip.stops.find((stop) => stop.status === 'upcoming' || stop.status === 'at_risk');
+      pins.push({
+        id: `vehicle:${trip.id}`,
+        lat: here.lat,
+        lng: here.lng,
+        dotClass: 'bg-ink',
+        title: trip.plate ?? trip.vehicleId,
+        caption: trip.position
+          ? next
+            ? `On the way to ${next.storeName}`
+            : 'On the way'
+          : 'Last confirmed stop',
+        size: 'vehicle',
+        selected: trip.id === selectedId,
+      });
+    }
     if (!selected) return pins;
     for (const stop of selected.stops) {
       if (stop.lat == null || stop.lng == null) continue;
-      if (selected.lastStop?.stopId === stop.id) continue;
+      if (!selected.position && selected.lastStop?.stopId === stop.id) continue;
       pins.push({
         id: stop.id,
         lat: stop.lat,
@@ -131,21 +150,8 @@ export function LocateMap() {
         size: 'pin',
       });
     }
-    const last = selected.lastStop;
-    if (last?.lat != null && last.lng != null) {
-      pins.push({
-        id: last.stopId,
-        lat: last.lat,
-        lng: last.lng,
-        dotClass: 'bg-scrim',
-        title: last.storeName,
-        caption: 'Last confirmed stop',
-        size: 'vehicle',
-        selected: true,
-      });
-    }
     return pins;
-  }, [data, selected, brand]);
+  }, [data, selected, selectedId, brand, trips]);
 
   function chooseDepot(id: string) {
     setSelectedId(null);
@@ -159,8 +165,8 @@ export function LocateMap() {
           <h1 className="text-[34px] font-medium leading-10 text-ink">Live map</h1>
           <p className="text-[14px] leading-5 text-muted">
             {data
-              ? `${dayLabel(data.date)}  ·  ${depotLabel(data.depotId)}  ·  positions update at each completed stop`
-              : 'Positions update at each completed stop'}
+              ? `${dayLabel(data.date)}  ·  ${depotLabel(data.depotId)}  ·  trucks on the road show their latest ping`
+              : 'Trucks on the road show their latest ping'}
           </p>
         </div>
         {data && data.depots.length > 0 && (
@@ -208,12 +214,25 @@ export function LocateMap() {
               markers={markers}
               onMarker={(id) => {
                 if (id.startsWith('depot:')) chooseDepot(id.slice('depot:'.length));
+                if (id.startsWith('vehicle:')) setSelectedId(id.slice('vehicle:'.length));
               }}
             />
           )}
           <LocateLegend />
           <MapControls mapRef={mapRef} />
-          {selected?.lastStop && (
+          {selected?.position && (
+            <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">On the way</p>
+              <p className="mt-1 text-[15px] font-semibold text-ink">
+                {selected.stops.find((stop) => stop.status === 'upcoming' || stop.status === 'at_risk')
+                  ?.storeName ?? selected.district}
+              </p>
+              <p className="mt-1 text-[13px] text-muted">
+                {selected.plate ?? selected.vehicleId} · ping {timeOf(selected.position.recordedAt)}
+              </p>
+            </article>
+          )}
+          {selected?.lastStop && !selected.position && (
             <article className="absolute left-4 top-4 w-[240px] rounded-card bg-surface p-4 shadow-raised">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
                 Last confirmed stop
@@ -293,6 +312,7 @@ function TripButton({
   onSelect: () => void;
 }) {
   const tone = toneOf(trip);
+  const nextStop = trip.stops.find((stop) => stop.status === 'upcoming' || stop.status === 'at_risk');
   return (
     <li>
       <button
@@ -314,7 +334,11 @@ function TripButton({
           {trip.brand} · {trip.district} · {trip.stopsDone}/{trip.stopsTotal} stops
         </span>
         <span className="mt-1 block text-[12px] text-ink">
-          {trip.lastStop ? `Last stop ${trip.lastStop.storeName}` : 'No stop confirmed yet'}
+          {trip.position
+            ? `On the way${nextStop ? ` to ${nextStop.storeName}` : ''}`
+            : trip.lastStop
+              ? `Last stop ${trip.lastStop.storeName}`
+              : 'No stop confirmed yet'}
         </span>
       </button>
     </li>

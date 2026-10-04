@@ -1,7 +1,7 @@
 # Data model
 
 **Source of truth:** [apps/api/prisma/schema.prisma](../apps/api/prisma/schema.prisma).  
-**Picture:** [waypoint-schema.drawio](waypoint-schema.drawio) (same file as the workspace `waypoint_schema.drawio`). Open it in Draw.io — Prisma has no ERD plugin.
+**Picture:** [waypoint-schema.drawio](waypoint-schema.drawio) and [waypoint-schema1.drawio](waypoint-schema1.drawio). Open either in Draw.io — Prisma has no ERD plugin. Field names follow `schema.prisma`.
 
 `Store` is the running-app name for an **outlet**. Login people are `User` rows (`role` = dispatcher / store / loader / driver). `Driver`, `Loader`, and `Dispatcher` are 1:1 profile tables on that user. Vehicle assignment is `Vehicle.driverId` → `User`, not a column on `Driver`.
 
@@ -26,32 +26,34 @@ Order → DeliveryNote (versioned) → DeliveryNoteLine → DeliveryNotePick →
 
 ---
 
-## Tables (37)
+## Tables (40)
 
 ### Lookups (CSV / seed)
 
 | Table | Role |
 | --- | --- |
 | `Depot` | Peliyagoda, Kandy. Parent of stores, vehicles, users, trips. |
-| `District` | Unique `name`. Optional `depotId`. Travel fields (`depotToDistrictMin`, `interStopMin`, km) used in trip minutes. |
+| `District` | PK is `name`. Optional `depotId`. Travel fields (`depotToDistrictMin`, `interStopMin`, km) used in trip minutes. |
 | `ServiceAllowance` | Unique `(brand, dockType)` → `minutes`. |
 | `CalendarDay` | PK is the calendar date. Operating / monsoon / payday flags. |
 | `TrafficSpeed` | Hourly speed index by district name. No FK. |
 | `RoadCondition` | Daily disruption by district name. No FK. |
-| `Item` | Catalogue. `id` is the catalogue code (`F-MILK`, …). `brand` is Fresh / Style / Tech. `type` is the booklet class: `chilled_food`, `fresh`, `style`, `tech`. |
+| `Item` | Catalogue. `id` is the catalogue code (`F-MILK`, …). Brand is on `Store` and `Order`. `type` is the booklet class: `chilled_food`, `fresh`, `style`, `tech`. |
 | `InventoryBatch` | FEFO stock for an item. |
 
 ### Login and people
 
 | Table | Role |
 | --- | --- |
-| `User` | Unique `loginId`. `role` picks the home screen. `storeId` for outlet managers. `depotId` for depot staff. Password or PIN hashes. |
+| `User` | Login account. Unique `loginId`. `role` picks the home screen. `storeId` for outlet managers. `depotId` for depot staff. `passwordHash` or `pinHash`. Optional `notificationPrefs` JSON. Phone numbers live on `DriverPhone`, `LoaderPhone`, `DispatcherPhone`, and `OutletPhone`. |
 | `Session` | Cookie token. `userId` + `expiresAt`. Cascades off `User`. |
 | `Notification` | In-app notice for one user. |
-| `Driver` | 1:1 `userId`. License / NIC / `isActive`. |
-| `DriverPhone` | PK is `phoneNumber`. |
-| `Loader` | 1:1 `userId`. Shift morning / night. |
-| `Dispatcher` | 1:1 `userId`. Assigns `LoadingJob`, reviews `LoaderFlag`. |
+| `Driver` | 1:1 `userId`. License, `licenseExpiry`, NIC, address, `isActive`. |
+| `DriverPhone` | Driver numbers. PK is `phoneNumber`. |
+| `Loader` | 1:1 `userId`. Shift morning / night. Optional address. |
+| `LoaderPhone` | Loader numbers. PK is `phoneNumber`. |
+| `Dispatcher` | 1:1 `userId`. Optional email and address. Assigns `LoadingJob`, reviews `LoaderFlag`. |
+| `DispatcherPhone` | Dispatcher numbers. PK is `phoneNumber`. |
 
 **Outlet manager rule:** one `User` with `role = store` per `Store`. Login id is the outlet id (`OUT001`, …). Password is the store secret. `sunil` is an extra demo login on the same home store.
 
@@ -59,11 +61,12 @@ Order → DeliveryNote (versioned) → DeliveryNoteLine → DeliveryNotePick →
 
 | Table | Role |
 | --- | --- |
-| `Store` | Outlet. `id` from `outlets.csv`. Brand, district, depot, dock, windows, lat/lng. `daysSinceLastServed` is days since the latest served trip. Phones are `OutletPhone` rows, not a column. |
+| `Store` | Outlet. `id` from `outlets.csv`. Brand, district, depot, dock, windows, address, email, lat/lng. `daysSinceLastServed` is days since the latest served trip. Outlet numbers are `OutletPhone` rows. |
 | `OutletPhone` | Shop / manager / warehouse numbers. `phoneNo` is not unique — the same number can sit on one store twice or on two stores. |
-| `Order` | One delivery for one store on one date. Optional `TripStop`. |
+| `StoreSavedItem` | Catalogue items a manager starred for that outlet. Composite PK `(storeId, itemId)`. |
+| `Order` | One delivery for one store on one date. Status is `waiting`, `planned`, `deferred`, `delivered`, `partial`, or `cancelled`. Optional `urgent`, `stockLevel`, `cancelledAt`, `cancelledById`. Optional `TripStop`. |
 | `OrderLine` | Named qty + optional `itemId`. Cascades off `Order`. |
-| `Vehicle` | Caps, fuel, `depotId`. Optional unique `driverId`. |
+| `Vehicle` | Caps, fuel, `depotId`, unique `numberPlate`. Optional unique `driverId`. Out of service stores `outOfServiceReason` (required by the app) and optional `returnDate` (date and time). `lastServiceAt` is the last service timestamp. |
 | `Trip` | One vehicle, one depot, one brand, one district, one `serviceDate`. Unique `(vehicleId, serviceDate, tripNumber)`. |
 | `TripStop` | One order on a trip. Unique `orderId`. Unique `(tripId, sequence)`. |
 | `RouteLeg` | Planned/actual travel between points. Unique `(tripId, seq)`. |
@@ -86,7 +89,7 @@ Order → DeliveryNote (versioned) → DeliveryNoteLine → DeliveryNotePick →
 | Table | Role |
 | --- | --- |
 | `StoreReceipt` | 1:1 `stopId`. `lineResults` JSON + signature keys. Signed by a `User`. |
-| `FieldFlag` | Raised by the **outlet**, not the driver. Driver only sets `driverDecision`. |
+| `FieldFlag` | Raised by the **outlet**, not the driver. Driver only sets `driverDecision`. `resolveStatus` stays false until a replacement of that item is ordered, or the flag is marked solved. |
 | `LoaderFlag` | Dock issue on a DN version. Dispatcher `validationStatus`. |
 | `DriverEvent` | Phone sync audit. Unique `clientId`. Types: SOS_ALERT, ARRIVED, ACKNOWLEDGEMENT, ROAD_ISSUE, FUEL_READING. |
 | `Incident` | Legacy dispatcher ticket on a trip (`breakdown` / `delay` / …). Not the same as `DriverIncident`. |
