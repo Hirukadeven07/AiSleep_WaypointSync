@@ -2,7 +2,10 @@ import type { Brand, ItemType, OrderStatus, StopStatus } from './status';
 import type { OrderLine, StockLevel } from './order';
 import type { FlagType } from './dock';
 
-/** Ordering is refused from 16:00 Asia/Colombo. The order date is the day it is placed. */
+/**
+ * At 16:00 Asia/Colombo the order day rolls forward. Before that, an order is for today.
+ * From 16:00 it is for the next day, and the store can keep ordering.
+ */
 export const ORDER_CUTOFF_MIN = 16 * 60;
 
 /**
@@ -114,6 +117,8 @@ export interface StoreHome {
   cutoffMin: number;
   nowMin: number;
   today: string;
+  /** The day a new order is dated: today before 16:00, the next day from 16:00. */
+  orderDate: string;
   delivery: StoreDelivery | null;
   nextOrder: StoreOrderView | null;
   deferral: StoreOrderView | null;

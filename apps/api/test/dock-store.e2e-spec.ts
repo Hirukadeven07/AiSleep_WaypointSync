@@ -335,7 +335,7 @@ describe('loader dock and store (e2e)', () => {
   });
 
   describe('store', () => {
-    it('takes orders before 16:00 and refuses them after', async () => {
+    it('takes orders before 16:00 and dates them for the next day after', async () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
       const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
       const newOrders = () =>
@@ -359,8 +359,9 @@ describe('loader dock and store (e2e)', () => {
         const late = await store
           .post('/api/store/orders')
           .send({ lines: [{ catalogueId: 'F-MILK', qty: 2 }] })
-          .expect(409);
-        expect(late.body.reason).toBe('AFTER_CUTOFF');
+          .expect(201);
+        expect(late.body.deliveryDate).toBe('2026-10-02');
+        expect(late.body.status).toBe('waiting');
       } finally {
         process.env.DEMO_NOW = MORNING;
       }

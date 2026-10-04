@@ -7,11 +7,11 @@ import { Modal, ModalIcon, SolidButton } from './Modal';
 import type { PlanEdit } from './usePlanEdit';
 
 /** Sends the plan, then says how many trips and stores it reached (Figma "Published" toast). */
-export async function publishPlan(edit: PlanEdit, anyway: boolean, tripId?: string) {
+export async function publishPlan(edit: PlanEdit, anyway: boolean, date: string, tripId?: string) {
   try {
     const res = await api<PlanPublishResult>('/plan/publish', {
       method: 'POST',
-      body: { anyway, ...(tripId ? { tripId } : {}) },
+      body: { anyway, date, ...(tripId ? { tripId } : {}) },
     });
     await edit.reload();
     edit.closeModal();
@@ -38,10 +38,12 @@ export async function publishPlan(edit: PlanEdit, anyway: boolean, tripId?: stri
 /** Figma "Plan v2 / Publish check": what is still open. A capacity problem blocks; other warnings can go through. */
 export function PublishModal({
   check,
+  date,
   edit,
   tripId,
 }: {
   check: PublishCheck;
+  date: string;
   edit: PlanEdit;
   tripId?: string;
 }) {
@@ -68,7 +70,7 @@ export function PublishModal({
             Back to plan
           </button>
           <SolidButton
-            onClick={() => void publishPlan(edit, false, tripId)}
+            onClick={() => void publishPlan(edit, false, date, tripId)}
             className="min-w-px flex-1 bg-primary text-on-primary"
           >
             Publish {trips}
@@ -107,7 +109,7 @@ export function PublishModal({
         <button
           type="button"
           disabled={!check.canPublish}
-          onClick={() => void publishPlan(edit, true, tripId)}
+          onClick={() => void publishPlan(edit, true, date, tripId)}
           className="flex min-w-px flex-1 items-center justify-center rounded-pill border border-border bg-surface px-[18px] py-3 text-[14px] font-semibold leading-5 text-ink disabled:opacity-40"
         >
           Publish anyway

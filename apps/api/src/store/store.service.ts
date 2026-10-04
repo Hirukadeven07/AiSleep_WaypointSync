@@ -204,6 +204,7 @@ export class StoreService {
       cutoffMin: this.orderCutoffMin(),
       nowMin: this.clock.minutesNow(),
       today,
+      orderDate: this.deliveryIso(),
       // The open delivery first; otherwise the last one of the day.
       delivery: deliveries.find((d) => !d.driverAckAt) ?? deliveries.at(-1) ?? null,
       nextOrder: upcoming ? orderView(upcoming) : null,
@@ -303,23 +304,25 @@ export class StoreService {
   }
 
   /**
-   * Orders close at ORDER_CUTOFF_MIN (16:00) everywhere, so the store app and the plan board agree.
-   * For working on the store screens after 16:00, set ORDER_CUTOFF_OPEN=1 to keep ordering open
-   * until 23:59; never set it for a demo.
+   * 16:00 is when the order day rolls to the next day. Ordering stays open.
+   * ORDER_CUTOFF_OPEN=1 keeps the order on today until 23:59, for development only.
    */
   private orderCutoffMin(): number {
     return process.env.ORDER_CUTOFF_OPEN === '1' ? 23 * 60 + 59 : ORDER_CUTOFF_MIN;
   }
 
-  /** The order date is the day the storekeeper places it. Ordering closes at 16:00 Asia/Colombo. */
+  /** Today before the cutoff; the next calendar day from 16:00 Asia/Colombo. */
+  private deliveryIso(): string {
+    const today = this.clock.today();
+    if (this.clock.minutesNow() < this.orderCutoffMin()) return today;
+    const next = asDate(today);
+    next.setUTCDate(next.getUTCDate() + 1);
+    return isoDay(next);
+  }
+
+  /** Before 16:00 the order is for today. From 16:00 it is for the next day. */
   async placeOrder(me: AuthUser, dto: PlaceOrderDto): Promise<StoreOrderView> {
     const store = await this.store(me);
-    if (this.clock.minutesNow() >= this.orderCutoffMin()) {
-      throw new DomainError(
-        'AFTER_CUTOFF',
-        'Ordering closes at 16:00. Order again tomorrow morning.',
-      );
-    }
     let built: ReturnType<typeof buildOrderLines>;
     try {
       built = buildOrderLines(dto.lines);
@@ -328,7 +331,7 @@ export class StoreService {
     }
     // Stock level and note only mean something on an urgent order.
     const urgent = dto.urgent === true;
-    const deliveryDate = asDate(this.clock.today());
+    const deliveryDate = asDate(this.deliveryIso());
     const order = await this.prisma.order.create({
       data: {
         storeId: store.id,
