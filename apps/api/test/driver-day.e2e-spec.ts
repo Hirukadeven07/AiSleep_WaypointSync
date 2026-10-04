@@ -396,30 +396,16 @@ describe('driver day (e2e)', () => {
     }
   });
 
-  it('lets dispatch put another driver on a trip and tells both drivers', async () => {
+  it('keeps the vehicle driver and refuses a different driver on the trip', async () => {
     const dispatcher = await login({ role: 'dispatcher', loginId: 'nimal', secret: 'waypoint' });
     try {
-      const given = await dispatcher
+      const refused = await dispatcher
         .post(`/api/plan/trips/${liveTripId}/driver`)
         .send({ driverId: otherDriverId })
-        .expect(200);
-      expect(given.body).toMatchObject({
-        driverId: otherDriverId,
-        driverName: 'Other day driver',
-        driverAssigned: true,
-      });
+        .expect(409);
+      expect(refused.body.reason).toBe('DRIVER_UNAVAILABLE');
       const day = (await driverAgent.get('/api/driver/day').expect(200)).body as DriverDayResponse;
-      expect(day.trips.map((t) => t.id)).not.toContain(liveTripId);
-      expect(
-        await prisma.notification.count({
-          where: { userId: otherDriverId, title: { startsWith: 'You are driving' } },
-        }),
-      ).toBe(1);
-      expect(
-        await prisma.notification.count({
-          where: { userId: driverId, title: { endsWith: 'moved to another driver' } },
-        }),
-      ).toBe(1);
+      expect(day.trips.map((t) => t.id)).toContain(liveTripId);
 
       // A trip that has left the depot keeps its driver; an unknown driver is not found.
       const left = await dispatcher

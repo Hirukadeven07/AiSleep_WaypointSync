@@ -162,8 +162,9 @@ export class PlanTripsService {
   }
 
   /**
-   * Put a driver on a trip, or (`null`) go back to the vehicle's registered driver. Allowed until
-   * the trip leaves the depot. A sent trip tells the new driver, and the one taken off it.
+   * A trip is driven by the vehicle's registered driver. That driver stays until they leave;
+   * another driver takes the vehicle only after that. `null` clears a leftover trip assignment
+   * and follows the vehicle's driver. Allowed until the trip leaves the depot.
    */
   async assignDriver(me: Me, tripId: string, driverId: string | null): Promise<PlanTrip> {
     const trip = await this.edit.loadTrip(me, tripId);
@@ -186,6 +187,15 @@ export class PlanTripsService {
         throw new DomainError(
           'DRIVER_UNAVAILABLE',
           `${driver.name} is not an active driver at this depot.`,
+        );
+      }
+      if (driverId !== trip.vehicle.driverId) {
+        const holder = trip.vehicle.driver?.name;
+        throw new DomainError(
+          'DRIVER_UNAVAILABLE',
+          holder
+            ? `${label} stays with ${holder} until that driver leaves.`
+            : `${label} has no driver yet. Set the driver on the vehicle; the next driver takes it after they leave.`,
         );
       }
       // One driver per run: the same driver cannot drive another truck's Trip 1 at the same time.
