@@ -11,6 +11,9 @@ import { IslandMap, type IslandMapHandle, type IslandMarker, type MapCircle, typ
 import { MapControls } from './MapControls';
 import { depotLabel } from '@/lib/depots';
 
+/** How often the selected trip's road route is rebuilt. */
+const ROUTE_REFRESH_MS = 10_000;
+
 const BRANDS: { id: 'all' | Brand; label: string; className: string }[] = [
   { id: 'all', label: 'All', className: 'bg-scrim text-on-primary' },
   { id: 'Fresh', label: 'Fresh', className: 'bg-fresh-tint text-fresh' },
@@ -43,7 +46,11 @@ export function LocateMap() {
 
   useEffect(() => {
     let cancel = false;
+    // One request at a time: a slow answer skips a tick instead of stacking requests up.
+    let busy = false;
     const load = () => {
+      if (busy) return;
+      busy = true;
       const query = depotId ? `?depot=${encodeURIComponent(depotId)}` : '';
       api<LocateMapData>(`/dispatch/map${query}`)
         .then((next) => {
@@ -54,11 +61,14 @@ export function LocateMap() {
         })
         .catch(() => {
           if (!cancel) setError(true);
+        })
+        .finally(() => {
+          busy = false;
         });
     };
     load();
-    // Every 10 s, the same rate the drivers' phones send their position.
-    const timer = setInterval(load, 10_000);
+    // Every second, the same rate the drivers' phones send their position.
+    const timer = setInterval(load, 1_000);
     return () => {
       cancel = true;
       clearInterval(timer);
@@ -71,17 +81,23 @@ export function LocateMap() {
       return;
     }
     let cancel = false;
-    api<LocateRoute>(`/dispatch/map/trips/${selectedId}`)
-      .then((next) => {
-        if (!cancel) setRoute(next);
-      })
-      .catch(() => {
-        if (!cancel) setRoute(null);
-      });
+    const load = () =>
+      api<LocateRoute>(`/dispatch/map/trips/${selectedId}`)
+        .then((next) => {
+          if (!cancel) setRoute(next);
+        })
+        .catch(() => {
+          if (!cancel) setRoute(null);
+        });
+    void load();
+    // The road path comes from a public routing service, so it is rebuilt every 10 s, not with
+    // every 1 s position update.
+    const timer = setInterval(load, ROUTE_REFRESH_MS);
     return () => {
       cancel = true;
+      clearInterval(timer);
     };
-  }, [selectedId, data?.asOf]);
+  }, [selectedId]);
 
   const tones = useMemo(() => {
     const map = new Map<string, ReturnType<typeof districtTone>>();

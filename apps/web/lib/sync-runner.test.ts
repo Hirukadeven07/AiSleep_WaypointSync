@@ -32,6 +32,13 @@ describe('flushOutbox', () => {
     expect(sent[0]).not.toHaveProperty('status');
   });
 
+  it('sends location pings without counting them, so they do not reload the day', async () => {
+    const ping = await enqueueAction('LOCATION_PING', { lat: 6.9, lng: 79.9 }, 't1', 1, kasun);
+    vi.stubGlobal('fetch', reply({ applied: [ping.clientId], duplicate: [], rejected: [] }));
+    expect(await flushOutbox()).toBe(0);
+    expect(await getPendingActions()).toEqual([]);
+  });
+
   it('keeps everything queued when the server fails', async () => {
     await enqueueAction('ARRIVED', { stopId: 's1' }, 't1', 1, kasun);
     vi.stubGlobal('fetch', reply({}, false));
