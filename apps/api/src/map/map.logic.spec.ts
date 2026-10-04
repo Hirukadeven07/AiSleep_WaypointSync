@@ -89,6 +89,15 @@ describe('locateLive', () => {
     ).toBe('late');
   });
 
+  it('calls an on-road trip not synced after 5 quiet minutes', () => {
+    expect(
+      locateLive({ status: 'on_road', broke: false, allDone: false, lateMin: 0, staleMin: 4 }),
+    ).toBe('on_time');
+    expect(
+      locateLive({ status: 'on_road', broke: false, allDone: false, lateMin: 0, staleMin: 5 }),
+    ).toBe('not_synced');
+  });
+
   it('prefers not-synced over late, and breakdown over both', () => {
     expect(
       locateLive({ status: 'on_road', broke: false, allDone: false, lateMin: 20, staleMin: 25 }),
