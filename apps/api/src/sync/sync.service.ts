@@ -247,7 +247,9 @@ export class SyncService {
           where: { driverId: driver.id, incidentType: 'sos', resolvedAt: null },
           orderBy: { raisedAt: 'desc' },
         });
+        let sosId: string;
         if (open) {
+          sosId = open.id;
           await tx.driverIncident.update({
             where: { id: open.id },
             data: {
@@ -260,7 +262,7 @@ export class SyncService {
             },
           });
         } else {
-          await tx.driverIncident.create({
+          const created = await tx.driverIncident.create({
             data: {
               driverId: driver.id,
               tripId,
@@ -273,6 +275,7 @@ export class SyncService {
               raisedAt: happenedAt,
             },
           });
+          sosId = created.id;
         }
 
         const depotId = vehicle?.depotId ?? me.depotId;
@@ -287,7 +290,8 @@ export class SyncService {
             userId: user.id,
             title: 'Driver SOS',
             body,
-            link: '/dispatch/incidents',
+            // Opens this SOS in the incidents list (its id there is `sos:` + the DriverIncident id).
+            link: `/dispatch/incidents?id=${encodeURIComponent(`sos:${sosId}`)}`,
           })),
         };
       }

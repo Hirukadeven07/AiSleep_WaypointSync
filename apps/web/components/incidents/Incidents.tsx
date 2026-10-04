@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { IncidentDetail as Detail, IncidentList as List } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { usePoll } from '@/lib/poll';
@@ -23,11 +24,11 @@ export function Incidents() {
   const [logging, setLogging] = useState(false);
   const opened = useRef(new Set<string>());
 
-  // "Truck broke down" links here with ?id=<incident> so the new breakdown opens straight away.
+  // "Truck broke down" and a driver's SOS notice link here with ?id=<incident> so it opens straight away.
+  const linked = useSearchParams().get('id');
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get('id');
-    if (id) setPicked(id);
-  }, []);
+    if (linked) setPicked(linked);
+  }, [linked]);
 
   useEffect(() => {
     if (!toast) return;
@@ -192,7 +193,9 @@ export function Incidents() {
           role="status"
           className="fixed right-6 top-6 z-40 flex max-w-[320px] flex-col gap-[2px] rounded-[16px] bg-primary px-4 py-3"
         >
-          <span className="text-[13px] font-bold leading-[18px] text-on-primary">{toast.title}</span>
+          <span className="text-[13px] font-bold leading-[18px] text-on-primary">
+            {toast.title}
+          </span>
           <span className="text-[12px] leading-[17px] text-sand">{toast.sub}</span>
         </div>
       )}
