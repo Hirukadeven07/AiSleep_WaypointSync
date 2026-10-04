@@ -22,6 +22,7 @@ import type {
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
+  AllocateDto,
   AssignDriverDto,
   CreateTripDto,
   DeferDto,
@@ -92,6 +93,13 @@ export class PlanController {
   @HttpCode(200)
   assign(@CurrentUser() me: AuthUser, @Body() dto: DropDto): Promise<AssignResult> {
     return this.edit.assign(me, dto.orderId, dto.tripId);
+  }
+
+  /** Put an order on the truck or van the dispatcher picked: one of its trips, or a new run on it. */
+  @Post('allocate')
+  @HttpCode(200)
+  allocate(@CurrentUser() me: AuthUser, @Body() dto: AllocateDto): Promise<AssignResult> {
+    return this.trips.allocate(me, dto);
   }
 
   /** Take an order off its trip; it goes back to waiting. */

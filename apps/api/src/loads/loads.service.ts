@@ -1,17 +1,18 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import type { Prisma } from '@prisma/client';
-import type {
-  DepartSummary,
-  LoadFlagView,
-  LoadJob,
-  LoadQueueItem,
-  LoadSheet,
-  LoadStop,
-  OrderLine,
-  PlanLock,
-  PlanLockSlot,
-  StartLoadingRequest,
+import {
+  DOCK_LOGIN_PREFIX,
+  type DepartSummary,
+  type LoadFlagView,
+  type LoadJob,
+  type LoadQueueItem,
+  type LoadSheet,
+  type LoadStop,
+  type OrderLine,
+  type PlanLock,
+  type PlanLockSlot,
+  type StartLoadingRequest,
 } from '@waypoint/contracts';
 import { DomainError, loadOrder } from '@waypoint/domain';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -202,11 +203,30 @@ export class LoadsService {
 
   /**
    * The dock tablet is one shared sign-in, so each person who joins the load confirms who they are
-   * with their loader ID and their own PIN. Only then are they added to the trip's loader list.
+   * with their loader ID and their own PIN. Several loaders can join one trip. A loader already on
+   * this trip, or still loading another trip that has not departed, is refused.
    */
   async start(me: AuthUser, tripId: string, dto: StartLoadingRequest): Promise<LoadSheet> {
     const trip = await this.findTrip(me, tripId);
     const loaderUser = await this.verifyLoader(me, dto);
+    if (trip.loadSession?.loaderIds.includes(loaderUser.id)) {
+      throw new DomainError('LOADER_ALREADY_ON_TRIP', 'This loader is already on this trip.');
+    }
+    const busy = await this.prisma.loadSession.findFirst({
+      where: {
+        departedAt: null,
+        loaderIds: { has: loaderUser.id },
+        trip: { status: 'loading' },
+      },
+      include: { trip: { include: { vehicle: true } } },
+    });
+    if (busy) {
+      const plate = busy.trip.vehicle.numberPlate ?? busy.trip.vehicleId;
+      throw new DomainError(
+        'LOADER_ON_ANOTHER_TRIP',
+        `${loaderUser.name} is still loading ${plate}. They can join another trip after that one is loaded.`,
+      );
+    }
     if (!trip.loadSession) {
       await this.prisma.loadSession.create({
         data: {
@@ -217,7 +237,7 @@ export class LoadsService {
           ackedStopIds: ackedOrders(trip),
         },
       });
-    } else if (!trip.loadSession.loaderIds.includes(loaderUser.id)) {
+    } else {
       await this.prisma.loadSession.update({
         where: { tripId: trip.id },
         data: { loaderIds: { push: loaderUser.id } },
@@ -349,7 +369,7 @@ export class LoadsService {
       }),
       this.prisma.trip.update({
         where: { id: trip.id },
-        data: { status: 'on_road', startingTime: departedAt },
+        data: { status: 'ready' },
       }),
       ...(trip.loadingJob
         ? [
@@ -402,7 +422,7 @@ export class LoadsService {
     await this.notifier.notify({
       userId: driverId,
       title: 'Truck loaded',
-      body: `${plate} is loaded. Trip ${trip.tripNumber} can leave the depot.`,
+      body: `${plate} is loaded. Trip ${trip.tripNumber} starts when you tap Start trip.`,
       link: '/drive/next',
     });
   }
@@ -491,7 +511,8 @@ export class LoadsService {
 
   /**
    * A loader ID for someone at this depot, plus that loader's own PIN when they have one (a loader
-   * with no PIN set is let in on the ID alone). One message for every failure.
+   * with no PIN set is let in on the ID alone). The dock tablet's own shared account is a loader
+   * with no PIN as well, but it is not a person, so it is refused. One message for every failure.
    */
   private async verifyLoader(me: AuthUser, dto: StartLoadingRequest) {
     const wrong = () =>
@@ -506,6 +527,7 @@ export class LoadsService {
     if (
       !user ||
       user.role !== 'loader' ||
+      user.loginId.startsWith(DOCK_LOGIN_PREFIX) ||
       user.depotId !== me.depotId ||
       user.loaderProfile?.isActive === false ||
       (user.pinHash && (!dto.pin || !(await argon2.verify(user.pinHash, dto.pin))))

@@ -1,6 +1,6 @@
 import type { PlanDay, PlanSummary } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
-import { clock12, dayLabel } from './format';
+import { addDays, clock12, dayLabel } from './format';
 import { depotLabel } from '@/lib/depots';
 
 function Pill({
@@ -39,27 +39,34 @@ export function PlanHeader({
   plan,
   view,
   onView,
+  onDate,
   onAutoAssign,
   onNewTrip,
   onPublish,
 }: {
-  plan: Pick<PlanDay, 'date' | 'depotId' | 'cutoffMin' | 'trips'>;
+  plan: Pick<PlanDay, 'date' | 'today' | 'depotId' | 'cutoffMin' | 'trips'>;
   view: 'list' | 'map';
   onView: (view: 'list' | 'map') => void;
+  onDate: (date: string) => void;
   onAutoAssign: () => void;
   onNewTrip: () => void;
   onPublish: () => void;
 }) {
   // The header sends every trip still being planned. Sent trips stay on the board, and more can be added.
   const working = plan.trips.filter((t) => t.status === 'planning' && t.stops.length > 0).length;
+  const nextDay = addDays(plan.today, 1);
+  const title =
+    plan.date === plan.today
+      ? "Plan today's trips"
+      : plan.date === nextDay
+        ? "Plan tomorrow's trips"
+        : `Plan ${dayLabel(plan.date)}`;
   return (
     <header className="flex flex-wrap items-center gap-[10px]">
       <div className="flex min-w-px flex-[1_0_0] flex-col gap-1">
-        <h1 className="whitespace-nowrap text-[34px] font-medium leading-10 text-ink">
-          Plan tomorrow&apos;s trips
-        </h1>
+        <h1 className="whitespace-nowrap text-[34px] font-medium leading-10 text-ink">{title}</h1>
         <p className="whitespace-pre text-[14px] leading-5 text-muted">
-          {`${dayLabel(plan.date)}  ·  ${depotLabel(plan.depotId)}  ·  orders close ${clock12(plan.cutoffMin)}`}
+          {`${dayLabel(plan.date)}  ·  ${depotLabel(plan.depotId)}  ·  new orders move to the next day at ${clock12(plan.cutoffMin)}`}
         </p>
       </div>
       <Pill icon="sparkle" onClick={onAutoAssign}>
@@ -78,6 +85,26 @@ export function PlanHeader({
         Publish trips
       </Pill>
       <div aria-hidden className="h-7 w-px shrink-0 bg-border" />
+      <div className="flex shrink-0 gap-1 rounded-pill bg-border p-1" role="group" aria-label="Which day's orders">
+        {(
+          [
+            [plan.today, 'Today'],
+            [nextDay, 'Next day'],
+          ] as const
+        ).map(([iso, label]) => (
+          <button
+            key={iso}
+            type="button"
+            aria-pressed={plan.date === iso}
+            onClick={() => onDate(iso)}
+            className={`rounded-pill px-[14px] py-[9px] text-[13px] font-semibold leading-[18px] ${
+              plan.date === iso ? 'bg-surface text-ink' : 'text-muted'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="flex shrink-0 gap-1 rounded-pill bg-border p-1">
         <button
           type="button"

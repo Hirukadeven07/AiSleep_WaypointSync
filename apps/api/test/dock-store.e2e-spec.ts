@@ -183,6 +183,7 @@ describe('loader dock and store (e2e)', () => {
           createdAt: { gte: startedAt },
         },
       });
+      await prisma.driverEvent.deleteMany({ where: { tripId: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.trip.deleteMany({ where: { id: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.order.deleteMany({ where: { storeId: { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] } } });
       await prisma.user.update({ where: { loginId: 'sunil' }, data: { storeId: sunilStoreId } });
@@ -201,11 +202,13 @@ describe('loader dock and store (e2e)', () => {
       expect(card.job).toMatchObject({ bay: 'Bay-9', status: 'assigned' });
 
       // Each loader confirms their own ID and PIN; a wrong PIN, a stranger's ID or no PIN adds no one.
+      // The dock tablet's own account has no PIN, but it is not a loader who can join the load.
       const start = (body: object) => loader.post(`/api/loads/${ids.loadTrip}/start`).send(body);
       for (const body of [
         { loaderId: 'sampath', pin: '9999' },
         { loaderId: 'nobody', pin: '1234' },
         { loaderId: 'nimal', pin: '1234' },
+        { loaderId: 'dock-depo1' },
       ]) {
         const refused = await start(body).expect(400);
         expect(refused.body.reason).toBe('WRONG_LOADER_CREDENTIALS');
@@ -306,7 +309,38 @@ describe('loader dock and store (e2e)', () => {
         where: { id: ids.loadTrip },
         include: { loadingJob: true },
       });
-      expect(trip.status).toBe('on_road');
+      expect(trip.status).toBe('ready');
+      expect(trip.startingTime).toBeNull();
+
+      const kasun = await prisma.user.findUniqueOrThrow({ where: { loginId: 'kasun' } });
+      await prisma.trip.update({
+        where: { id: ids.loadTrip },
+        data: { assignedDriverId: kasun.id },
+      });
+      const driver = await login({ role: 'driver', loginId: 'kasun', secret: '1234' });
+      const startedAt = MORNING;
+      const clientId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      await prisma.driverEvent.deleteMany({ where: { clientId } });
+      const synced = await driver
+        .post('/api/sync')
+        .send({
+          events: [
+            {
+              clientId,
+              driverId: kasun.id,
+              tripId: ids.loadTrip,
+              type: 'START_TRIP',
+              payload: {},
+              createdOnPhoneAt: startedAt,
+              seenPlanVersion: 2,
+            },
+          ],
+        })
+        .expect(200);
+      expect(synced.body.applied).toEqual([clientId]);
+      const moving = await prisma.trip.findUniqueOrThrow({ where: { id: ids.loadTrip } });
+      expect(moving.status).toBe('on_road');
+      expect(moving.startingTime?.toISOString()).toBe(new Date(startedAt).toISOString());
       expect(trip.loadingJob?.status).toBe('handed_over');
 
       // Loading order is LIFO, so loadOrder[0] is E2E-B; its first line by name is Bread (3).
@@ -332,10 +366,108 @@ describe('loader dock and store (e2e)', () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
       await store.get('/api/loads').expect(403);
     });
+
+    it('lets several loaders join one trip and frees a loader after that trip is loaded', async () => {
+      const plate = 'WP E2E-OPEN';
+      const stores = ['E2E-C', 'E2E-D'];
+      const vehicles = ['E2E-VAN-1', 'E2E-VAN-2'];
+      const logins = ['E2E-L1', 'E2E-L2'];
+      const tripIds: string[] = [];
+      const clear = async () => {
+        await prisma.deliveryNote.deleteMany({ where: { order: { storeId: { in: stores } } } });
+        await prisma.trip.deleteMany({ where: { id: { in: tripIds } } });
+        await prisma.trip.deleteMany({ where: { vehicleId: { in: vehicles } } });
+        await prisma.order.deleteMany({ where: { storeId: { in: stores } } });
+        await prisma.vehicle.deleteMany({ where: { id: { in: vehicles } } });
+        await prisma.store.deleteMany({ where: { id: { in: stores } } });
+        await prisma.user.deleteMany({ where: { loginId: { in: logins } } });
+      };
+      const loader = await login({ role: 'loader', secret: '123456', depotId: 'depo1' });
+      try {
+        await clear();
+        for (const id of stores) {
+          await prisma.store.create({
+            data: {
+              id,
+              displayName: id,
+              brand: 'Fresh',
+              districtId: ids.district,
+              depotId: 'depo1',
+              dockType: 'street',
+              windowOpenMin: 300,
+              windowCloseMin: 480,
+            },
+          });
+        }
+        for (const [loginId, name] of [
+          ['E2E-L1', 'E2E Loader One'],
+          ['E2E-L2', 'E2E Loader Two'],
+        ] as const) {
+          await prisma.user.create({
+            data: {
+              loginId,
+              role: 'loader',
+              name,
+              depotId: 'depo1',
+              loaderProfile: { create: {} },
+            },
+          });
+        }
+        for (const [index, vehicleId] of vehicles.entries()) {
+          await prisma.vehicle.create({
+            data: {
+              id: vehicleId,
+              numberPlate: index === 0 ? plate : 'WP E2E-NEXT',
+              depotId: 'depo1',
+              type: 'truck',
+              temp: 'reefer',
+              weightCapKg: 3000,
+              volumeCapM3: 20,
+            },
+          });
+          const placed = await order(stores[index]!, [{ name: 'Milk', qty: 1, itemId: 'F-MILK' }]);
+          const trip = await prisma.trip.create({
+            data: {
+              vehicleId,
+              depotId: 'depo1',
+              brand: 'Fresh',
+              districtId: ids.district,
+              serviceDate: date(DAY),
+              tripNumber: 1,
+              status: 'published',
+            },
+          });
+          tripIds.push(trip.id);
+          await prisma.tripStop.create({
+            data: { tripId: trip.id, orderId: placed.id, sequence: 1 },
+          });
+        }
+
+        const start = (tripId: string, loaderId: string) =>
+          loader.post(`/api/loads/${tripId}/start`).send({ loaderId });
+        const first = await start(tripIds[0]!, 'E2E-L1').expect(200);
+        expect(first.body.session.loaderNames).toEqual(['E2E Loader One']);
+        const both = await start(tripIds[0]!, 'E2E-L2').expect(200);
+        expect(both.body.session.loaderNames).toEqual(['E2E Loader One', 'E2E Loader Two']);
+
+        const again = await start(tripIds[0]!, 'E2E-L1').expect(409);
+        expect(again.body.reason).toBe('LOADER_ALREADY_ON_TRIP');
+
+        const busy = await start(tripIds[1]!, 'E2E-L1').expect(409);
+        expect(busy.body.reason).toBe('LOADER_ON_ANOTHER_TRIP');
+        expect(busy.body.message).toContain(plate);
+
+        await loader.post(`/api/loads/${tripIds[0]}/depart`).send({ planVersion: 1 }).expect(200);
+        const freed = await start(tripIds[1]!, 'E2E-L1').expect(200);
+        expect(freed.body.session.loaderNames).toEqual(['E2E Loader One']);
+      } finally {
+        await clear();
+      }
+    });
   });
 
   describe('store', () => {
-    it('takes orders before 16:00 and refuses them after', async () => {
+    it('takes orders before 16:00 and dates them for the next day after', async () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
       const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
       const newOrders = () =>
@@ -359,8 +491,9 @@ describe('loader dock and store (e2e)', () => {
         const late = await store
           .post('/api/store/orders')
           .send({ lines: [{ catalogueId: 'F-MILK', qty: 2 }] })
-          .expect(409);
-        expect(late.body.reason).toBe('AFTER_CUTOFF');
+          .expect(201);
+        expect(late.body.deliveryDate).toBe('2026-10-02');
+        expect(late.body.status).toBe('waiting');
       } finally {
         process.env.DEMO_NOW = MORNING;
       }

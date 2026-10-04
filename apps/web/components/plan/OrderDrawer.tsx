@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Brand, PlanOrderDetail } from '@waypoint/contracts';
+import type { Brand, PlanOrderDetail, PlanVehicleChoice } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
 import { kgText, m3Text, orderWindow } from './format';
@@ -37,19 +37,152 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Figma "Plan v2 / Order detail": the order, its products, a warning when it has been moved, and the best trip. */
+const STATUS = {
+  fits: { text: 'Fits', className: 'bg-success-tint text-success' },
+  warn: { text: 'Warning', className: 'bg-warning-tint text-warning' },
+  blocked: { text: 'Can’t take it', className: 'bg-danger-tint text-danger' },
+} as const;
+
+const choiceKey = (c: PlanVehicleChoice) => c.tripId ?? `${c.vehicleId}:${c.tripNumber}`;
+
+/**
+ * The dispatcher picks the truck or van: each of the day's trips, and a new run on a free vehicle.
+ * Blocked choices stay listed, dimmed, with the reason, so the dispatcher sees why.
+ */
+function VehiclePicker({
+  choices,
+  onAllocate,
+}: {
+  choices: PlanVehicleChoice[];
+  onAllocate: (choice: PlanVehicleChoice) => void;
+}) {
+  const [type, setType] = useState<'all' | 'truck' | 'van'>('all');
+  const [picked, setPicked] = useState<string | null>(() => {
+    const best = choices.find((c) => c.bestFit && !c.current);
+    return best ? choiceKey(best) : null;
+  });
+  const shown = choices.filter((c) => type === 'all' || c.vehicleType === type);
+  const choice = choices.find((c) => choiceKey(c) === picked) ?? null;
+
+  return (
+    <div className="flex shrink-0 flex-col gap-[10px] rounded-[20px] bg-bg p-4">
+      <div className="flex items-center gap-2">
+        <p className="min-w-px flex-1 text-[12px] font-bold leading-[15px] text-muted">
+          ALLOCATE TO A VEHICLE
+        </p>
+        <div className="flex gap-1 rounded-pill bg-surface p-[3px]" role="tablist">
+          {(
+            [
+              ['all', 'All'],
+              ['truck', 'Trucks'],
+              ['van', 'Vans'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={type === id}
+              onClick={() => setType(id)}
+              className={`rounded-pill px-[10px] py-1 text-[12px] font-semibold leading-[15px] ${
+                type === id ? 'bg-bg text-ink' : 'text-muted'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {shown.length === 0 && (
+        <p className="text-[12px] leading-[17px] text-muted">
+          {type === 'van' ? 'No van' : type === 'truck' ? 'No truck' : 'No vehicle'} is free for
+          this day.
+        </p>
+      )}
+      <div role="radiogroup" aria-label="Vehicle" className="flex flex-col gap-[6px]">
+        {shown.map((c) => {
+          const key = choiceKey(c);
+          const disabled = c.current || c.status === 'blocked';
+          const on = picked === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              disabled={disabled}
+              onClick={() => setPicked(key)}
+              className={`flex items-start gap-[10px] rounded-input border-2 bg-surface p-3 text-left ${
+                on ? 'border-slate' : 'border-transparent'
+              } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+            >
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-bg text-slate">
+                <Icon name="truck" size={15} />
+              </span>
+              <span className="flex min-w-px flex-1 flex-col gap-[2px]">
+                <span className="flex flex-wrap items-center gap-[6px]">
+                  <span className="text-[13px] font-semibold leading-[18px] text-ink">
+                    {c.label}
+                  </span>
+                  {c.current ? (
+                    <span className="rounded-pill bg-info-tint px-2 py-[2px] text-[11px] font-semibold leading-[14px] text-slate">
+                      On this trip
+                    </span>
+                  ) : (
+                    <span
+                      className={`rounded-pill px-2 py-[2px] text-[11px] font-semibold leading-[14px] ${STATUS[c.status].className}`}
+                    >
+                      {STATUS[c.status].text}
+                    </span>
+                  )}
+                  {c.bestFit && (
+                    <span className="rounded-pill bg-info-tint px-2 py-[2px] text-[11px] font-semibold leading-[14px] text-slate">
+                      Best fit
+                    </span>
+                  )}
+                </span>
+                <span className="text-[12px] leading-[17px] text-muted">{c.detail}</span>
+                {c.note && !c.current && (
+                  <span
+                    className={`text-[12px] leading-[17px] ${
+                      c.status === 'blocked' ? 'text-danger' : 'text-warning'
+                    }`}
+                  >
+                    {c.note}
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        disabled={!choice}
+        onClick={() => choice && onAllocate(choice)}
+        className="flex items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-on-primary disabled:opacity-40"
+      >
+        {choice ? `Allocate to ${choice.label.split(' · ')[0]}` : 'Pick a truck or van'}
+      </button>
+    </div>
+  );
+}
+
+/** Figma "Plan v2 / Order detail": the order, its products, a warning when it has been moved, and the vehicle picker. */
 export function OrderDrawer({
   orderId,
   onClose,
-  onAdd,
+  onAllocate,
   onMoveLater,
 }: {
   orderId: string;
   onClose: () => void;
   /** Opens the Move to later dialog for this order. */
   onMoveLater: () => void;
-  /** Adds the order to a trip; the drawer closes when it is done. */
-  onAdd: (detail: PlanOrderDetail, tripId: string) => void;
+  /** Puts the order on the picked truck or van; the drawer closes when it is done. */
+  onAllocate: (detail: PlanOrderDetail, choice: PlanVehicleChoice) => void;
 }) {
   const [detail, setDetail] = useState<PlanOrderDetail | null>(null);
 
@@ -70,7 +203,6 @@ export function OrderDrawer({
   }, [onClose]);
 
   const o = detail?.order;
-  const plate = detail?.suggestion?.label.split(' · ')[0];
 
   return (
     <div className="fixed inset-0 z-30">
@@ -175,33 +307,10 @@ export function OrderDrawer({
               </div>
             )}
 
-            {detail.suggestion && (
-              <div className="flex shrink-0 flex-col gap-[10px] rounded-[20px] bg-info-tint p-4">
-                <p className="text-[12px] font-bold leading-[15px] text-slate">
-                  BEST FIT · {detail.suggestion.fit}
-                </p>
-                <div className="flex items-center gap-[10px]">
-                  <span className="flex size-9 items-center justify-center rounded-full bg-surface text-slate">
-                    <Icon name="truck" size={16} />
-                  </span>
-                  <div className="flex min-w-px flex-1 flex-col whitespace-nowrap">
-                    <p className="text-[14px] font-semibold leading-5 text-ink">
-                      {detail.suggestion.label}
-                    </p>
-                    <p className="text-[12px] leading-[17px] text-muted">
-                      {detail.suggestion.detail}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onAdd(detail, detail.suggestion!.tripId)}
-                  className="flex items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-on-primary"
-                >
-                  Add to {plate}
-                </button>
-              </div>
-            )}
+            <VehiclePicker
+              choices={detail.vehicles}
+              onAllocate={(choice) => onAllocate(detail, choice)}
+            />
 
             <span className="min-h-px flex-1" />
             <button

@@ -39,7 +39,7 @@ export default function StoreHomePage() {
     );
   }
 
-  const open = nowMin !== undefined && nowMin < data.cutoffMin;
+  const forToday = data.orderDate === data.today;
   const left = nowMin !== undefined ? data.cutoffMin - nowMin : 0;
   const canReceive = data.delivery && ['arrived', 'waiting'].includes(data.delivery.status);
 
@@ -58,15 +58,15 @@ export default function StoreHomePage() {
               </p>
             </div>
             <div
-              className={`rounded-card p-md ${open ? (left <= 60 ? 'bg-warning-tint' : 'bg-surface') : 'bg-border'}`}
+              className={`rounded-card p-md ${forToday ? (left <= 60 ? 'bg-warning-tint' : 'bg-surface') : 'bg-surface'}`}
             >
               <p className="text-caption text-muted">
-                Order cutoff {formatMinutes(data.cutoffMin)}
+                {forToday ? `Order cutoff ${formatMinutes(data.cutoffMin)}` : 'Ordering for'}
               </p>
               <p
-                className={`text-title ${open ? (left <= 60 ? 'text-warning' : 'text-ink') : 'text-muted'}`}
+                className={`text-title ${forToday && left <= 60 ? 'text-warning' : 'text-ink'}`}
               >
-                {open ? `${formatDuration(left)} left` : 'Ordering closed'}
+                {forToday ? `${formatDuration(left)} left` : formatDate(data.orderDate)}
               </p>
             </div>
           </div>
@@ -86,14 +86,12 @@ export default function StoreHomePage() {
                   : 'Nothing ordered today yet.'}
               </p>
             </div>
-            {open && (
-              <Link
-                href="/store/order"
-                className="shrink-0 rounded-pill bg-olive px-md py-sm text-label font-semibold text-ink"
-              >
-                Order
-              </Link>
-            )}
+            <Link
+              href="/store/order"
+              className="shrink-0 rounded-pill bg-olive px-md py-sm text-label font-semibold text-ink"
+            >
+              Order
+            </Link>
           </div>
 
           {data.phones.length > 0 && (

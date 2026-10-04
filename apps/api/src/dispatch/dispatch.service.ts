@@ -233,9 +233,10 @@ export class DispatchService {
         where: { deliveryDate: day, movedFromDate: { not: null }, store: { depotId } },
         select: { status: true, stop: { select: { id: true } } },
       }),
+      // Orders placed before the cutoff are for today; from the cutoff they are for the next day.
       this.prisma.order.count({
         where: {
-          deliveryDate: nextDay,
+          deliveryDate: this.clock.minutesNow() < ORDER_CUTOFF_MIN ? day : nextDay,
           status: { in: ['waiting', 'planned'] },
           store: { depotId },
         },
