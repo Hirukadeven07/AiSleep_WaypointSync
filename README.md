@@ -96,7 +96,46 @@ docs/               Architecture, data model, AI disclosure  - Chamodhi
 
 ## Judge walkthrough
 
-_To be written._
+The seed prepares two days at the Peliyagoda depot so every role has something to do on a fresh install:
+
+- **Tomorrow** is an overbooked planning day: more chilled orders than refrigerated space, a draft trip over volume, a van-only store and a store that was already moved once.
+- **Today** has one published trip waiting at the dock, and driver `kasun` already on the road, arrived at store manager `sunil`'s store.
+
+Sign in at `/login` (or the live demo) with the [seeded logins](#seeded-logins). Use a phone-sized window for the loader and driver. All times are Sri Lanka time.
+
+**1. Store manager places an order** (`sunil` / `waypoint`)
+1. On the store home, check the delivery window, the 16:00 order cutoff countdown and any deferral notice.
+2. Open **Place order**, add lines and send it. The order shows as confirmed and waiting. After 16:00 ordering is closed for the next day.
+3. Open **Updates** to see the deferral notice for an order that was moved to a later run, with its reason.
+
+**2. Dispatcher plans tomorrow** (`nimal` / `waypoint`, desktop)
+1. Open the plan board. It shows tomorrow's orders in one queue, with the trips for each vehicle.
+2. Run **Auto-assign proposal**. Orders go to vehicles and trips within weight and volume, refrigeration, van-only access, the depot, delivery windows and the two-trips-per-day limit. Chilled orders that don't fit the refrigerated trucks are proposed for a later day.
+3. Open the draft trip that is over volume. The publish check blocks it; drag a stop onto the free refrigerated truck to bring it within capacity.
+4. Use **Move to later** on an order, pick a reason and confirm. The store that was already moved once is flagged as a repeat skip.
+5. Run **Publish the plan**. Blocking issues (capacity, chilled on ambient, van-only, brand, depot, a large time overrun) stop the publish. Window risk and fuel quota show as warnings with the litres against the vehicle's weekly allowance.
+
+**3. Loader loads today's trip** (shared dock tablet or phone)
+1. Open `/login/loader` and enter the Peliyagoda dock password `123456`.
+2. The load queue lists today's published trip. Start loading and identify as loader `sampath`, PIN `1234`.
+3. Work through the checklist, which is in reverse stop order so the first stop's goods go on last. Flag a line as missing, damaged or the wrong quantity; the flag goes to dispatch.
+4. Tap **Truck is loaded** to send the truck off.
+
+**4. Driver delivers** (`kasun` / PIN `1234`, phone)
+1. The driver app opens on today's trip, which is on the road and stopped at `sunil`'s store, waiting for the store to confirm.
+2. To test offline: turn on airplane mode (or set the browser offline). The app keeps working from local data, shows an offline banner and queues its events, such as **I've arrived** at a stop or a road issue. Reconnect and the queue syncs; events made against an older plan come back marked stale.
+
+**5. Store manager confirms receipt** (`sunil`)
+1. Open the delivery that has arrived and check the goods line by line.
+2. Confirm what arrived, and report an issue on any line that is short or damaged. The order becomes delivered or partial, and issues go to dispatch.
+
+**6. Driver finishes the trip** (`kasun`)
+1. The app shows that the store confirmed the receipt. Acknowledge it to see the next stop.
+2. When no stops are left, tap **End trip** back at the depot. The trip is marked completed.
+
+**7. Dispatcher follows up** (`nimal`)
+1. The live board and map show trip progress. The loader's and store's flags, and any delays or SOS, appear on the Incidents page.
+2. A sent trip can still change before it leaves. The loader's checklist then locks until they accept the new plan version, and a departure on an old version is refused.
 
 ## Departures from the Designathon design
 
