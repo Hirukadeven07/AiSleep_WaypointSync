@@ -266,13 +266,12 @@ export class StoreService {
   }
 
   /**
-   * TEMPORARY: local development keeps ordering open until 23:59 so work is not
-   * blocked after 16:00. Production and the test suite still close at ORDER_CUTOFF_MIN.
+   * Orders close at ORDER_CUTOFF_MIN (16:00) everywhere, so the store app and the plan board agree.
+   * For working on the store screens after 16:00, set ORDER_CUTOFF_OPEN=1 to keep ordering open
+   * until 23:59; never set it for a demo.
    */
   private orderCutoffMin(): number {
-    const env = process.env.NODE_ENV;
-    const devBypass = env !== 'production' && env !== 'test';
-    return devBypass ? 23 * 60 + 59 : ORDER_CUTOFF_MIN;
+    return process.env.ORDER_CUTOFF_OPEN === '1' ? 23 * 60 + 59 : ORDER_CUTOFF_MIN;
   }
 
   /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */

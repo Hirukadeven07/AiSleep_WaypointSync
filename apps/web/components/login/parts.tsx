@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
+import { LOCAL_CHECK_URL } from '@/lib/local-check';
 import { Icon } from '@/components/ui/Icon';
 
 const PHOTO = '/login/skyline.webp';
@@ -37,12 +38,14 @@ export function SkylinePhoto({ variant }: { variant: 'panel' | 'sheet' | 'hero' 
 export function SwitchRole({ className = '' }: { className?: string }) {
   return (
     <span className={`flex items-center gap-2 ${className}`}>
-      <a
-        href="http://127.0.0.1:3099/"
-        className="flex items-center gap-[6px] rounded-pill bg-olive py-[9px] pl-3 pr-[14px] text-label font-semibold text-ink"
-      >
-        Check
-      </a>
+      {LOCAL_CHECK_URL && (
+        <a
+          href={LOCAL_CHECK_URL}
+          className="flex items-center gap-[6px] rounded-pill bg-olive py-[9px] pl-3 pr-[14px] text-label font-semibold text-ink"
+        >
+          Check
+        </a>
+      )}
       <Link
         href="/login?switch=1"
         className="flex items-center gap-[6px] rounded-pill py-[9px] pl-3 pr-[14px] text-label font-semibold text-ink"

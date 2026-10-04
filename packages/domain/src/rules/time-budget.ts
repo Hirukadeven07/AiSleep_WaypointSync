@@ -6,6 +6,7 @@ import { TIME_BUDGET_GRACE_MIN, TIME_BUDGET_MIN } from '../constants';
 import { Reason } from '../reasons';
 import { computeTripMinutes } from '../time';
 import type { Lookup, RuleIssue, StopView, Vehicle } from '../types';
+import { vehicleName } from '../names';
 
 export function checkTimeBudget(
   vehicle: Vehicle,
@@ -34,7 +35,7 @@ export function checkTimeBudget(
     {
       code: Reason.TIME_BUDGET,
       severity: overBy <= TIME_BUDGET_GRACE_MIN ? 'warn' : 'block',
-      message: `Trip would take ${minutes} min on ${vehicle.id}; ${brand} budget is ${budget} min.`,
+      message: `The trip would take ${minutes} min on ${vehicleName(vehicle)}; the ${brand} limit is ${budget} min.`,
     },
   ];
 }

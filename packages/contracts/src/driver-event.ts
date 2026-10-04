@@ -8,6 +8,8 @@ export const DRIVER_EVENT_TYPES = [
   'BREAK_START',
   'BREAK_END',
   'LOCATION_PING',
+  /** The driver closed the SOS screen ("I'm safe"): their open SOS is resolved. */
+  'SOS_CLEARED',
 ] as const;
 
 export type DriverEventType = (typeof DRIVER_EVENT_TYPES)[number];

@@ -968,4 +968,47 @@ describe('driver sync (e2e)', () => {
     expect(res.body).toMatchObject({ loginId: 'kasun', vehicle: { id: vehicleId } });
     expect(res.body.recentTrips.map((t: { id: string }) => t.id)).toContain(tripId);
   });
+
+  it('keeps one open SOS per driver and clears it when the driver marks themselves safe', async () => {
+    await resolveOpenSos();
+    const sos = (clientId: string, type: string, payload: Record<string, unknown>) => ({
+      clientId,
+      driverId,
+      tripId,
+      type,
+      payload,
+      createdOnPhoneAt: '2026-10-01T08:45:00+05:30',
+      seenPlanVersion: 1,
+    });
+    const open = () =>
+      prisma.driverIncident.findMany({
+        where: { driver: { userId: driverId }, incidentType: 'sos', resolvedAt: null },
+      });
+
+    await driverAgent
+      .post('/api/sync')
+      .send({
+        events: [
+          sos('a1a1a1a1-0000-4000-8000-000000000001', 'SOS_ALERT', { location: null }),
+          sos('a1a1a1a1-0000-4000-8000-000000000002', 'SOS_ALERT', { message: 'E2E twice' }),
+        ],
+      })
+      .expect(200);
+    const stillOne = await open();
+    expect(stillOne).toHaveLength(1);
+    expect(stillOne[0]!.message).toBe('E2E twice');
+
+    const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+    const cleared = await driverAgent
+      .post('/api/sync')
+      .send({ events: [sos('a1a1a1a1-0000-4000-8000-000000000003', 'SOS_CLEARED', {})] })
+      .expect(200);
+    expect(cleared.body.applied).toEqual(['a1a1a1a1-0000-4000-8000-000000000003']);
+    expect(await open()).toHaveLength(0);
+    const safe = await prisma.notification.findMany({
+      where: { userId: nimal.id, title: 'Driver is safe', createdAt: { gte: startedAt } },
+    });
+    expect(safe.length).toBeGreaterThanOrEqual(1);
+    await prisma.notification.deleteMany({ where: { id: { in: safe.map((n) => n.id) } } });
+  });
 });

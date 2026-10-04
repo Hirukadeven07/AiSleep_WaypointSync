@@ -10,6 +10,7 @@ import { isoWeekKey } from './clock';
 import { findTravel } from './lookups';
 import { Reason } from './reasons';
 import type { Lookup, RuleIssue, StopView, Vehicle } from './types';
+import { vehicleName } from './names';
 
 export function tripKm(stopCount: number, depotToDistrictKm: number, interStopKm: number): number {
   if (stopCount === 0) {
@@ -69,7 +70,7 @@ export function checkFuelQuota(
     {
       code: Reason.FUEL_QUOTA,
       severity: 'warn',
-      message: `Vehicle ${vehicle.id} planned ${status.plannedLitres.toFixed(1)} L in ${status.weekKey}; quota is ${status.quotaLitres} L.`,
+      message: `${vehicleName(vehicle)} has ${status.plannedLitres.toFixed(1)} L planned in week ${status.weekKey}; its quota is ${status.quotaLitres} L.`,
     },
   ];
 }

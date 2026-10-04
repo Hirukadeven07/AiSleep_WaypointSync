@@ -7,6 +7,7 @@ import { m3Text, orderWindow } from '@/components/plan/format';
 import { districtTone } from './districts';
 import { IslandMap, type IslandMapHandle, type IslandMarker, type MapView } from './IslandMap';
 import { MapControls } from './MapControls';
+import { depotLabel } from '@/lib/depots';
 
 const DOT: Record<PlanMapPin['brand'], string> = {
   Fresh: 'bg-fresh',
@@ -100,7 +101,7 @@ export function PlanMap({
         lat: data.depot.lat,
         lng: data.depot.lng,
         dotClass: 'bg-scrim',
-        title: `${data.depot.name} depot`,
+        title: depotLabel(data.depot.name),
         size: 'depot',
       });
     }

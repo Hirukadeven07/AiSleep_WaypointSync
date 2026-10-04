@@ -137,11 +137,17 @@ export class LoadsService {
       },
       orderBy: [{ tripNumber: 'asc' }, { vehicleId: 'asc' }],
     });
-    // Jobs the dispatcher marked urgent come first; the rest keep trip order.
-    trips.sort((a, b) => (b.loadingJob?.priority ?? 0) - (a.loadingJob?.priority ?? 0));
+    // Today before tomorrow; within a day, jobs the dispatcher marked urgent come first, then trip order.
+    trips.sort(
+      (a, b) =>
+        a.serviceDate.getTime() - b.serviceDate.getTime() ||
+        (b.loadingJob?.priority ?? 0) - (a.loadingJob?.priority ?? 0),
+    );
     const names = await this.loaderNames(trips.flatMap((t) => t.loadSession?.loaderIds ?? []));
     return trips.map((t) => ({
       tripId: t.id,
+      serviceDate: t.serviceDate.toISOString().slice(0, 10),
+      later: t.serviceDate.toISOString().slice(0, 10) > today,
       vehicle: vehicleView(t.vehicle),
       brand: t.brand,
       district: t.district.name,

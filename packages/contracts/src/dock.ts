@@ -22,6 +22,10 @@ export interface LoadJob {
 /** One card in the loader's queue. */
 export interface LoadQueueItem {
   tripId: string;
+  /** YYYY-MM-DD. The queue holds today's trips and tomorrow's published plan. */
+  serviceDate: string;
+  /** True for a trip on a later day than today (the night shift loads tomorrow's run). */
+  later: boolean;
   vehicle: LoadVehicle;
   brand: Brand;
   district: string;
