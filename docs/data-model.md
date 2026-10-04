@@ -160,7 +160,8 @@ These are booklet / app rules. They are enforced in Nest services, not only by u
 
 Live state stays in `LoadSession` and `LoadFlag` so the plan-change lock can diff them.
 
-- **Start loading** (`POST /loads/:tripId/start`): `LoadingJob` → `picking`. Each order gets a `DeliveryNote` (`DN-<orderId>`) version `status: picking`, its lines (one per order line with an `itemId`), and a `DeliveryNoteLoader` row.
+- **Sign in to the dock:** the tablet signs in with the depot and its 6-digit dock password (`Depot.dockPasswordHash`, argon2) as one shared `User` per depot (`loginId` = `dock-<depotId>`, `role` = loader), created on first sign-in.
+- **Start loading** (`POST /loads/:tripId/start`, body `{ loaderId, pin }`): the loader's own ID and PIN are checked against their `User` row. The first confirmed loader creates the `LoadSession` (`loaderIds` = that loader, `ackedPlanVersion` and `ackedStopIds` from the live trip) and moves the trip `published` → `loading`; each later loader is added to `loaderIds`. `LoadingJob` → `picking`. Each order gets a `DeliveryNote` (`DN-<orderId>`) version `status: picking`, its lines (one per order line with an `itemId`), and a `DeliveryNoteLoader` row for the confirmed loader, not for the shared tablet account.
 - **Confirm departure** (`POST /loads/:tripId/depart`): current note `validTo` is set; a `loaded` version is added. `qtyConfirmed` is ordered qty minus missing / wrong-quantity flags. Each dock flag becomes a `LoaderFlag` (`pending_dispatcher`). `LoadingJob` → `handed_over` with loaded weight and volume.
 
 ### Store
@@ -190,6 +191,7 @@ The phone `outbox` / `cache_*` tables in the draw.io swimlane are **IndexedDB on
 | --- | --- | --- |
 | `nimal` | dispatcher | Password `waypoint` |
 | `sampath` | loader | PIN 1234, confirmed at Start loading (the dock itself uses the depot dock password) |
+| `L001` … | loader | Fleet loaders, no PIN: added at Start loading with the PIN box left blank |
 | `kasun` | driver | PIN `1234` |
 | `sunil` | store | Extra login on the demo Fresh store |
 | `OUT001` … | store | One manager per outlet, password `waypoint` |

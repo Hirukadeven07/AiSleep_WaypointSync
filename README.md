@@ -105,7 +105,7 @@ The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, th
 ### Landing page and sign-in
 
 - Signed-in visitors skip the landing page and go straight to their workspace. Every "Sign in" and workspace card goes to the role chooser, because the Figma has no role parameter.
-- **Sync Dock sign-in (L1):** the tablet is unlocked with the depot's shared 6-digit dock password (stored hashed on the `Depot` row: seeded `depo1` = 123456, `depo2` = 654321; change it in Account settings). There is no loader ID on that screen. Each person who joins a load taps **Start loading** (or **+ Add a loader** once started), enters their own loader ID and PIN (seeded L001… and `sampath` use 1234), and is added to the trip's loader list only when the API confirms them. Delivery notes are attributed to those loaders, not to the shared tablet account.
+- **Sync Dock sign-in (L1):** the tablet is unlocked with the depot's shared 6-digit dock password (stored hashed on the `Depot` row: seeded `depo1` = 123456, `depo2` = 654321; change it in Account settings). There is no loader ID on that screen. Each person who joins a load taps **Start loading** (or **+ Add a loader** once started), enters their own loader ID and PIN if they have one (seeded L001… have no PIN, so the box stays blank; `sampath` uses 1234), and is added to the trip's loader list only when the API confirms them. Delivery notes are attributed to those loaders, not to the shared tablet account.
 - Depot cards show the depot name only; "12 trips today" has no data behind it yet.
 - "Forgot password?" is drawn but not wired. "Keep me signed in" and "Remember this phone" only remember the login id on the device, because the API sets the session length.
 
