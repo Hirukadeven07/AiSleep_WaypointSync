@@ -11,6 +11,7 @@ import {
   ORDER_CUTOFF_MIN,
   type CatalogueItem,
   type StoreDelivery,
+  type StoreFlag,
   type StoreHome,
   type StoreNotice,
   type StopStatus,
@@ -143,7 +144,7 @@ export class StoreService {
   async home(me: AuthUser): Promise<StoreHome> {
     const store = await this.store(me);
     const today = this.clock.today();
-    const [deliveries, upcoming, deferral, unreadNotices] = await Promise.all([
+    const [deliveries, upcoming, deferral, unreadNotices, openFlagCount] = await Promise.all([
       this.deliveries(me),
       this.prisma.order.findFirst({
         where: {
@@ -158,6 +159,7 @@ export class StoreService {
         orderBy: { deliveryDate: 'asc' },
       }),
       this.prisma.notification.count({ where: { userId: me.id, read: false } }),
+      this.prisma.fieldFlag.count({ where: { storeId: store.id, resolveStatus: false } }),
     ]);
     return {
       storeId: store.id,
@@ -173,6 +175,7 @@ export class StoreService {
       nextOrder: upcoming ? orderView(upcoming) : null,
       deferral: deferral ? orderView(deferral) : null,
       unreadNotices,
+      openFlagCount,
       phones: store.phones.map((p) => ({ label: p.label, phoneNo: p.phoneNo })),
     };
   }
@@ -373,6 +376,25 @@ export class StoreService {
       where: { storeId, resolveStatus: false, itemId: { in: ids } },
       data: { resolveStatus: true, resolvedAt: now },
     });
+  }
+
+  /** Every item this store has flagged, newest first. */
+  async flags(me: AuthUser): Promise<StoreFlag[]> {
+    const store = await this.store(me);
+    const rows = await this.prisma.fieldFlag.findMany({
+      where: { storeId: store.id },
+      include: { item: true },
+      orderBy: { raisedAt: 'desc' },
+    });
+    return rows.map((f) => ({
+      id: f.id,
+      itemName: f.item?.itemName ?? 'Whole delivery',
+      qty: f.qtyFlagged,
+      reason: f.reason,
+      driverDecision: f.driverDecision,
+      resolveStatus: f.resolveStatus,
+      raisedAt: f.raisedAt.toISOString(),
+    }));
   }
 
   /** Today's stops for this store, in ETA order. */

@@ -448,6 +448,19 @@ describe('loader dock and store (e2e)', () => {
         severity: 'medium',
         resolveStatus: false,
       });
+      const flags = (await store.get('/api/store/flags').expect(200)).body;
+      expect(flags).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: flag.id,
+            reason: 'missing',
+            qty: 1,
+            driverDecision: 'pending',
+            resolveStatus: false,
+            raisedAt: expect.any(String),
+          }),
+        ]),
+      );
       expect(
         await prisma.notification.count({
           where: { userId: kasun.id, title: 'E2E-HOME checked the goods' },
