@@ -10,6 +10,7 @@ import type { Order, Prisma } from '@prisma/client';
 import {
   ORDER_CUTOFF_MIN,
   type CatalogueItem,
+  type FlagType,
   type StoreDelivery,
   type StoreHome,
   type StoreNotice,
@@ -28,6 +29,40 @@ import type { PlaceOrderDto, ReceiptDto } from './dto/store.dto';
 import { PhotosService } from '../photos/photos.service';
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
+
+type ReceiptPick = {
+  receivedQty: number;
+  issue?: FlagType;
+  issues?: { type: FlagType; qty: number }[];
+};
+
+/**
+ * Problem counts for one line. Separate counts can share a line (1 missing and 1 damaged).
+ * A short count with no reason is missing. A flagged line with nothing short counts in full.
+ */
+function receiptIssues(
+  name: string,
+  ordered: number,
+  r?: ReceiptPick,
+): { type: FlagType; qty: number }[] {
+  if (r?.issues && r.issues.length > 0) {
+    const merged = new Map<FlagType, number>();
+    for (const i of r.issues) merged.set(i.type, (merged.get(i.type) ?? 0) + i.qty);
+    const issues = [...merged].map(([type, qty]) => ({ type, qty }));
+    const sum = issues.reduce((total, i) => total + i.qty, 0);
+    if (sum > ordered) {
+      throw new BadRequestException(
+        `${name}: missing, damaged and wrong quantity cannot add up to more than ${ordered}.`,
+      );
+    }
+    return issues;
+  }
+  const receivedQty = Math.min(Math.max(r?.receivedQty ?? ordered, 0), ordered);
+  const issue = r?.issue ?? (receivedQty < ordered ? ('missing' as const) : undefined);
+  if (!issue) return [];
+  const qty = receivedQty < ordered ? ordered - receivedQty : ordered;
+  return [{ type: issue, qty }];
+}
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
 const deliveryInclude = {
@@ -422,8 +457,8 @@ export class StoreService {
     );
     const results = stop.order.lines.map((line) => {
       const r = dto.lines.find((l) => l.orderLineId === line.id);
-      const receivedQty = Math.min(r?.receivedQty ?? line.qty, line.qty);
-      const issue = r?.issue ?? (receivedQty < line.qty ? 'missing' : undefined);
+      const issues = receiptIssues(line.name, line.qty, r);
+      const receivedQty = line.qty - issues.reduce((sum, i) => sum + i.qty, 0);
       return {
         itemId: line.itemId,
         chilled: line.chilled,
@@ -431,10 +466,12 @@ export class StoreService {
         name: line.name,
         orderedQty: line.qty,
         receivedQty,
-        issue: issue ?? null,
+        // A single problem keeps the old shape. Mixed problems live on `issues`.
+        issue: issues.length === 1 ? issues[0]!.type : null,
+        issues,
       };
     });
-    const partial = results.some((r) => r.issue);
+    const partial = results.some((r) => r.issues.length > 0);
     const now = this.clock.now();
     const lineResults = results.map(({ itemId: _i, chilled: _c, ...r }) => r);
     const warm = dto.chilledWasCold === false;
@@ -459,23 +496,21 @@ export class StoreService {
         },
       });
       // Each problem line becomes a FieldFlag the driver accepts or disputes at acknowledgement.
-      await tx.fieldFlag.createMany({
-        data: results
-          .filter((r) => r.issue)
-          .map((r) => ({
-            raisedAt: now,
-            storeId: stop.order.storeId,
-            orderId: stop.orderId,
-            tripId: stop.tripId,
-            itemId: r.itemId,
-            // The short count is the problem; a damaged line with nothing short counts as all damaged.
-            qtyFlagged: r.receivedQty < r.orderedQty ? r.orderedQty - r.receivedQty : r.orderedQty,
-            reason: r.issue!,
-            reasonDetail: `${r.name}: ${r.receivedQty} of ${r.orderedQty} received`,
-            severity: r.chilled && warm ? ('high' as const) : ('medium' as const),
-            resolveStatus: false,
-          })),
-      });
+      const flags = results.flatMap((r) =>
+        r.issues.map((i) => ({
+          raisedAt: now,
+          storeId: stop.order.storeId,
+          orderId: stop.orderId,
+          tripId: stop.tripId,
+          itemId: r.itemId,
+          qtyFlagged: i.qty,
+          reason: i.type,
+          reasonDetail: `${r.name}: ${i.qty} of ${r.orderedQty} ${i.type.replace('_', ' ')}`,
+          severity: r.chilled && warm ? ('high' as const) : ('medium' as const),
+          resolveStatus: false,
+        })),
+      );
+      if (flags.length > 0) await tx.fieldFlag.createMany({ data: flags });
       await tx.order.update({
         where: { id: stop.orderId },
         data: { status: partial ? 'partial' : 'delivered' },
@@ -483,14 +518,14 @@ export class StoreService {
     });
 
     // A receipt with problems is the store's report to dispatch.
-    const problems = results.filter((r) => r.issue);
+    const problems = results.filter((r) => r.issues.length > 0);
     if (problems.length > 0) {
       const store = await this.store(me);
       await this.notifyDispatchers(store.depotId, {
         title: 'Store report',
         body: `${store.displayName ?? store.id}: ${problems.length} ${problems.length === 1 ? 'line' : 'lines'} with issues on ${stop.trip.vehicle.numberPlate ?? stop.trip.vehicleId} (${problems
           .slice(0, 2)
-          .map((r) => `${r.name} ${r.issue}`)
+          .map((r) => `${r.name} ${r.issues.map((i) => `${i.qty} ${i.type}`).join(' and ')}`)
           .join(', ')}${problems.length > 2 ? ', …' : ''}).`,
         link: '/dispatch/board',
       });
@@ -500,7 +535,7 @@ export class StoreService {
     const driverId = stop.trip.assignedDriverId ?? stop.trip.vehicle.driverId;
     if (driverId) {
       const store = await this.store(me);
-      const issues = results.filter((r) => r.issue).length;
+      const issues = results.filter((r) => r.issues.length > 0).length;
       await this.notifier.notify({
         userId: driverId,
         title: `${store.displayName ?? store.id} checked the goods`,
