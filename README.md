@@ -31,7 +31,7 @@ Open http://localhost:3000. Postgres, MinIO, the API (migrations + seed) and the
 | Role | Login ID | Secret | Notes |
 | --- | --- | --- | --- |
 | Dispatcher | `nimal` | password `waypoint` | Depot Peliyagoda |
-| Store manager | `sunil` | password `waypoint` | First Peliyagoda Fresh store (if `data/outlets.csv` is loaded) |
+| Store manager | `sunil` | password `waypoint` | First Peliyagoda Fresh store (`OUT001`) |
 | Loader | dock password `123456` (Peliyagoda) / `654321` (Kandy) | then loader ID + PIN at Start loading (`sampath` / `1234`) | Shared dock tablet |
 | Driver | `kasun` | PIN `1234` | Depot Peliyagoda |
 
@@ -145,7 +145,7 @@ The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, th
 
 ### Data
 
-- The competition CSVs are not in `data/` in the repository, so the plan board has only been tried on a small demo day. Seed the real files (`docs/data-model.md`) before judging.
+- The shared competition CSVs are committed in `data/`, so a fresh `docker compose up` seeds all 120 outlets, 60 vehicles, the calendar and travel data, plus a ready demo delivery day.
 
 ## Docs
 
