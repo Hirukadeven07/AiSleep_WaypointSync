@@ -8,6 +8,12 @@ describe('rejectedText', () => {
     );
   });
 
+  it('explains a start that the server was not ready for', () => {
+    expect(
+      rejectedText({ clientId: 'c3', type: 'START_TRIP', reason: 'TRIP_NOT_READY', at: '' }),
+    ).toBe('Start trip was not saved: the trip is not ready for that yet.');
+  });
+
   it('falls back for an unknown reason', () => {
     expect(rejectedText({ clientId: 'c2', type: 'FUEL_READING', reason: 'UNKNOWN', at: '' })).toBe(
       'Your fuel reading was not saved: the server refused it.',
