@@ -9,6 +9,7 @@ import { timeOf, toneOf } from '@/components/dispatch/live-format';
 import { districtTone } from './districts';
 import { IslandMap, type IslandMapHandle, type IslandMarker, type MapView } from './IslandMap';
 import { MapControls } from './MapControls';
+import { depotLabel } from '@/lib/depots';
 
 const BRANDS: { id: 'all' | Brand; label: string; className: string }[] = [
   { id: 'all', label: 'All', className: 'bg-scrim text-on-primary' },
@@ -113,7 +114,7 @@ export function LocateMap() {
         lat: depot.lat,
         lng: depot.lng,
         dotClass: 'bg-scrim',
-        title: `${depot.name} depot`,
+        title: depotLabel(depot.name),
         size: 'depot',
       });
     }
@@ -158,7 +159,7 @@ export function LocateMap() {
           <h1 className="text-[34px] font-medium leading-10 text-ink">Live map</h1>
           <p className="text-[14px] leading-5 text-muted">
             {data
-              ? `${dayLabel(data.date)}  ·  ${data.depotId} depot  ·  positions update at each completed stop`
+              ? `${dayLabel(data.date)}  ·  ${depotLabel(data.depotId)}  ·  positions update at each completed stop`
               : 'Positions update at each completed stop'}
           </p>
         </div>
@@ -173,7 +174,7 @@ export function LocateMap() {
             >
               {data.depots.map((depot) => (
                 <option key={depot.id} value={depot.id}>
-                  {depot.name} depot
+                  {depotLabel(depot.name)}
                 </option>
               ))}
             </select>

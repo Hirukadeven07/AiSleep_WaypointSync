@@ -1,6 +1,7 @@
 import type { PlanDay, PlanSummary } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { clock12, dayLabel } from './format';
+import { depotLabel } from '@/lib/depots';
 
 function Pill({
   icon,
@@ -58,7 +59,7 @@ export function PlanHeader({
           Plan tomorrow&apos;s trips
         </h1>
         <p className="whitespace-pre text-[14px] leading-5 text-muted">
-          {`${dayLabel(plan.date)}  ·  ${plan.depotId} depot  ·  orders close ${clock12(plan.cutoffMin)}`}
+          {`${dayLabel(plan.date)}  ·  ${depotLabel(plan.depotId)}  ·  orders close ${clock12(plan.cutoffMin)}`}
         </p>
       </div>
       <Pill icon="sparkle" onClick={onAutoAssign}>

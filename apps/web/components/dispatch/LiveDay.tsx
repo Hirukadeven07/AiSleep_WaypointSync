@@ -9,6 +9,7 @@ import { GlancePanel } from './GlancePanel';
 import { useLiveDay } from './useLiveDay';
 import { useTripPanels } from './useTripPanels';
 import { BRAND_TAG, firstName, greeting, lastUpdate, time12, timeOf, toneOf } from './live-format';
+import { depotLabel } from '@/lib/depots';
 
 type Filter = 'all' | 'on_time' | 'late' | 'issue' | 'done';
 
@@ -165,7 +166,7 @@ export function LiveDay() {
               {me ? `, ${firstName(me.name)}` : ''}
             </h1>
             <p className="whitespace-pre text-[14px] leading-5 text-muted">
-              {`${dayLabel(day.date)}  ·  ${day.depotId} depot${day.liveSince ? `  ·  Live since ${time12(day.liveSince)}` : ''}`}
+              {`${dayLabel(day.date)}  ·  ${depotLabel(day.depotId)}${day.liveSince ? `  ·  Live since ${time12(day.liveSince)}` : ''}`}
             </p>
           </div>
           <span className="flex shrink-0 items-center gap-[6px] rounded-pill bg-success/[0.12] px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] text-success">

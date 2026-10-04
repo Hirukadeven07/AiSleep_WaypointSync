@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { DISPATCH_PHONE, telHref } from '@/lib/driver-format';
 import { enqueueAction } from '@/lib/outbox';
 import { useDriver } from './DriverShell';
+import { depotName } from '@/lib/depots';
 
 function CallCard({
   href,
@@ -160,7 +161,7 @@ export function SosScreen() {
             primary
             href={telHref(DISPATCH_PHONE)}
             title="Call dispatcher"
-            subtitle={me?.depotId ? `Dispatch · ${me.depotId}` : 'Dispatch'}
+            subtitle={me?.depotId ? `Dispatch · ${depotName(me.depotId)}` : 'Dispatch'}
             number={DISPATCH_PHONE}
           />
           <CallCard href={telHref('119')} title="Police emergency" subtitle="Sri Lanka Police" number="119" />
