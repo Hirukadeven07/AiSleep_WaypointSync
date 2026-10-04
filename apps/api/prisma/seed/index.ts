@@ -248,8 +248,9 @@ async function seedFleetDrivers() {
 /**
  * 100 loaders per depot (L001… Peliyagoda, then Kandy). Last 10 at each depot have left.
  * A loader does not sign in on their own: the dock tablet signs in with the depot's dock password
- * (seedDockPasswords), and each loader confirms with loader id + PIN 1234 at "Start loading".
- * sampath stays as the demo loader.
+ * (seedDockPasswords), and each loader confirms with their loader id at "Start loading". Fleet
+ * loaders have no PIN, so the PIN box stays blank; a loader can set one in Account settings, which
+ * the next seed clears again. sampath stays as the demo loader with PIN 1234.
  */
 async function seedFleetLoaders() {
   const depots = await prisma.depot.findMany({ select: { id: true }, orderBy: { id: 'desc' } });
@@ -257,7 +258,6 @@ async function seedFleetLoaders() {
     console.warn('[seed] no depots - skipping fleet loaders');
     return;
   }
-  const pinHash = await argon2.hash('1234');
   let n = 0;
   for (const depot of depots) {
     for (let i = 1; i <= LOADERS_PER_DEPOT; i++) {
@@ -268,8 +268,8 @@ async function seedFleetLoaders() {
       const name = personName(given, n);
       const user = await prisma.user.upsert({
         where: { loginId },
-        update: { role: 'loader', name, depotId: depot.id, pinHash },
-        create: { loginId, role: 'loader', name, depotId: depot.id, pinHash },
+        update: { role: 'loader', name, depotId: depot.id, pinHash: null },
+        create: { loginId, role: 'loader', name, depotId: depot.id, pinHash: null },
       });
       const joinDate = new Date(Date.UTC(2020, 0, 1 + ((n * 7) % 1200)));
       await prisma.loader.upsert({
