@@ -29,11 +29,10 @@ import { IncidentsService } from '../incidents/incidents.service';
 import { NoticeHub } from '../notifications/notice-hub';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { tripAreaLabel } from '../plan/plan.mapper';
+import { SYNC_STALE_MIN } from '../map/map.logic';
 
 /** A trip counts as late from this many minutes past a stop's window. */
 const LATE_MIN = 5;
-/** A trip on the road that has not synced for this long is shown as "Not synced". */
-const SYNC_STALE_MIN = 20;
 /** A stop is "at risk" when its ETA is within this many minutes of the end of its window. */
 const AT_RISK_MIN = 15;
 const DONE = new Set(['delivered', 'confirmed', 'partial', 'deferred']);
