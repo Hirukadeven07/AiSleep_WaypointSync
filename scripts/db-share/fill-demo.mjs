@@ -2,7 +2,74 @@
  * Fills the demo columns and rows added for the dispatcher walkthrough.
  * Safe to run again: demo orders use the demo-dispatch- id prefix.
  */
+import fs from 'node:fs';
 import pg from 'pg';
+
+const districtShapes = JSON.parse(
+  fs.readFileSync(
+    new URL('../../apps/web/public/maps/sri-lanka-districts.geojson', import.meta.url),
+    'utf8',
+  ),
+).features;
+const shapeByName = new Map(districtShapes.map((feature) => [feature.properties.name, feature]));
+
+function ringContains(lng, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonsOf(feature) {
+  return feature.geometry.type === 'Polygon' ? [feature.geometry.coordinates] : feature.geometry.coordinates;
+}
+
+function insideDistrict(lng, lat, feature) {
+  for (const polygon of polygonsOf(feature)) {
+    const [outer, ...holes] = polygon;
+    if (!ringContains(lng, lat, outer)) continue;
+    if (holes.some((hole) => ringContains(lng, lat, hole))) continue;
+    return true;
+  }
+  return false;
+}
+
+/** Nearest map point that sits inside the district outline. */
+function pointInDistrict(lat, lng, district) {
+  const feature = shapeByName.get(district);
+  if (!feature) return { lat, lng };
+  if (lat != null && lng != null && insideDistrict(lng, lat, feature)) return { lat, lng };
+  let minLng = 180;
+  let minLat = 90;
+  let maxLng = -180;
+  let maxLat = -90;
+  for (const polygon of polygonsOf(feature)) {
+    for (const [x, y] of polygon[0]) {
+      minLng = Math.min(minLng, x);
+      minLat = Math.min(minLat, y);
+      maxLng = Math.max(maxLng, x);
+      maxLat = Math.max(maxLat, y);
+    }
+  }
+  const targetLng = lng ?? (minLng + maxLng) / 2;
+  const targetLat = lat ?? (minLat + maxLat) / 2;
+  let best = null;
+  let bestDist = Infinity;
+  for (let x = minLng; x <= maxLng; x += 0.02) {
+    for (let y = minLat; y <= maxLat; y += 0.02) {
+      if (!insideDistrict(x, y, feature)) continue;
+      const dist = (x - targetLng) ** 2 + (y - targetLat) ** 2;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { lat: Math.round(y * 1e4) / 1e4, lng: Math.round(x * 1e4) / 1e4 };
+      }
+    }
+  }
+  return best ?? { lat: targetLat, lng: targetLng };
+}
 
 const c = new pg.Client({
   connectionString: 'postgresql://waypoint:waypoint@localhost:5432/waypoint',
@@ -65,17 +132,21 @@ try {
   for (let i = 0; i < stores.length; i++) {
     const s = stores[i];
     const streetNo = 12 + (i % 80);
+    const point = pointInDistrict(
+      s.lat == null ? Number(s.dlat) : Number(s.lat),
+      s.lng == null ? Number(s.dlng) : Number(s.lng),
+      s.district,
+    );
     await c.query(
-      `UPDATE "Store" SET "displayName" = $2, address = $3, email = $4,
-         lat = COALESCE(lat, $5), lng = COALESCE(lng, $6)
+      `UPDATE "Store" SET "displayName" = $2, address = $3, email = $4, lat = $5, lng = $6
        WHERE id = $1`,
       [
         s.id,
         shopName(s.brand, i),
         `${streetNo} Temple Road, ${s.district}`,
         `${s.id.toLowerCase()}@shops.waypoint.lk`,
-        s.lat ?? s.dlat,
-        s.lng ?? s.dlng,
+        point.lat,
+        point.lng,
       ],
     );
   }
@@ -416,60 +487,133 @@ try {
     );
   }
 
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Colombo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const nowMin = (() => {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Colombo',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+    const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
+    const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+    return h * 60 + m;
+  })();
+  const leftAgo = new Date(Date.now() - 12 * 60_000);
+
+  await c.query(
+    `UPDATE "Trip" t SET "serviceDate" = $1::date, "startingTime" = $2
+     WHERE t.status = 'on_road'
+       AND NOT EXISTS (
+         SELECT 1 FROM "Trip" other
+         WHERE other."vehicleId" = t."vehicleId"
+           AND other."serviceDate" = $1::date
+           AND other."tripNumber" = t."tripNumber"
+           AND other.id <> t.id
+       )`,
+    [today, leftAgo.toISOString()],
+  );
+  await c.query(
+    `UPDATE "Order" o SET "deliveryDate" = t."serviceDate"
+     FROM "TripStop" ts
+     JOIN "Trip" t ON t.id = ts."tripId"
+     WHERE ts."orderId" = o.id AND t.status = 'on_road' AND t."serviceDate" = $1::date`,
+    [today],
+  );
+  await c.query(
+    `UPDATE "LoadSession" ls SET "departedAt" = $2
+     FROM "Trip" t
+     WHERE ls."tripId" = t.id AND t.status = 'on_road' AND t."serviceDate" = $1::date`,
+    [today, leftAgo.toISOString()],
+  );
+
   const pingTrips = (
     await c.query(`
-      SELECT t.id, t."assignedDriverId", v."driverId" AS "vehicleDriver"
+      SELECT t.id, t."depotId", t."assignedDriverId", v."driverId" AS "vehicleDriver",
+             d.lat AS "depotLat", d.lng AS "depotLng"
       FROM "Trip" t
       JOIN "Vehicle" v ON v.id = t."vehicleId"
-      WHERE t.status IN ('completed', 'on_road')
-         OR EXISTS (SELECT 1 FROM "TripStop" ts WHERE ts."tripId" = t.id AND ts.status IN ('delivered', 'confirmed', 'partial'))
-      ORDER BY t."serviceDate" DESC
-      LIMIT 2
-    `)
+      JOIN "Depot" d ON d.id = t."depotId"
+      WHERE t.status = 'on_road' AND t."serviceDate" = $1::date
+      ORDER BY t.id
+    `, [today])
   ).rows;
+  const finished = new Set(['delivered', 'confirmed', 'partial', 'deferred']);
+  const atStore = new Set(['arrived', 'waiting']);
   for (const trip of pingTrips) {
     const driverUser = trip.assignedDriverId ?? trip.vehicleDriver;
     const profile = driverUser
       ? (await c.query(`SELECT id FROM "Driver" WHERE "userId" = $1`, [driverUser])).rows[0]
       : drivers[0];
-    if (!profile || !driverUser) continue;
+    if (!profile) continue;
     const stops = (
       await c.query(
-        `SELECT s.lat, s.lng FROM "TripStop" ts
+        `SELECT ts.id, ts.sequence, ts.status, ts."etaMin", s.lat, s.lng, s."windowCloseMin"
+         FROM "TripStop" ts
          JOIN "Order" o ON o.id = ts."orderId"
          JOIN "Store" s ON s.id = o."storeId"
-         WHERE ts."tripId" = $1 AND s.lat IS NOT NULL
-         ORDER BY ts.sequence LIMIT 4`,
+         WHERE ts."tripId" = $1
+         ORDER BY ts.sequence`,
         [trip.id],
       )
     ).rows;
-    for (let i = 0; i < Math.max(stops.length, 1); i++) {
-      const lat = stops[i]?.lat ?? 6.95;
-      const lng = stops[i]?.lng ?? 79.86;
-      const when = new Date(Date.UTC(2026, 9, 3, 3, i * 12));
+    let open = 0;
+    for (const stop of stops) {
+      if (finished.has(stop.status) || atStore.has(stop.status) || stop.lat == null) continue;
+      const eta = Math.min(1430, nowMin + 20 + open * 25);
+      open += 1;
+      if (stop.etaMin == null || stop.etaMin >= stop.windowCloseMin || stop.etaMin < nowMin) {
+        await c.query(`UPDATE "TripStop" SET "etaMin" = $2 WHERE id = $1`, [stop.id, eta]);
+        stop.etaMin = eta;
+      }
+    }
+    const fromStop = [...stops].reverse().find((s) => (finished.has(s.status) || atStore.has(s.status)) && s.lat != null);
+    const toStop = stops.find((s) => !finished.has(s.status) && !atStore.has(s.status) && s.lat != null);
+    const from = fromStop
+      ? { lat: Number(fromStop.lat), lng: Number(fromStop.lng) }
+      : { lat: Number(trip.depotLat ?? 6.9678), lng: Number(trip.depotLng ?? 79.8832) };
+    const to = toStop ? { lat: Number(toStop.lat), lng: Number(toStop.lng) } : from;
+    const steps = [0.35, 0.58, 0.78];
+    for (let i = 0; i < steps.length; i++) {
+      const t = steps[i];
+      const lat = from.lat + (to.lat - from.lat) * t;
+      const lng = from.lng + (to.lng - from.lng) * t;
+      const when = new Date(Date.now() - (steps.length - 1 - i) * 3 * 60_000);
+      const id = `road-ping-${trip.id}-${i}`;
+      const speed = toStop ? 34 : 0;
       await c.query(
         `INSERT INTO "LocationPing"
-          (id, "clientUuid", "tripId", "driverId", lat, lng, "accuracyM", "speedKmh", "recordedAt")
-         VALUES ($1, $2, $3, $4, $5, $6, 8, 32, $7)
-         ON CONFLICT ("clientUuid") DO NOTHING`,
-        [`demo-ping-${trip.id}-${i}`, `demo-ping-${trip.id}-${i}`, trip.id, profile.id, lat, lng, when.toISOString()],
+          (id, "clientUuid", "tripId", "driverId", lat, lng, "accuracyM", "speedKmh", "recordedAt", "receivedAt")
+         VALUES ($1, $1, $2, $3, $4, $5, 8, $7, $6, $6)
+         ON CONFLICT ("clientUuid") DO UPDATE SET
+           lat = EXCLUDED.lat,
+           lng = EXCLUDED.lng,
+           "speedKmh" = EXCLUDED."speedKmh",
+           "recordedAt" = EXCLUDED."recordedAt",
+           "receivedAt" = EXCLUDED."receivedAt",
+           "driverId" = EXCLUDED."driverId"`,
+        [id, trip.id, profile.id, lat, lng, when.toISOString(), speed],
       );
-      if (i === 0) {
-        await c.query(
-          `INSERT INTO "DriverEvent"
-            (id, "clientId", "driverId", "tripId", type, payload, "createdOnPhoneAt", "seenPlanVersion")
-           VALUES ($1, $2, $3, $4, 'ARRIVED', $5::jsonb, $6, 1)
-           ON CONFLICT ("clientId") DO NOTHING`,
-          [
-            `demo-ev-${trip.id}`,
-            `demo-ev-${trip.id}`,
-            driverUser,
-            trip.id,
-            JSON.stringify({ stopId: 'demo' }),
-            when.toISOString(),
-          ],
-        );
-      }
+    }
+    if (driverUser) {
+      await c.query(
+        `INSERT INTO "DriverEvent"
+          (id, "clientId", "driverId", "tripId", type, payload, "createdOnPhoneAt", "seenPlanVersion", "appliedAt")
+         VALUES ($1, $1, $2, $3, 'ARRIVED', $4::jsonb, $5, 1, $5)
+         ON CONFLICT ("clientId") DO UPDATE SET "appliedAt" = EXCLUDED."appliedAt", "createdOnPhoneAt" = EXCLUDED."createdOnPhoneAt"`,
+        [
+          `demo-ev-${trip.id}`,
+          driverUser,
+          trip.id,
+          JSON.stringify({ stopId: fromStop?.id ?? 'demo' }),
+          leftAgo.toISOString(),
+        ],
+      );
     }
   }
 
@@ -548,6 +692,105 @@ try {
          WHERE NOT EXISTS (SELECT 1 FROM "LoaderFlag" WHERE id = 'demo-loader-flag')`,
         [loader.id, dn.dnId, dn.versionAt, item.id],
       );
+    }
+  }
+
+  const kasun = (await c.query(`SELECT id FROM "User" WHERE "loginId" = 'kasun'`)).rows[0];
+  const kasunDriver = kasun
+    ? (await c.query(`SELECT id FROM "Driver" WHERE "userId" = $1`, [kasun.id])).rows[0]
+    : null;
+  const arrival = (
+    await c.query(
+      `SELECT ts.id AS stop, ts."tripId", o.id AS "orderId", s.id AS "storeId", s.lat, s.lng, t."vehicleId"
+       FROM "User" sunil
+       JOIN "Store" s ON s.id = sunil."storeId"
+       JOIN "Order" o ON o."storeId" = s.id
+       JOIN "TripStop" ts ON ts."orderId" = o.id
+       JOIN "Trip" t ON t.id = ts."tripId"
+       WHERE sunil."loginId" = 'sunil'
+         AND t.status = 'on_road'
+         AND t."serviceDate" = $1::date
+         AND ts.status = 'arrived'
+       ORDER BY ts."arrivedAt" DESC NULLS LAST
+       LIMIT 1`,
+      [today],
+    )
+  ).rows[0];
+  if (kasun && arrival) {
+    const arrivedAt = new Date();
+    await c.query(
+      `UPDATE "Trip" SET "assignedDriverId" = $2, status = 'on_road', "serviceDate" = $3::date WHERE id = $1`,
+      [arrival.tripId, kasun.id, today],
+    );
+    await c.query(
+      `UPDATE "TripStop"
+       SET status = 'arrived', "arrivedAt" = $2, "storeConfirmedAt" = NULL, "driverAckAt" = NULL
+       WHERE id = $1`,
+      [arrival.stop, arrivedAt.toISOString()],
+    );
+    await c.query(
+      `UPDATE "TripStop" ts
+       SET "driverAckAt" = $2
+       FROM "Order" o
+       WHERE ts."orderId" = o.id
+         AND o."storeId" = $3
+         AND ts.id <> $1
+         AND ts.status IN ('confirmed', 'delivered', 'partial')
+         AND ts."driverAckAt" IS NULL`,
+      [arrival.stop, arrivedAt.toISOString(), arrival.storeId],
+    );
+    if (kasunDriver && arrival.lat != null) {
+      const pingId = `road-ping-${arrival.tripId}-arrive`;
+      await c.query(
+        `INSERT INTO "LocationPing"
+          (id, "clientUuid", "tripId", "driverId", lat, lng, "accuracyM", "speedKmh", "recordedAt", "receivedAt")
+         VALUES ($1, $1, $2, $3, $4, $5, 5, 0, $6, $6)
+         ON CONFLICT ("clientUuid") DO UPDATE SET
+           lat = EXCLUDED.lat, lng = EXCLUDED.lng, "speedKmh" = 0,
+           "recordedAt" = EXCLUDED."recordedAt", "receivedAt" = EXCLUDED."receivedAt",
+           "driverId" = EXCLUDED."driverId"`,
+        [pingId, arrival.tripId, kasunDriver.id, arrival.lat, arrival.lng, arrivedAt.toISOString()],
+      );
+    }
+    await c.query(
+      `INSERT INTO "DriverEvent"
+        (id, "clientId", "driverId", "tripId", type, payload, "createdOnPhoneAt", "seenPlanVersion", "appliedAt")
+       VALUES ($1, $1, $2, $3, 'ARRIVED', $4::jsonb, $5, 1, $5)
+       ON CONFLICT ("clientId") DO UPDATE SET
+         "driverId" = EXCLUDED."driverId",
+         "tripId" = EXCLUDED."tripId",
+         payload = EXCLUDED.payload,
+         "createdOnPhoneAt" = EXCLUDED."createdOnPhoneAt",
+         "appliedAt" = EXCLUDED."appliedAt"`,
+      [
+        `kasun-arrived-${arrival.storeId}`,
+        kasun.id,
+        arrival.tripId,
+        JSON.stringify({ stopId: arrival.stop }),
+        arrivedAt.toISOString(),
+      ],
+    );
+    const lineCount = (
+      await c.query(`SELECT COUNT(*)::int AS n FROM "OrderLine" WHERE "orderId" = $1`, [arrival.orderId])
+    ).rows[0].n;
+    if (lineCount === 0) {
+      const item = (await c.query(`SELECT id, "itemName", "packLabel", "isChilled", "packWeightKg" FROM "Item" WHERE type IN ('fresh', 'chilled_food') ORDER BY id LIMIT 2`)).rows;
+      for (const [i, row] of item.entries()) {
+        await c.query(
+          `INSERT INTO "OrderLine" (id, "orderId", "itemId", name, qty, pack, chilled, "unitWeightKg", "unitVolumeM3")
+           VALUES ($1, $2, $3, $4, 4, $5, $6, $7, 0.02)
+           ON CONFLICT (id) DO NOTHING`,
+          [
+            `kasun-line-${arrival.storeId}-${i}`,
+            arrival.orderId,
+            row.id,
+            row.itemName,
+            row.packLabel ?? 'crate',
+            row.isChilled,
+            row.packWeightKg ?? 1,
+          ],
+        );
+      }
     }
   }
 

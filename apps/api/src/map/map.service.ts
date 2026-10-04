@@ -151,7 +151,7 @@ export class MapService {
     const day = dateOnly(date);
     const now = this.clock.now();
 
-    const [districts, depots, stores, rows, events, pings] = await Promise.all([
+    const [districts, depots, stores, rows, events, pings, pingRows] = await Promise.all([
       this.districts(),
       this.prisma.depot.findMany({ orderBy: { name: 'asc' } }),
       this.storeMarkers(depotId, date),
@@ -178,6 +178,10 @@ export class MapService {
         _max: { receivedAt: true },
         where: { trip: { depotId, serviceDate: day } },
       }),
+      this.prisma.locationPing.findMany({
+        where: { trip: { depotId, serviceDate: day } },
+        select: { tripId: true, lat: true, lng: true, recordedAt: true },
+      }),
     ]);
 
     const lastSeen = new Map<string, Date>();
@@ -188,6 +192,11 @@ export class MapService {
       const seen = ping._max.receivedAt;
       const prev = lastSeen.get(ping.tripId);
       if (seen && (!prev || seen > prev)) lastSeen.set(ping.tripId, seen);
+    }
+    const latestPing = new Map<string, { lat: number; lng: number; recordedAt: Date }>();
+    for (const ping of pingRows) {
+      const prev = latestPing.get(ping.tripId);
+      if (!prev || ping.recordedAt > prev.recordedAt) latestPing.set(ping.tripId, ping);
     }
 
     const trips: LocateTrip[] = [];
@@ -223,6 +232,7 @@ export class MapService {
 
       const visited = lastVisited(trip.stops);
       const next = trip.stops.find((s) => !stopIsDone(s.status));
+      const ping = latestPing.get(trip.id);
       trips.push({
         id: trip.id,
         vehicleId: trip.vehicleId,
@@ -243,6 +253,9 @@ export class MapService {
               lng: visited.order.store.lng,
               arrivedAt: visited.arrivedAt.toISOString(),
             }
+          : null,
+        position: ping
+          ? { lat: ping.lat, lng: ping.lng, recordedAt: ping.recordedAt.toISOString() }
           : null,
         stops: trip.stops.map((s) => ({
           id: s.id,

@@ -1,4 +1,12 @@
-import { fallbackDistricts, isOnRoad, lastVisited, locateLive, minutesLate, stopKind } from './map.logic';
+import {
+  fallbackDistricts,
+  isOnRoad,
+  lastVisited,
+  locateLive,
+  minutesLate,
+  stopKind,
+  vehiclePosition,
+} from './map.logic';
 
 const at = (iso: string) => new Date(iso);
 
@@ -25,6 +33,20 @@ describe('lastVisited', () => {
 
   it('returns null when no stop has an arrival', () => {
     expect(lastVisited([{ arrivedAt: null }, { arrivedAt: null }])).toBeNull();
+  });
+});
+
+describe('vehiclePosition', () => {
+  it('uses the latest ping so a truck between shops is on the way', () => {
+    expect(vehiclePosition({ lat: 6.95, lng: 79.87 }, { lat: 6.93, lng: 79.84 })).toEqual({
+      lat: 6.95,
+      lng: 79.87,
+    });
+  });
+
+  it('falls back to the last confirmed stop when the phone has not pinged', () => {
+    expect(vehiclePosition(null, { lat: 6.93, lng: 79.84 })).toEqual({ lat: 6.93, lng: 79.84 });
+    expect(vehiclePosition(null, { lat: null, lng: null })).toBeNull();
   });
 });
 

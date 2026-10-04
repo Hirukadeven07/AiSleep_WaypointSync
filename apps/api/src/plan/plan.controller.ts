@@ -148,7 +148,7 @@ export class PlanController {
     return this.trips.remove(me, id);
   }
 
-  /** Put a driver on a trip (or `null` for the vehicle's registered driver). */
+  /** Keep the vehicle's driver on the trip. Another driver is refused until the current one leaves. */
   @Post('trips/:id/driver')
   @HttpCode(200)
   assignDriver(
