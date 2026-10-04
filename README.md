@@ -28,7 +28,7 @@ Open http://localhost:3000. Postgres, MinIO, the API (migrations + seed) and the
 | --- | --- | --- | --- |
 | Dispatcher | `nimal` | password `waypoint` | Depot Peliyagoda |
 | Store manager | `sunil` | password `waypoint` | First Peliyagoda Fresh store (if `data/outlets.csv` is loaded) |
-| Loader | `sampath` | none | Pick depot Peliyagoda |
+| Loader | dock password `123456` (Peliyagoda) / `654321` (Kandy) | then loader ID + PIN at Start loading (`sampath` / `1234`) | Shared dock tablet |
 | Driver | `kasun` | PIN `1234` | Depot Peliyagoda |
 
 ## Local development
@@ -105,7 +105,7 @@ The web app follows the Figma file "AI-Sleep_Designathon". Where it does not, th
 ### Landing page and sign-in
 
 - Signed-in visitors skip the landing page and go straight to their workspace. Every "Sign in" and workspace card goes to the role chooser, because the Figma has no role parameter.
-- **Sync Dock sign-in (L1):** the design has a shared dock password on the keypad, and no loader ID. The API signs a loader in by loader ID and depot, so the screen has a "Loader ID" field. The keypad code is the loader's own PIN: it is checked when the loader has one (seeded L001… use 1234), and a loader without one (judges' `sampath`) signs in with ID and depot and can set a PIN in Account settings.
+- **Sync Dock sign-in (L1):** the tablet is unlocked with the depot's shared 6-digit dock password (stored hashed on the `Depot` row: seeded `depo1` = 123456, `depo2` = 654321; change it in Account settings). There is no loader ID on that screen. Each person who joins a load taps **Start loading** (or **+ Add a loader** once started), enters their own loader ID and PIN (seeded L001… and `sampath` use 1234), and is added to the trip's loader list only when the API confirms them. Delivery notes are attributed to those loaders, not to the shared tablet account.
 - Depot cards show the depot name only; "12 trips today" has no data behind it yet.
 - "Forgot password?" is drawn but not wired. "Keep me signed in" and "Remember this phone" only remember the login id on the device, because the API sets the session length.
 

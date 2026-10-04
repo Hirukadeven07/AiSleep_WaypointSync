@@ -2,7 +2,13 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { FlagRequest, LoadSheet, LoadStop, OrderLine } from '@waypoint/contracts';
+import type {
+  FlagRequest,
+  LoadSheet,
+  LoadStop,
+  OrderLine,
+  StartLoadingRequest,
+} from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { messageOf, reasonOf } from '@/lib/api-error';
 import { usePoll } from '@/lib/poll';
@@ -16,6 +22,7 @@ import { FlagSheet } from '@/components/dock/FlagSheet';
 import { JobNote } from '@/components/dock/JobNote';
 import { LoadSummary } from '@/components/dock/LoadSummary';
 import { PlanLockBanner } from '@/components/dock/PlanLockBanner';
+import { StartLoadingSheet } from '@/components/dock/StartLoadingSheet';
 
 const FLAG_LABEL = { missing: 'Missing', damaged: 'Damaged', wrong_quantity: 'Wrong qty' } as const;
 
@@ -62,6 +69,8 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
   const { data, error, loading, refresh } = usePoll(() => api<LoadSheet>(`/loads/${tripId}`));
   const [sheet, setSheet] = useState<LoadSheet>();
   const [busy, setBusy] = useState(false);
+  // Open while someone confirms their loader ID and PIN to start loading or join the load.
+  const [confirming, setConfirming] = useState<{ error: string | null }>();
   const [flagging, setFlagging] = useState<{ stopId: string; line: OrderLine }>();
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'danger' | 'warning' }>();
   const clearToast = useCallback(() => setToast(undefined), []);
@@ -86,6 +95,32 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
       }
     },
     [refresh],
+  );
+
+  const startLoading = useCallback(
+    async (credentials: StartLoadingRequest) => {
+      setBusy(true);
+      setConfirming({ error: null });
+      try {
+        const next = await api<LoadSheet>(`/loads/${tripId}/start`, {
+          method: 'POST',
+          body: credentials,
+        });
+        setSheet(next);
+        setConfirming(undefined);
+        setToast({ message: 'You are on this load. Keep loading.', tone: 'success' });
+      } catch (e) {
+        if ((reasonOf(e) as string | undefined) === 'WRONG_LOADER_CREDENTIALS') setConfirming({ error: messageOf(e) });
+        else {
+          setConfirming(undefined);
+          setToast({ message: messageOf(e), tone: 'danger' });
+          await refresh();
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [tripId, refresh],
   );
 
   const flaggedLines = useMemo(
@@ -164,9 +199,9 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
           <Button
             className="w-full"
             disabled={busy}
-            onClick={() => run(() => api<LoadSheet>(`/loads/${tripId}/start`, { method: 'POST' }))}
+            onClick={() => setConfirming({ error: null })}
           >
-            {busy ? 'Starting…' : 'Start loading'}
+            Start loading
           </Button>
         </div>
       ) : (
@@ -180,6 +215,14 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
               Loading: {sheet.session.loaderNames.join(', ')}
             </p>
           )}
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => setConfirming({ error: null })}
+            className="mt-xs text-label font-semibold text-slate disabled:opacity-50"
+          >
+            + Add a loader
+          </button>
         </div>
       )}
 
@@ -235,6 +278,15 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
         </div>
       )}
 
+      {confirming && (
+        <StartLoadingSheet
+          busy={busy}
+          error={confirming.error}
+          joining={started}
+          onClose={() => setConfirming(undefined)}
+          onSubmit={startLoading}
+        />
+      )}
       {flagging && (
         <FlagSheet
           stopId={flagging.stopId}

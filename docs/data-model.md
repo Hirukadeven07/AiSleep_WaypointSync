@@ -32,7 +32,7 @@ Order → DeliveryNote (versioned) → DeliveryNoteLine → DeliveryNotePick →
 
 | Table | Role |
 | --- | --- |
-| `Depot` | Peliyagoda, Kandy. Parent of stores, vehicles, users, trips. |
+| `Depot` | Peliyagoda, Kandy. Parent of stores, vehicles, users, trips. `dockPasswordHash` is the shared dock-tablet password (argon2). |
 | `District` | PK is `name`. Optional `depotId`. Travel fields (`depotToDistrictMin`, `interStopMin`, km) used in trip minutes. |
 | `ServiceAllowance` | Unique `(brand, dockType)` → `minutes`. |
 | `CalendarDay` | PK is the calendar date. Operating / monsoon / payday flags. |
@@ -189,7 +189,7 @@ The phone `outbox` / `cache_*` tables in the draw.io swimlane are **IndexedDB on
 | loginId | role | Notes |
 | --- | --- | --- |
 | `nimal` | dispatcher | Password `waypoint` |
-| `sampath` | loader | Depot pick, no password |
+| `sampath` | loader | PIN 1234, confirmed at Start loading (the dock itself uses the depot dock password) |
 | `kasun` | driver | PIN `1234` |
 | `sunil` | store | Extra login on the demo Fresh store |
 | `OUT001` … | store | One manager per outlet, password `waypoint` |

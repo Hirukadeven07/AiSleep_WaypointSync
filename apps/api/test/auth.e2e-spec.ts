@@ -59,6 +59,26 @@ describe('auth (e2e)', () => {
       .expect(401);
   });
 
+  it('unlocks a dock with the depot dock password, not a loader ID', async () => {
+    const dock = request.agent(app.getHttpServer());
+    const res = await dock
+      .post('/api/auth/login')
+      .send({ role: 'loader', secret: '123456', depotId: 'depo1' })
+      .expect(200);
+    expect(res.body.home).toBe('/dock');
+    expect((await dock.get('/api/me').expect(200)).body).toMatchObject({
+      role: 'loader',
+      depotId: 'depo1',
+    });
+    for (const body of [
+      { role: 'loader', secret: '654321', depotId: 'depo1' },
+      { role: 'loader', secret: '123456' },
+      { role: 'loader', secret: '123456', depotId: 'no-such-depot' },
+    ]) {
+      await request(app.getHttpServer()).post('/api/auth/login').send(body).expect(401);
+    }
+  });
+
   it('forbids a driver from a dispatcher route', async () => {
     const agent = request.agent(app.getHttpServer());
     await agent

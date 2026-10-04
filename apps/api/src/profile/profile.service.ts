@@ -8,6 +8,7 @@ import type { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
+  DOCK_PASSWORD_PATTERN,
   PASSWORD_MIN_LENGTH,
   PIN_PATTERN,
   type ChangePasswordResponse,
@@ -29,10 +30,13 @@ const usesPin = (role: AuthUser['role']) => role === 'driver' || role === 'loade
 export class ProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Dispatchers and loaders pick their depot. A store's depot comes from its store, a driver's from the vehicle. */
+  /**
+   * Dispatchers pick their depot. A store's depot comes from its store, a driver's from the vehicle,
+   * and a dock tablet belongs to the depot whose dock password unlocked it.
+   */
   async changeDepot(me: AuthUser, depotId: string): Promise<Me> {
-    if (me.role !== 'dispatcher' && me.role !== 'loader') {
-      throw new ForbiddenException('Only dispatchers and loaders can change depot');
+    if (me.role !== 'dispatcher') {
+      throw new ForbiddenException('Only dispatchers can change depot');
     }
     const depot = await this.prisma.depot.findUnique({ where: { id: depotId } });
     if (!depot) throw new NotFoundException('Depot not found');
@@ -55,6 +59,7 @@ export class ProfileService {
     sessionId: string | undefined,
     dto: ChangePasswordDto,
   ): Promise<ChangePasswordResponse> {
+    if (me.role === 'loader') return this.changeDockPassword(me, dto);
     const pin = usesPin(me.role);
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: me.id } });
     const hash = pin ? user.pinHash : user.passwordHash;
@@ -87,6 +92,38 @@ export class ProfileService {
         where: { userId: me.id, ...(sessionId ? { id: { not: sessionId } } : {}) },
       }),
     ]);
+    return { ok: true };
+  }
+
+  /** The dock tablet's sign-in: changing it saves the depot's new password; tablets already unlocked stay unlocked. */
+  private async changeDockPassword(
+    me: AuthUser,
+    dto: ChangePasswordDto,
+  ): Promise<ChangePasswordResponse> {
+    const depot = me.depotId
+      ? await this.prisma.depot.findUnique({ where: { id: me.depotId } })
+      : null;
+    if (!depot) throw new NotFoundException('Depot not found');
+    if (
+      !depot.dockPasswordHash ||
+      !dto.currentSecret ||
+      !(await argon2.verify(depot.dockPasswordHash, dto.currentSecret))
+    ) {
+      throw new BadRequestException({
+        reason: 'WRONG_CURRENT_SECRET',
+        message: 'The current dock password is not right.',
+      });
+    }
+    if (!DOCK_PASSWORD_PATTERN.test(dto.newSecret)) {
+      throw new BadRequestException({
+        reason: 'WEAK_SECRET',
+        message: 'The new dock password must be 6 digits.',
+      });
+    }
+    await this.prisma.depot.update({
+      where: { id: depot.id },
+      data: { dockPasswordHash: await argon2.hash(dto.newSecret) },
+    });
     return { ok: true };
   }
 

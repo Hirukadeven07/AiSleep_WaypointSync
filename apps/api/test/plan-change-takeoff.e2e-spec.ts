@@ -26,7 +26,7 @@ describe('plan change at the dock: taken-off goods (e2e)', () => {
     await agent.post('/api/auth/login').send(body).expect(200);
     return agent;
   }
-  const loader = () => login({ role: 'loader', loginId: 'sampath', depotId: 'depo1' });
+  const loader = () => login({ role: 'loader', secret: '123456', depotId: 'depo1' });
   const dispatcher = () => login({ role: 'dispatcher', loginId: 'nimal', secret: 'waypoint' });
   const session = () => prisma.loadSession.findUniqueOrThrow({ where: { tripId: ids.trip } });
 
@@ -153,7 +153,10 @@ describe('plan change at the dock: taken-off goods (e2e)', () => {
 
   it('shows the goods to take off and the before/after load order', async () => {
     const dock = await loader();
-    const started = (await dock.post(`/api/loads/${ids.trip}/start`).expect(200)).body;
+    const started = (await dock
+        .post(`/api/loads/${ids.trip}/start`)
+        .send({ loaderId: 'sampath', pin: '1234' })
+        .expect(200)).body;
     expect(started.lock).toMatchObject({ locked: false, before: [], after: [] });
     expect(started.loadOrder.every((s: { isNew: boolean }) => s.isNew === false)).toBe(true);
 

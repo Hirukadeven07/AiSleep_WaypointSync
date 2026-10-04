@@ -1,18 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { rememberedLoginId } from '@/lib/roles';
 import {
   CheckRow,
   Field,
   FormError,
-  InputBox,
   Keypad,
   SkylinePhoto,
   SubmitButton,
   SwitchRole,
-  TextInput,
 } from './parts';
 import { useSignIn } from './useSignIn';
 import { DEPOTS } from '@/lib/depots';
@@ -20,12 +17,8 @@ import { DEPOTS } from '@/lib/depots';
 const CODE_LENGTH = 6;
 
 export function LoaderLogin() {
-  const { signIn, busy, error, clearError } = useSignIn();
+  const { signIn, busy, error } = useSignIn();
   const [depotId, setDepotId] = useState(DEPOTS[0]!.id);
-  const [loginId, setLoginId] = useState('');
-  useEffect(() => {
-    setLoginId((cur) => cur || (rememberedLoginId('loader') ?? ''));
-  }, []);
   const [code, setCode] = useState('');
   const [keep, setKeep] = useState(true);
 
@@ -34,9 +27,9 @@ export function LoaderLogin() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    // The loader's id and depot, plus the keypad code: the server checks it as the loader's PIN
-    // when they have one set.
-    void signIn({ role: 'loader', loginId: loginId.trim(), depotId, ...(code ? { secret: code } : {}) }, keep);
+    // The depot and its shared dock password. Each loader confirms their own ID and PIN later, when
+    // they start loading a truck.
+    void signIn({ role: 'loader', depotId, secret: code }, keep);
   }
 
   return (
@@ -52,7 +45,7 @@ export function LoaderLogin() {
           Dock login
         </h2>
         <p className="relative text-[15px] leading-[22px] text-sand">
-          Shared tablet at the loading dock. Everyone on the loader team knows this password.
+          Shared tablet at the loading dock. Unlock it with the depot's dock password; each loader confirms their own ID and PIN when they start a truck.
         </p>
         <div className="relative">
           <span className="inline-flex rounded-pill border border-slate px-4 py-2 text-[13px] font-medium text-on-primary">
@@ -89,22 +82,6 @@ export function LoaderLogin() {
             </div>
           </Field>
 
-          <Field label="Loader ID">
-            <InputBox tone="tint">
-              <TextInput
-                value={loginId}
-                onChange={(e) => {
-                  setLoginId(e.target.value);
-                  clearError();
-                }}
-                autoCapitalize="none"
-                autoComplete="username"
-                required
-                className="text-[16px] font-medium"
-              />
-            </InputBox>
-          </Field>
-
           <Field label="Dock password">
             <div
               aria-label={`${code.length} of ${CODE_LENGTH} digits entered`}
@@ -123,7 +100,7 @@ export function LoaderLogin() {
             Keep this dock unlocked for the shift
           </CheckRow>
           <FormError message={error} />
-          <SubmitButton busy={busy} disabled={!loginId.trim()} busyLabel="Unlocking…" className="py-[15px] text-[16px]">
+          <SubmitButton busy={busy} disabled={code.length !== CODE_LENGTH} busyLabel="Unlocking…" className="py-[15px] text-[16px]">
             Unlock dock
           </SubmitButton>
         </form>

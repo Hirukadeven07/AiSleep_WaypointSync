@@ -2,10 +2,19 @@ import type { Role } from './status';
 
 export interface LoginRequest {
   role: Role;
-  loginId: string;
+  /** Not used for the dock: a loader signs in to the tablet with the depot and its dock password. */
+  loginId?: string;
+  /** Password (dispatcher, store), PIN (driver) or the depot's dock password (loader). */
   secret?: string;
+  /** Required for the dock sign-in. */
   depotId?: string;
 }
+
+/** The dock tablet signs in as one shared account per depot; loaders confirm themselves at "Start loading". */
+export const DOCK_LOGIN_PREFIX = 'dock-';
+export const dockLoginId = (depotId: string) => `${DOCK_LOGIN_PREFIX}${depotId}`;
+/** The dock password is the 6 digits of the dock keypad. */
+export const DOCK_PASSWORD_PATTERN = /^\d{6}$/;
 
 export interface LoginResponse {
   role: Role;

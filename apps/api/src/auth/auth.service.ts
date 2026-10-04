@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import * as argon2 from 'argon2';
-import type { LoginResponse, Profile, Role } from '@waypoint/contracts';
+import { dockLoginId, type LoginResponse, type Profile, type Role } from '@waypoint/contracts';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 
@@ -21,8 +21,37 @@ export function sessionTtlMs(): number {
 export class AuthService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * The dock tablet: a loader signs in with the depot and the depot's dock password (6 digits,
+   * stored hashed on the Depot). That opens one shared account per depot. Each loader then
+   * confirms themselves with their own ID and PIN when starting to load a truck.
+   */
+  private async dockUser(dto: LoginDto) {
+    const depot = dto.depotId
+      ? await this.prisma.depot.findUnique({ where: { id: dto.depotId } })
+      : null;
+    if (
+      !depot?.dockPasswordHash ||
+      !dto.secret ||
+      !(await argon2.verify(depot.dockPasswordHash, dto.secret))
+    ) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    const data = { role: 'loader' as const, name: `Dock · ${depot.name}`, depotId: depot.id };
+    return this.prisma.user.upsert({
+      where: { loginId: dockLoginId(depot.id) },
+      update: data,
+      create: { loginId: dockLoginId(depot.id), ...data },
+    });
+  }
+
   async login(dto: LoginDto): Promise<{ token: string; expiresAt: Date; body: LoginResponse }> {
-    const user = await this.prisma.user.findUnique({ where: { loginId: dto.loginId } });
+    const user =
+      dto.role === 'loader'
+        ? await this.dockUser(dto)
+        : dto.loginId
+          ? await this.prisma.user.findUnique({ where: { loginId: dto.loginId } })
+          : null;
     if (!user || user.role !== dto.role) throw new UnauthorizedException('Invalid credentials');
 
     switch (dto.role) {
@@ -38,17 +67,7 @@ export class AuthService {
         }
         break;
       case 'loader':
-        if (!dto.depotId || user.depotId !== dto.depotId) {
-          throw new UnauthorizedException('Invalid credentials');
-        }
-        // A loader with a PIN must enter it on the dock keypad; one without a PIN signs in with
-        // their id and depot (the shared dock tablet), and can set a PIN in Account settings.
-        if (
-          user.pinHash &&
-          (!dto.secret || !(await argon2.verify(user.pinHash, dto.secret)))
-        ) {
-          throw new UnauthorizedException('Invalid credentials');
-        }
+        // Already checked against the depot's dock password in dockUser().
         break;
     }
 
