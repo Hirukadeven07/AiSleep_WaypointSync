@@ -103,34 +103,61 @@ function QueueCard({ trip }: { trip: LoadQueueItem }) {
       </p>
 
       <JobNote job={trip.job} compact />
-
-      <div className="mt-auto flex items-center justify-between gap-sm">
-        <p className="flex min-w-0 items-center gap-xs text-label text-muted">
-          <Icon name="user" size={16} />
-          <span className="truncate">
-            {trip.loaderNames.length ? trip.loaderNames.join(', ') : 'Nobody loading yet'}
-          </span>
-        </p>
-        <span className="shrink-0 rounded-pill bg-primary px-md py-sm text-label text-on-primary">
-          {started ? 'Continue' : 'Start loading'}
-        </span>
-      </div>
     </>
   );
-  // Starting a truck first asks who is loading; a truck already being loaded opens straight away.
-  return started ? (
-    <Link href={`/dock/${trip.tripId}`} className={cardClass}>
-      {body}
-    </Link>
-  ) : (
+  const actions = (
+    <div className="mt-auto flex items-center justify-between gap-sm">
+      <p className="flex min-w-0 items-center gap-xs text-label text-muted">
+        <Icon name="user" size={16} />
+        <span className="truncate">
+          {trip.loaderNames.length ? trip.loaderNames.join(', ') : 'Nobody loading yet'}
+        </span>
+      </p>
+      <span className="flex shrink-0 gap-xs">
+        {started && (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="rounded-pill border border-mist bg-surface px-md py-sm text-label text-ink"
+          >
+            Add a loader
+          </button>
+        )}
+        {started ? (
+          <Link
+            href={`/dock/${trip.tripId}`}
+            className="rounded-pill bg-primary px-md py-sm text-label text-on-primary"
+          >
+            Continue
+          </Link>
+        ) : (
+          <span className="rounded-pill bg-primary px-md py-sm text-label text-on-primary">
+            Start loading
+          </span>
+        )}
+      </span>
+    </div>
+  );
+  // Starting a truck asks who is loading. A truck already being loaded can still take more loaders.
+  return (
     <>
-      <button type="button" onClick={() => setAdding(true)} className={cardClass}>
-        {body}
-      </button>
+      {started ? (
+        <div className={cardClass}>
+          <Link href={`/dock/${trip.tripId}`} className="flex flex-col gap-md outline-none">
+            {body}
+          </Link>
+          {actions}
+        </div>
+      ) : (
+        <button type="button" onClick={() => setAdding(true)} className={cardClass}>
+          {body}
+          {actions}
+        </button>
+      )}
       {adding && (
         <StartLoadingSheet
           tripId={trip.tripId}
-          title="Start loading"
+          title={started ? 'Add loaders' : 'Start loading'}
           initialNames={trip.loaderNames}
           onClose={() => setAdding(false)}
           onContinue={() => router.push(`/dock/${trip.tripId}`)}

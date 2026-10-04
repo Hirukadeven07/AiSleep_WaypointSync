@@ -334,6 +334,104 @@ describe('loader dock and store (e2e)', () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
       await store.get('/api/loads').expect(403);
     });
+
+    it('lets several loaders join one trip and frees a loader after that trip is loaded', async () => {
+      const plate = 'WP E2E-OPEN';
+      const stores = ['E2E-C', 'E2E-D'];
+      const vehicles = ['E2E-VAN-1', 'E2E-VAN-2'];
+      const logins = ['E2E-L1', 'E2E-L2'];
+      const tripIds: string[] = [];
+      const clear = async () => {
+        await prisma.deliveryNote.deleteMany({ where: { order: { storeId: { in: stores } } } });
+        await prisma.trip.deleteMany({ where: { id: { in: tripIds } } });
+        await prisma.trip.deleteMany({ where: { vehicleId: { in: vehicles } } });
+        await prisma.order.deleteMany({ where: { storeId: { in: stores } } });
+        await prisma.vehicle.deleteMany({ where: { id: { in: vehicles } } });
+        await prisma.store.deleteMany({ where: { id: { in: stores } } });
+        await prisma.user.deleteMany({ where: { loginId: { in: logins } } });
+      };
+      const loader = await login({ role: 'loader', secret: '123456', depotId: 'depo1' });
+      try {
+        await clear();
+        for (const id of stores) {
+          await prisma.store.create({
+            data: {
+              id,
+              displayName: id,
+              brand: 'Fresh',
+              districtId: ids.district,
+              depotId: 'depo1',
+              dockType: 'street',
+              windowOpenMin: 300,
+              windowCloseMin: 480,
+            },
+          });
+        }
+        for (const [loginId, name] of [
+          ['E2E-L1', 'E2E Loader One'],
+          ['E2E-L2', 'E2E Loader Two'],
+        ] as const) {
+          await prisma.user.create({
+            data: {
+              loginId,
+              role: 'loader',
+              name,
+              depotId: 'depo1',
+              loaderProfile: { create: {} },
+            },
+          });
+        }
+        for (const [index, vehicleId] of vehicles.entries()) {
+          await prisma.vehicle.create({
+            data: {
+              id: vehicleId,
+              numberPlate: index === 0 ? plate : 'WP E2E-NEXT',
+              depotId: 'depo1',
+              type: 'truck',
+              temp: 'reefer',
+              weightCapKg: 3000,
+              volumeCapM3: 20,
+            },
+          });
+          const placed = await order(stores[index]!, [{ name: 'Milk', qty: 1, itemId: 'F-MILK' }]);
+          const trip = await prisma.trip.create({
+            data: {
+              vehicleId,
+              depotId: 'depo1',
+              brand: 'Fresh',
+              districtId: ids.district,
+              serviceDate: date(DAY),
+              tripNumber: 1,
+              status: 'published',
+            },
+          });
+          tripIds.push(trip.id);
+          await prisma.tripStop.create({
+            data: { tripId: trip.id, orderId: placed.id, sequence: 1 },
+          });
+        }
+
+        const start = (tripId: string, loaderId: string) =>
+          loader.post(`/api/loads/${tripId}/start`).send({ loaderId });
+        const first = await start(tripIds[0]!, 'E2E-L1').expect(200);
+        expect(first.body.session.loaderNames).toEqual(['E2E Loader One']);
+        const both = await start(tripIds[0]!, 'E2E-L2').expect(200);
+        expect(both.body.session.loaderNames).toEqual(['E2E Loader One', 'E2E Loader Two']);
+
+        const again = await start(tripIds[0]!, 'E2E-L1').expect(409);
+        expect(again.body.reason).toBe('LOADER_ALREADY_ON_TRIP');
+
+        const busy = await start(tripIds[1]!, 'E2E-L1').expect(409);
+        expect(busy.body.reason).toBe('LOADER_ON_ANOTHER_TRIP');
+        expect(busy.body.message).toContain(plate);
+
+        await loader.post(`/api/loads/${tripIds[0]}/depart`).send({ planVersion: 1 }).expect(200);
+        const freed = await start(tripIds[1]!, 'E2E-L1').expect(200);
+        expect(freed.body.session.loaderNames).toEqual(['E2E Loader One']);
+      } finally {
+        await clear();
+      }
+    });
   });
 
   describe('store', () => {

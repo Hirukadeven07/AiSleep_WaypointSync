@@ -203,11 +203,30 @@ export class LoadsService {
 
   /**
    * The dock tablet is one shared sign-in, so each person who joins the load confirms who they are
-   * with their loader ID and their own PIN. Only then are they added to the trip's loader list.
+   * with their loader ID and their own PIN. Several loaders can join one trip. A loader already on
+   * this trip, or still loading another trip that has not departed, is refused.
    */
   async start(me: AuthUser, tripId: string, dto: StartLoadingRequest): Promise<LoadSheet> {
     const trip = await this.findTrip(me, tripId);
     const loaderUser = await this.verifyLoader(me, dto);
+    if (trip.loadSession?.loaderIds.includes(loaderUser.id)) {
+      throw new DomainError('LOADER_ALREADY_ON_TRIP', 'This loader is already on this trip.');
+    }
+    const busy = await this.prisma.loadSession.findFirst({
+      where: {
+        departedAt: null,
+        loaderIds: { has: loaderUser.id },
+        trip: { status: 'loading' },
+      },
+      include: { trip: { include: { vehicle: true } } },
+    });
+    if (busy) {
+      const plate = busy.trip.vehicle.numberPlate ?? busy.trip.vehicleId;
+      throw new DomainError(
+        'LOADER_ON_ANOTHER_TRIP',
+        `${loaderUser.name} is still loading ${plate}. They can join another trip after that one is loaded.`,
+      );
+    }
     if (!trip.loadSession) {
       await this.prisma.loadSession.create({
         data: {
@@ -218,7 +237,7 @@ export class LoadsService {
           ackedStopIds: ackedOrders(trip),
         },
       });
-    } else if (!trip.loadSession.loaderIds.includes(loaderUser.id)) {
+    } else {
       await this.prisma.loadSession.update({
         where: { tripId: trip.id },
         data: { loaderIds: { push: loaderUser.id } },
