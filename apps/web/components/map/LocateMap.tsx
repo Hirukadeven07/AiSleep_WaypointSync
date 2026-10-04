@@ -436,44 +436,85 @@ function EmptyRoad({ data }: { data: LocateMapData }) {
   );
 }
 
+const LEGEND_KEY = 'ws-map-legend-open';
+
+/** Open or minimised legend, remembered on this device. Open the first time, as it always was. */
+function useLegendOpen() {
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(LEGEND_KEY) === '0') setOpen(false);
+    } catch {
+      /* storage blocked: it just opens each visit */
+    }
+  }, []);
+  const toggle = () =>
+    setOpen((v) => {
+      try {
+        window.localStorage.setItem(LEGEND_KEY, v ? '0' : '1');
+      } catch {
+        /* the choice lasts for this visit only */
+      }
+      return !v;
+    });
+  return { open, toggle };
+}
+
 function LocateLegend() {
   const row = 'flex items-center gap-2 text-[12px] leading-4 text-ink';
+  const { open, toggle } = useLegendOpen();
   return (
-    <div className="absolute bottom-4 left-4 w-[230px] rounded-card bg-surface p-3 shadow">
-      <p className="mb-2 text-[12px] font-semibold text-muted">Legend</p>
-      <ul className="flex flex-col gap-1.5">
-        <li className={row}>
-          <span className="size-3 rounded-[4px] bg-scrim" /> Depot
-        </li>
-        <li className={row}>
-          <span className="size-3 rounded-full border border-slate" /> 500 m around the depot
-        </li>
-        <li className={row}>
-          <span className="size-3 rounded-full bg-scrim ring-2 ring-ink ring-offset-1" /> Selected vehicle
-        </li>
-        <li className={row}>
-          <span className="h-0.5 w-4 bg-[#1d4e89]" /> Road route
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-success" /> Delivered stop
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-scrim" /> Next stop
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full border-2 border-ink bg-surface" /> Upcoming stop
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-warning" /> At-risk stop
-        </li>
-        <li className={row}>
-          <span className="size-3 rounded-[3px] bg-mist" /> Served by the other depot
-        </li>
-        <li className={row}>
-          <span className="size-3 rounded-[3px] bg-slate" /> Area not served
-        </li>
-      </ul>
-      <p className="mt-2 text-[10px] leading-3 text-muted">Map data © OpenStreetMap · Boundaries © geoBoundaries</p>
+    <div className="absolute bottom-4 left-4 flex max-w-[230px] flex-col items-start gap-1">
+      <div className={`rounded-card bg-surface shadow ${open ? 'w-[230px] p-3' : 'px-3 py-2'}`}>
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          aria-controls="map-legend-list"
+          title={open ? 'Minimise the legend' : 'Show the legend'}
+          className={`flex w-full items-center gap-2 text-left text-[12px] font-semibold text-muted ${open ? 'mb-2' : ''}`}
+        >
+          <span className="flex-1">Legend</span>
+          <Icon name="chevron-down" size={14} className={open ? '' : '-rotate-90'} />
+        </button>
+        {open && (
+          <ul id="map-legend-list" className="flex flex-col gap-1.5">
+            <li className={row}>
+              <span className="size-3 rounded-[4px] bg-scrim" /> Depot
+            </li>
+            <li className={row}>
+              <span className="size-3 rounded-full border border-slate" /> 500 m around the depot
+            </li>
+            <li className={row}>
+              <span className="size-3 rounded-full bg-scrim ring-2 ring-ink ring-offset-1" /> Selected vehicle
+            </li>
+            <li className={row}>
+              <span className="h-0.5 w-4 bg-[#1d4e89]" /> Road route
+            </li>
+            <li className={row}>
+              <span className="size-2.5 rounded-full bg-success" /> Delivered stop
+            </li>
+            <li className={row}>
+              <span className="size-2.5 rounded-full bg-scrim" /> Next stop
+            </li>
+            <li className={row}>
+              <span className="size-2.5 rounded-full border-2 border-ink bg-surface" /> Upcoming stop
+            </li>
+            <li className={row}>
+              <span className="size-2.5 rounded-full bg-warning" /> At-risk stop
+            </li>
+            <li className={row}>
+              <span className="size-3 rounded-[3px] bg-mist" /> Served by the other depot
+            </li>
+            <li className={row}>
+              <span className="size-3 rounded-[3px] bg-slate" /> Area not served
+            </li>
+          </ul>
+        )}
+      </div>
+      <p className="px-1 text-[10px] leading-3 text-muted">
+        Map data © OpenStreetMap · Boundaries © geoBoundaries
+      </p>
     </div>
   );
 }
