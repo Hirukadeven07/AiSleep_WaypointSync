@@ -83,7 +83,7 @@ export default function StoreHomePage() {
               <p className="text-label text-muted">
                 {data.nextOrder
                   ? `${formatDate(data.nextOrder.deliveryDate)} · ${data.nextOrder.units} units · ${data.nextOrder.status}`
-                  : 'Nothing ordered for tomorrow yet.'}
+                  : 'Nothing ordered today yet.'}
               </p>
             </div>
             {open && (

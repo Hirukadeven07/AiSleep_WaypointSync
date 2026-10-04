@@ -119,7 +119,7 @@ function StoreShell({ me, children }: { me: Me; children: ReactNode }) {
     writeLocal(REMINDER_ALERTED, today);
     if (!settings.alerts) return;
     if (settings.sound) playChime();
-    void showPopup('Ordering closes soon', `${formatDuration(left)} left to order for tomorrow.`);
+    void showPopup('Ordering closes soon', `${formatDuration(left)} left to place today's order.`);
   }, [reminderDue, today, left, settings.alerts, settings.sound]);
 
   const showReminder = reminderDue && dismissedDay !== today && pathname !== '/store/order';
@@ -154,7 +154,7 @@ function StoreShell({ me, children }: { me: Me; children: ReactNode }) {
                     Ordering closes in {formatDuration(left)}
                   </span>
                   <span className="block text-label text-muted">
-                    Nothing ordered for tomorrow yet. Order now ›
+                    Nothing ordered today yet. Order now ›
                   </span>
                 </Link>
                 <button

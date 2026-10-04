@@ -22,7 +22,6 @@ import {
 import { DomainError } from '@waypoint/domain';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
-import { nextOperatingDay } from '../common/clock/operating-day';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { anyCatalogueItem, buildOrderLines, fullCatalogue } from './catalogue';
@@ -184,7 +183,7 @@ export class StoreService {
       this.prisma.order.findFirst({
         where: {
           storeId: store.id,
-          deliveryDate: { gt: asDate(today) },
+          deliveryDate: { gte: asDate(today) },
           status: { in: ['waiting', 'planned'] },
         },
         orderBy: { deliveryDate: 'asc' },
@@ -231,7 +230,7 @@ export class StoreService {
   }
 
   /**
-   * The store's orders with their lines, newest first: every order still to come (what is
+   * The store's orders with their lines, newest first: every order for today or later (what is
    * already placed, and what can be cancelled) and the latest five of any day ("order again").
    */
   async recentOrders(me: AuthUser): Promise<StoreOrderDetail[]> {
@@ -247,7 +246,7 @@ export class StoreService {
       this.prisma.order.findMany({
         where: {
           storeId: store.id,
-          deliveryDate: { gt: asDate(this.clock.today()) },
+          deliveryDate: { gte: asDate(this.clock.today()) },
           status: { in: ['waiting', 'planned'] },
         },
         include,
@@ -312,13 +311,13 @@ export class StoreService {
     return process.env.ORDER_CUTOFF_OPEN === '1' ? 23 * 60 + 59 : ORDER_CUTOFF_MIN;
   }
 
-  /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */
+  /** The order date is the day the storekeeper places it. Ordering closes at 16:00 Asia/Colombo. */
   async placeOrder(me: AuthUser, dto: PlaceOrderDto): Promise<StoreOrderView> {
     const store = await this.store(me);
     if (this.clock.minutesNow() >= this.orderCutoffMin()) {
       throw new DomainError(
         'AFTER_CUTOFF',
-        'Orders for tomorrow close at 16:00. Order again tomorrow morning.',
+        'Ordering closes at 16:00. Order again tomorrow morning.',
       );
     }
     let built: ReturnType<typeof buildOrderLines>;
@@ -329,7 +328,7 @@ export class StoreService {
     }
     // Stock level and note only mean something on an urgent order.
     const urgent = dto.urgent === true;
-    const deliveryDate = asDate(await nextOperatingDay(this.prisma, asDate(this.clock.today())));
+    const deliveryDate = asDate(this.clock.today());
     const order = await this.prisma.order.create({
       data: {
         storeId: store.id,
@@ -349,7 +348,7 @@ export class StoreService {
     await this.closeFlagsForSentItems(store.id, built.lines.map((l) => l.itemId));
     await this.notifyDispatchers(store.depotId, {
       title: 'New order',
-      body: `${store.displayName ?? store.id} ordered ${built.units} ${built.units === 1 ? 'item' : 'items'} (${Math.round(built.weightKg)} kg) for ${dayText(deliveryDate)}.`,
+      body: `${store.displayName ?? store.id} ordered ${built.units} ${built.units === 1 ? 'item' : 'items'} (${Math.round(built.weightKg)} kg) on ${dayText(deliveryDate)}.`,
       link: '/dispatch/plan',
     });
     return orderView(order);

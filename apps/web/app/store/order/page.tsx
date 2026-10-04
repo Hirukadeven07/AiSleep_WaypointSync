@@ -68,7 +68,7 @@ function readDraft(storeId: string, catalogue: CatalogueItem[]): Record<string, 
   }
 }
 
-/** S2: order for tomorrow from the catalogue. Refused from 16:00. */
+/** S2: place an order from the catalogue. The order date is today. Refused from 16:00. */
 export default function OrderPage() {
   const [home, setHome] = useState<StoreHome>();
   const [catalogue, setCatalogue] = useState<CatalogueItem[]>();
@@ -153,9 +153,9 @@ export default function OrderPage() {
     ...matches.filter((c) => lockedType(c.type)),
   ];
 
-  // Orders already placed for a coming day, and the latest order as the source for "order again".
+  // Orders already placed for today or later, and the latest order as the source for "order again".
   const upcoming = recent.filter(
-    (o) => o.deliveryDate > home.today && (o.status === 'waiting' || o.status === 'planned'),
+    (o) => o.deliveryDate >= home.today && (o.status === 'waiting' || o.status === 'planned'),
   );
   const last = recent[0];
   // Lines of the last order that are still in the catalogue, kept to its first line's group.
@@ -245,14 +245,14 @@ export default function OrderPage() {
 
   return (
     <section className="space-y-md pb-lg">
-      <PageTitle eyebrow="Order" title="Order for tomorrow" />
+      <PageTitle eyebrow="Order" title="Place an order" />
 
       {closed ? (
         <div className="space-y-xs rounded-card bg-border p-lg">
           <p className="text-title text-ink">Ordering is closed</p>
           <p className="text-body text-muted">
-            Orders for tomorrow close at {formatMinutes(home.cutoffMin)} so the plan can be built
-            tonight. You can order again from midnight.
+            Ordering closes at {formatMinutes(home.cutoffMin)}. You can order again tomorrow
+            morning.
           </p>
         </div>
       ) : (
@@ -272,7 +272,7 @@ export default function OrderPage() {
             <div role="status" className="order-1 rounded-card bg-success-tint p-lg">
               <p className="text-title text-ink">Order placed</p>
               <p className="text-body text-muted">
-                For {formatDate(placed.deliveryDate)} · {placed.units} units · {placed.weightKg} kg
+                Ordered {formatDate(placed.deliveryDate)} · {placed.units} units · {placed.weightKg} kg
               </p>
             </div>
           )}
@@ -281,7 +281,7 @@ export default function OrderPage() {
             <div key={o.id} className="order-2 space-y-sm rounded-card bg-surface p-md">
               <details>
                 <summary className="cursor-pointer text-body font-semibold text-ink">
-                  Already ordered for {formatDate(o.deliveryDate)} · {o.units} units
+                  Ordered {formatDate(o.deliveryDate)} · {o.units} units
                 </summary>
                 <ul className="mt-sm space-y-xs">
                   {o.lines.map((l, i) => (
