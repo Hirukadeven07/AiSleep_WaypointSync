@@ -121,7 +121,8 @@ export interface FlagRequest {
  */
 export interface StartLoadingRequest {
   loaderId: string;
-  pin: string;
+  /** Needed only when the loader has a PIN set. */
+  pin?: string;
 }
 
 export interface TakenOffRequest {

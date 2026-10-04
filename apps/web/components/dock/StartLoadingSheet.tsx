@@ -42,7 +42,7 @@ export function StartLoadingSheet({
     setBusy(true);
     setError(null);
     try {
-      const body: StartLoadingRequest = { loaderId: loaderId.trim(), pin };
+      const body: StartLoadingRequest = { loaderId: loaderId.trim(), ...(pin ? { pin } : {}) };
       const sheet = await api<LoadSheet>(`/loads/${tripId}/start`, { method: 'POST', body });
       setNames(sheet.session?.loaderNames ?? []);
       onSheet?.(sheet);
@@ -67,7 +67,7 @@ export function StartLoadingSheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative max-h-full w-full max-w-md space-y-md overflow-y-auto rounded-t-hero bg-surface p-lg shadow-raised sm:rounded-hero"
+        className="relative z-10 max-h-full w-full max-w-md space-y-md overflow-y-auto rounded-t-hero bg-surface p-lg shadow-raised sm:rounded-hero"
       >
         <div>
           <p className="text-eyebrow uppercase text-muted">Who is loading?</p>
@@ -109,7 +109,9 @@ export function StartLoadingSheet({
             />
           </label>
           <label className="block space-y-xs">
-            <span className="text-label font-semibold text-ink">Loader PIN</span>
+            <span className="text-label font-semibold text-ink">
+              Loader PIN <span className="font-normal text-muted">(if you have one)</span>
+            </span>
             <input
               type="password"
               inputMode="numeric"
@@ -128,7 +130,7 @@ export function StartLoadingSheet({
             type="submit"
             variant="secondary"
             className="w-full"
-            disabled={busy || !loaderId.trim() || pin.length < 4}
+            disabled={busy || !loaderId.trim()}
           >
             {busy ? 'Checking…' : '+ Add loader'}
           </Button>
