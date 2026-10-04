@@ -2,7 +2,7 @@ import type { Brand, ItemType, OrderStatus, StopStatus } from './status';
 import type { OrderLine, StockLevel } from './order';
 import type { FlagType } from './dock';
 
-/** Orders for tomorrow are refused from 16:00 Asia/Colombo. */
+/** Ordering is refused from 16:00 Asia/Colombo. The order date is the day it is placed. */
 export const ORDER_CUTOFF_MIN = 16 * 60;
 
 /**

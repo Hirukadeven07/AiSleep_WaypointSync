@@ -326,7 +326,7 @@ describe('loader dock and store (e2e)', () => {
         .post('/api/store/orders')
         .send({ lines: [{ catalogueId: 'F-MILK', qty: 2 }] })
         .expect(201);
-      expect(placed.body.deliveryDate).toBe('2026-10-02');
+      expect(placed.body.deliveryDate).toBe(DAY);
       // The depot's dispatcher hears about it under Planning.
       expect(await newOrders()).toBe(before + 1);
       expect(placed.body.status).toBe('waiting');
@@ -345,7 +345,7 @@ describe('loader dock and store (e2e)', () => {
       }
     });
 
-    it('delivers an order on the next operating day, skipping a closed one', async () => {
+    it('dates the order as the day it is placed, even when the next day is closed', async () => {
       const days = [date('2026-10-02'), date('2026-10-03')];
       const saved = await prisma.calendarDay.findMany({ where: { id: { in: days } } });
       const row = (id: Date, isOperating: boolean) => ({
@@ -375,7 +375,7 @@ describe('loader dock and store (e2e)', () => {
           .post('/api/store/orders')
           .send({ lines: [{ catalogueId: 'F-MILK', qty: 1 }] })
           .expect(201);
-        expect(placed.body.deliveryDate).toBe('2026-10-03');
+        expect(placed.body.deliveryDate).toBe(DAY);
       } finally {
         await prisma.calendarDay.deleteMany({ where: { id: { in: days } } });
         for (const { id, ...rest } of saved) {
