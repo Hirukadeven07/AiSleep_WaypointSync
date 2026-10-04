@@ -10,6 +10,10 @@ export const DRIVER_EVENT_TYPES = [
   'LOCATION_PING',
   /** The driver closed the SOS screen ("I'm safe"): their open SOS is resolved. */
   'SOS_CLEARED',
+  /** The driver leaves the depot. The trip becomes on_road and the start time is this moment. */
+  'START_TRIP',
+  /** The driver is back at the depot. The trip is completed and the end time is this moment. */
+  'END_TRIP',
 ] as const;
 
 export type DriverEventType = (typeof DRIVER_EVENT_TYPES)[number];
@@ -75,7 +79,9 @@ export type SyncRejectReason =
   | 'ACK_PENDING'
   | 'NO_ACTIVE_TRIP'
   | 'NO_VEHICLE'
-  | 'INVALID_PAYLOAD';
+  | 'INVALID_PAYLOAD'
+  /** Start trip is only for a truck the loader has finished. */
+  | 'TRIP_NOT_READY';
 
 export interface DriverEventInput {
   clientId: string;

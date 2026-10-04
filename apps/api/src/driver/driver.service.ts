@@ -31,6 +31,7 @@ const tripSelect = {
   tripNumber: true,
   status: true,
   planVersion: true,
+  startingTime: true,
   vehicle: { select: vehicleSelect },
   stops: {
     orderBy: { sequence: 'asc' },

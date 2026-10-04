@@ -82,6 +82,8 @@ export interface DriverDayTrip {
   tripNumber: 1 | 2;
   status: TripStatus;
   planVersion: number;
+  /** When the driver tapped Start trip. Null until then, including while the truck is only loaded. */
+  startedAt: string | null;
   stops: DriverDayStop[];
 }
 
