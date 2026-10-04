@@ -205,8 +205,13 @@ export class StoreService {
       nowMin: this.clock.minutesNow(),
       today,
       orderDate: this.deliveryIso(),
-      // The open delivery first; otherwise the last one of the day.
-      delivery: deliveries.find((d) => !d.driverAckAt) ?? deliveries.at(-1) ?? null,
+      // A driver at the door first (the Receive page lists these too); then the next open
+      // delivery; otherwise the last one of the day.
+      delivery:
+        deliveries.find((d) => d.status === 'arrived' || d.status === 'waiting') ??
+        deliveries.find((d) => !d.driverAckAt) ??
+        deliveries.at(-1) ??
+        null,
       nextOrder: upcoming ? orderView(upcoming) : null,
       deferral: deferral ? orderView(deferral) : null,
       unreadNotices,
