@@ -57,7 +57,8 @@ export function LocateMap() {
         });
     };
     load();
-    const timer = setInterval(load, 20_000);
+    // Every 10 s, the same rate the drivers' phones send their position.
+    const timer = setInterval(load, 10_000);
     return () => {
       cancel = true;
       clearInterval(timer);
