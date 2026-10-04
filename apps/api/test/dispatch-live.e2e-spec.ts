@@ -269,6 +269,16 @@ describe('live day (e2e)', () => {
     expect(body.kpis.incidentsText).toMatch(/breakdown/);
     expect(body.counts.all).toBe(body.trips.length);
     expect(body.tomorrow).toMatchObject({ cutoffMin: 960, minutesToCutoff: 960 - 645 });
+    // Before the cutoff, orders coming in are dated today, so those are the ones counted.
+    const ordersToday = await prisma.order.count({
+      where: {
+        deliveryDate: date(DAY),
+        status: { in: ['waiting', 'planned'] },
+        store: { depotId: 'depo1' },
+      },
+    });
+    expect(ordersToday).toBeGreaterThan(0);
+    expect(body.tomorrow.ordersReceived).toBe(ordersToday);
   });
 
   it('previews and sends a delay notice to the stores that are affected', async () => {

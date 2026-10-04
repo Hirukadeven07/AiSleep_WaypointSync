@@ -1,17 +1,18 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import type { Prisma } from '@prisma/client';
-import type {
-  DepartSummary,
-  LoadFlagView,
-  LoadJob,
-  LoadQueueItem,
-  LoadSheet,
-  LoadStop,
-  OrderLine,
-  PlanLock,
-  PlanLockSlot,
-  StartLoadingRequest,
+import {
+  DOCK_LOGIN_PREFIX,
+  type DepartSummary,
+  type LoadFlagView,
+  type LoadJob,
+  type LoadQueueItem,
+  type LoadSheet,
+  type LoadStop,
+  type OrderLine,
+  type PlanLock,
+  type PlanLockSlot,
+  type StartLoadingRequest,
 } from '@waypoint/contracts';
 import { DomainError, loadOrder } from '@waypoint/domain';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -491,7 +492,8 @@ export class LoadsService {
 
   /**
    * A loader ID for someone at this depot, plus that loader's own PIN when they have one (a loader
-   * with no PIN set is let in on the ID alone). One message for every failure.
+   * with no PIN set is let in on the ID alone). The dock tablet's own shared account is a loader
+   * with no PIN as well, but it is not a person, so it is refused. One message for every failure.
    */
   private async verifyLoader(me: AuthUser, dto: StartLoadingRequest) {
     const wrong = () =>
@@ -506,6 +508,7 @@ export class LoadsService {
     if (
       !user ||
       user.role !== 'loader' ||
+      user.loginId.startsWith(DOCK_LOGIN_PREFIX) ||
       user.depotId !== me.depotId ||
       user.loaderProfile?.isActive === false ||
       (user.pinHash && (!dto.pin || !(await argon2.verify(user.pinHash, dto.pin))))
