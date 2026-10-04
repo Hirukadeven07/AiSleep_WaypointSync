@@ -11,6 +11,21 @@ const nextConfig = {
       ? { outputFileTracingRoot: path.join(__dirname, '../../') }
       : {}),
   },
+  /**
+   * Signed-in pages are never stored: after sign out, Back must not show a cached copy of the
+   * app before the sign-in redirect. Only these four route groups; static assets, /maps and the
+   * login pages keep their normal caching.
+   */
+  async headers() {
+    const noStore = [
+      { key: 'Cache-Control', value: 'no-store' },
+      { key: 'Pragma', value: 'no-cache' },
+    ];
+    return ['/dispatch', '/dock', '/drive', '/store'].map((base) => ({
+      source: `${base}/:path*`,
+      headers: noStore,
+    }));
+  },
   async rewrites() {
     const api = process.env.API_INTERNAL_URL || 'http://localhost:3001';
     return [{ source: '/api/:path*', destination: `${api}/api/:path*` }];

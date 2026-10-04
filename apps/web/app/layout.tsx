@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
 import { DM_Sans } from 'next/font/google';
-import { BACK_CACHE_GUARD_SCRIPT } from '@/lib/page-guard';
 import { THEME_BOOT_SCRIPT } from '@/lib/theme-boot';
 import './globals.css';
 
@@ -24,7 +23,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={dmSans.variable} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
-        <script dangerouslySetInnerHTML={{ __html: BACK_CACHE_GUARD_SCRIPT }} />
       </head>
       <body className="font-sans">{children}</body>
     </html>

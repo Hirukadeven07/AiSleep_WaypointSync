@@ -203,6 +203,7 @@ describe('incidents (e2e)', () => {
   afterAll(async () => {
     process.env.DEMO_NOW = previousDemoNow;
     if (prisma) {
+      await prisma.driverIncident.deleteMany({ where: { driver: { userId: driverId } } });
       await prisma.incident.deleteMany({ where: { trip: { vehicleId: { in: VEHICLES } } } });
       await prisma.trip.deleteMany({ where: { vehicleId: { in: VEHICLES } } });
       await prisma.order.deleteMany({ where: { storeId: { in: STORES } } });
@@ -250,6 +251,80 @@ describe('incidents (e2e)', () => {
     expect(bd.line).toContain('Ruwan S. (driver)');
     const missing = body.active.find((i: { id: string }) => i.id === `missing:${ids.load}`);
     expect(missing).toMatchObject({ kind: 'missing_items', title: '2 items short on IC-V6' });
+  });
+
+  it("lists open SOS alerts with the incidents, matches Home's count, and Mark handled clears it", async () => {
+    const agent = await dispatcher();
+    const profile = await prisma.driver.findUniqueOrThrow({ where: { userId: driverId } });
+    const sos = await prisma.driverIncident.create({
+      data: {
+        driverId: profile.id,
+        tripId: ids.bd,
+        vehicleId: 'IC-V1',
+        incidentType: 'sos',
+        severity: 'high',
+        message: 'E2E flat tyre',
+        lat: 6.93,
+        lng: 79.85,
+        raisedAt: new Date(`${DAY}T09:40:00+05:30`),
+      },
+    });
+    const id = `sos:${sos.id}`;
+    const counts = async () => {
+      const list = (await agent.get('/api/incidents').expect(200)).body;
+      const home = (await agent.get('/api/dispatch/live').expect(200)).body;
+      return { list, home };
+    };
+    try {
+      const before = await counts();
+      const row = before.list.active.find((i: { id: string }) => i.id === id);
+      expect(row).toMatchObject({
+        kind: 'sos',
+        state: 'open',
+        title: 'SOS from Ruwan Silva on IC-V1',
+        brand: 'Fresh',
+      });
+      // The Incidents page and Home show the same number, SOS included.
+      expect(before.home.kpis.openIncidents).toBe(before.list.active.length);
+      expect(before.home.kpis.incidentsText).toMatch(/1 SOS/);
+
+      const detail = (await agent.get(`/api/incidents/${encodeURIComponent(id)}`).expect(200)).body;
+      expect(detail).toMatchObject({
+        kind: 'sos',
+        recoverable: false,
+        stops: [],
+        details: { driver: { name: 'Ruwan Silva', phone: '0777654321' } },
+        location: { text: '6.9300, 79.8500' },
+      });
+
+      // Opening it marks it seen; stores are never told about an SOS.
+      const seen = await agent
+        .post(`/api/incidents/${encodeURIComponent(id)}/acknowledge`)
+        .send({})
+        .expect(200);
+      expect(seen.body.state).toBe('acknowledged');
+      await agent.post(`/api/incidents/${encodeURIComponent(id)}/notify`).expect(400);
+
+      // Mark handled clears it everywhere, the same way Home's card does.
+      const handled = await agent
+        .post(`/api/incidents/${encodeURIComponent(id)}/close`)
+        .expect(200);
+      expect(handled.body).toMatchObject({ state: 'resolved' });
+      expect(
+        (await prisma.driverIncident.findUniqueOrThrow({ where: { id: sos.id } })).resolvedAt,
+      ).not.toBeNull();
+      const after = await counts();
+      expect(after.list.active.some((i: { id: string }) => i.id === id)).toBe(false);
+      expect(after.list.resolved.find((i: { id: string }) => i.id === id)).toMatchObject({
+        kind: 'sos',
+        outcome: 'Handled',
+      });
+      expect(after.list.active.length).toBe(before.list.active.length - 1);
+      expect(after.home.kpis.openIncidents).toBe(after.list.active.length);
+      await agent.post(`/api/incidents/${encodeURIComponent(id)}/reopen`).expect(400);
+    } finally {
+      await prisma.driverIncident.deleteMany({ where: { id: sos.id } });
+    }
   });
 
   it('opens the detail with the stops and ranked replacements', async () => {
