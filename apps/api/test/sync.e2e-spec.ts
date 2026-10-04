@@ -622,10 +622,14 @@ describe('driver sync (e2e)', () => {
     );
 
     const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
-    const alerts = await prisma.notification.count({
+    const alerts = await prisma.notification.findMany({
       where: { userId: nimal.id, title: 'Driver SOS', body: { contains: 'E2E SOS' } },
     });
-    expect(alerts).toBe(1);
+    expect(alerts).toHaveLength(1);
+    // The notice opens this SOS in the dispatcher's incidents.
+    expect(alerts[0].link).toBe(
+      `/dispatch/incidents?id=${encodeURIComponent(`sos:${incident.id}`)}`,
+    );
 
     // Re-syncing the same SOS must not raise a second incident.
     const again = await driverAgent.post('/api/sync').send(body).expect(200);

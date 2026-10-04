@@ -9,7 +9,13 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import type { DispatcherNotice, DispatcherNotices, LiveNotice, NoticeCategory } from '@waypoint/contracts';
+import { useRouter } from 'next/navigation';
+import type {
+  DispatcherNotice,
+  DispatcherNotices,
+  LiveNotice,
+  NoticeCategory,
+} from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
 import { LIVE_NOTICE } from '@/lib/live-notices';
@@ -94,9 +100,10 @@ function useNotices() {
 
 /**
  * The bell on the live day: a square panel of unseen notices with All / Incidents / Stores /
- * Planning tabs. Clicking a notice marks it seen and it leaves the list, so only the newest unseen stay.
+ * Planning tabs. Clicking a notice marks it seen and opens what it is about (an SOS opens that incident).
  */
 export function NoticesBell() {
+  const router = useRouter();
   const { data, setData, load } = useNotices();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('all');
@@ -171,6 +178,13 @@ export function NoticesBell() {
     void api(`/dispatch/notices/${n.id}/read`, { method: 'POST' }).catch(() => void load());
   };
 
+  const openNotice = (n: DispatcherNotice) => {
+    seen(n);
+    if (!n.link) return;
+    setOpen(false);
+    router.push(n.link);
+  };
+
   const unseen = data?.counts.all ?? 0;
   const list = (data?.notices ?? []).filter((n) => tab === 'all' || n.category === tab);
 
@@ -241,8 +255,8 @@ export function NoticesBell() {
                 <li key={n.id}>
                   <button
                     type="button"
-                    onClick={() => seen(n)}
-                    title="Mark as seen"
+                    onClick={() => openNotice(n)}
+                    title={n.link ? 'Open' : 'Mark as seen'}
                     className="flex w-full items-start gap-[10px] rounded-input bg-bg p-3 text-left hover:bg-wash"
                   >
                     <span
@@ -266,7 +280,7 @@ export function NoticesBell() {
             </ul>
             {list.length > 0 && (
               <p className="text-center text-[11px] leading-[14px] text-muted">
-                Click a notification to mark it as seen.
+                Click a notification to open it and mark it as seen.
               </p>
             )}
           </div>,
