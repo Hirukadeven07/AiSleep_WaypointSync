@@ -82,7 +82,7 @@ export default function FlagsPage() {
   return (
     <section className="space-y-md lg:max-w-[720px]">
       <PageTitle eyebrow="Flags" title="Flagged items" />
-      {!data && error && (
+      {!data && error != null && (
         <EmptyState
           title="Could not load flags"
           description="Check the connection. Retrying every 5 seconds."
