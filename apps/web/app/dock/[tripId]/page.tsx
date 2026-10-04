@@ -2,13 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type {
-  FlagRequest,
-  LoadSheet,
-  LoadStop,
-  OrderLine,
-  StartLoadingRequest,
-} from '@waypoint/contracts';
+import type { FlagRequest, LoadSheet, LoadStop, OrderLine } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { messageOf, reasonOf } from '@/lib/api-error';
 import { usePoll } from '@/lib/poll';
@@ -69,8 +63,8 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
   const { data, error, loading, refresh } = usePoll(() => api<LoadSheet>(`/loads/${tripId}`));
   const [sheet, setSheet] = useState<LoadSheet>();
   const [busy, setBusy] = useState(false);
-  // Open while someone confirms their loader ID and PIN to start loading or join the load.
-  const [confirming, setConfirming] = useState<{ error: string | null }>();
+  // Open while loaders add themselves (ID and PIN) to start loading or join the load.
+  const [adding, setAdding] = useState(false);
   const [flagging, setFlagging] = useState<{ stopId: string; line: OrderLine }>();
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'danger' | 'warning' }>();
   const clearToast = useCallback(() => setToast(undefined), []);
@@ -95,32 +89,6 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
       }
     },
     [refresh],
-  );
-
-  const startLoading = useCallback(
-    async (credentials: StartLoadingRequest) => {
-      setBusy(true);
-      setConfirming({ error: null });
-      try {
-        const next = await api<LoadSheet>(`/loads/${tripId}/start`, {
-          method: 'POST',
-          body: credentials,
-        });
-        setSheet(next);
-        setConfirming(undefined);
-        setToast({ message: 'You are on this load. Keep loading.', tone: 'success' });
-      } catch (e) {
-        if ((reasonOf(e) as string | undefined) === 'WRONG_LOADER_CREDENTIALS') setConfirming({ error: messageOf(e) });
-        else {
-          setConfirming(undefined);
-          setToast({ message: messageOf(e), tone: 'danger' });
-          await refresh();
-        }
-      } finally {
-        setBusy(false);
-      }
-    },
-    [tripId, refresh],
   );
 
   const flaggedLines = useMemo(
@@ -196,11 +164,7 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
             The last stop goes in first, so the first delivery is at the doors. Start when you are
             at the truck.
           </p>
-          <Button
-            className="w-full"
-            disabled={busy}
-            onClick={() => setConfirming({ error: null })}
-          >
+          <Button className="w-full" disabled={busy} onClick={() => setAdding(true)}>
             Start loading
           </Button>
         </div>
@@ -218,7 +182,7 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
           <button
             type="button"
             disabled={locked}
-            onClick={() => setConfirming({ error: null })}
+            onClick={() => setAdding(true)}
             className="mt-xs text-label font-semibold text-slate disabled:opacity-50"
           >
             + Add a loader
@@ -278,13 +242,14 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
         </div>
       )}
 
-      {confirming && (
+      {adding && (
         <StartLoadingSheet
-          busy={busy}
-          error={confirming.error}
-          joining={started}
-          onClose={() => setConfirming(undefined)}
-          onSubmit={startLoading}
+          tripId={tripId}
+          title={started ? 'Add loaders' : 'Start loading'}
+          initialNames={sheet.session?.loaderNames ?? []}
+          onSheet={setSheet}
+          onClose={() => setAdding(false)}
+          onContinue={() => setAdding(false)}
         />
       )}
       {flagging && (

@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import type { LoadQueueItem } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { usePoll } from '@/lib/poll';
@@ -8,6 +10,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { Icon } from '@/components/ui/Icon';
 import { JobNote } from '@/components/dock/JobNote';
+import { StartLoadingSheet } from '@/components/dock/StartLoadingSheet';
 
 /** L2: published trips for this depot, today and tomorrow's plan, in loading order. */
 export default function DockQueuePage() {
@@ -65,11 +68,12 @@ export default function DockQueuePage() {
 
 function QueueCard({ trip }: { trip: LoadQueueItem }) {
   const started = trip.status !== 'published';
-  return (
-    <Link
-      href={`/dock/${trip.tripId}`}
-      className="flex h-full flex-col gap-md rounded-card bg-surface p-lg outline-none ring-primary focus-visible:ring-2"
-    >
+  const router = useRouter();
+  const [adding, setAdding] = useState(false);
+  const cardClass =
+    'flex h-full w-full flex-col gap-md rounded-card bg-surface p-lg text-left outline-none ring-primary focus-visible:ring-2';
+  const body = (
+    <>
       <div className="flex items-start justify-between gap-sm">
         <div className="min-w-0">
           <p className="truncate text-title text-ink">{trip.vehicle.plate ?? trip.vehicle.id}</p>
@@ -111,6 +115,27 @@ function QueueCard({ trip }: { trip: LoadQueueItem }) {
           {started ? 'Continue' : 'Start loading'}
         </span>
       </div>
+    </>
+  );
+  // Starting a truck first asks who is loading; a truck already being loaded opens straight away.
+  return started ? (
+    <Link href={`/dock/${trip.tripId}`} className={cardClass}>
+      {body}
     </Link>
+  ) : (
+    <>
+      <button type="button" onClick={() => setAdding(true)} className={cardClass}>
+        {body}
+      </button>
+      {adding && (
+        <StartLoadingSheet
+          tripId={trip.tripId}
+          title="Start loading"
+          initialNames={trip.loaderNames}
+          onClose={() => setAdding(false)}
+          onContinue={() => router.push(`/dock/${trip.tripId}`)}
+        />
+      )}
+    </>
   );
 }
