@@ -35,8 +35,6 @@ const PARKING: Record<DriverDayHandover['parking'], string | null> = {
   van_only: 'Only a van can park here',
   mall_dock: 'Use the mall goods dock, not the car park',
 };
-/** Trips that have not left the depot yet. */
-const AT_DEPOT = new Set(['published', 'loading', 'ready']);
 /** The driver is at the store and the store is checking the goods. */
 const AT_STORE = new Set(['arrived', 'waiting']);
 
@@ -58,10 +56,16 @@ function useQueued() {
     arrived: Map<string, string>;
     acked: Set<string>;
     roadIssueTrips: Set<string>;
+    /** Trip id to the phone time the driver tapped Start trip, still waiting to sync. */
+    started: Map<string, string>;
+    /** Trip id to the phone time the driver tapped End trip, still waiting to sync. */
+    ended: Map<string, string>;
   }>({
     arrived: new Map(),
     acked: new Set(),
     roadIssueTrips: new Set(),
+    started: new Map(),
+    ended: new Map(),
   });
   useEffect(() => {
     let alive = true;
@@ -72,13 +76,17 @@ function useQueued() {
           const arrived = new Map<string, string>();
           const acked = new Set<string>();
           const roadIssueTrips = new Set<string>();
+          const started = new Map<string, string>();
+          const ended = new Map<string, string>();
           for (const a of list) {
             const stopId = String(a.payload.stopId ?? '');
             if (a.type === 'ARRIVED') arrived.set(stopId, a.createdOnPhoneAt);
             if (a.type === 'ACKNOWLEDGEMENT') acked.add(stopId);
             if (a.type === 'ROAD_ISSUE' && a.tripId != null) roadIssueTrips.add(String(a.tripId));
+            if (a.type === 'START_TRIP' && a.tripId != null) started.set(String(a.tripId), a.createdOnPhoneAt);
+            if (a.type === 'END_TRIP' && a.tripId != null) ended.set(String(a.tripId), a.createdOnPhoneAt);
           }
-          setQueued({ arrived, acked, roadIssueTrips });
+          setQueued({ arrived, acked, roadIssueTrips, started, ended });
         })
         .catch(() => {});
     check();
@@ -114,7 +122,7 @@ function Fact({ label, value }: { label: string; value: string }) {
 }
 
 function CallStore({ stop, primary = false }: { stop: DriverDayStop; primary?: boolean }) {
-  const look = primary ? 'bg-primary text-bg' : 'border border-border bg-surface text-ink';
+  const look = primary ? 'bg-primary text-on-primary' : 'border border-border bg-surface text-ink';
   return stop.phone ? (
     <a
       href={telHref(stop.phone)}
@@ -225,15 +233,51 @@ export function NextStop() {
   }, [phase, refresh]);
 
   if (!trip || !stop) {
+    const back = fullDay(day)?.returnToDepot ?? null;
+    const due = back
+      ? new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Colombo',
+          hour: 'numeric',
+          minute: '2-digit',
+        }).format(new Date(back.etaAt))
+      : null;
+    const endedAt = trip ? queued.ended.get(trip.id) ?? null : null;
+    const endTrip = () => {
+      if (!trip) return;
+      setBusy(true);
+      setMessage(null);
+      void enqueueAction('END_TRIP', {}, trip.id, trip.planVersion)
+        .catch(() => setMessage('Could not save that on this phone. Try again, or call dispatch.'))
+        .finally(() => setBusy(false));
+    };
     return (
       <div className="flex flex-col gap-4">
         <h1 className="text-[26px] font-semibold leading-8 text-ink">Next stop</h1>
         {!online && <OfflineBanner />}
         <p className="rounded-card bg-surface p-4 text-[15px] leading-5 text-muted">
           {trip
-            ? `All stops on Trip ${trip.tripNumber} are done. Head back to the depot.`
+            ? endedAt
+              ? `Trip ${trip.tripNumber} ended at ${timeOf(endedAt)}. It is saved on this phone until it can be sent.`
+              : `All stops on Trip ${trip.tripNumber} are done. Head back to the depot.${
+                  due ? ` About ${back?.minutes} min, due ${due}.` : ''
+                } Tap End trip when you are back. That is when the trip finishes.`
             : 'No trip for you today yet. Dispatch sends it here once it is planned.'}
         </p>
+        {trip && trip.status === 'on_road' && !endedAt && (
+          <button
+            type="button"
+            onClick={endTrip}
+            disabled={busy}
+            className="flex min-h-[60px] items-center justify-center rounded-pill bg-primary px-6 text-[18px] font-semibold text-on-primary disabled:opacity-60"
+          >
+            End trip
+          </button>
+        )}
+        {message && (
+          <p role="alert" className="text-[14px] font-medium leading-5 text-danger">
+            {message}
+          </p>
+        )}
         <Link href="/drive/stops" className="text-[15px] font-semibold text-slate">
           See the whole trip
         </Link>
@@ -245,6 +289,11 @@ export function NextStop() {
   const waited = arrivedAt ? Math.max(0, Math.floor((now - Date.parse(arrivedAt)) / 1000)) : 0;
   const waitedMin = Math.floor(waited / 60);
   const longWait = waitedMin >= WAIT_ALERT_MIN;
+  const localStart = queued.started.get(trip.id) ?? null;
+  const onRoad = trip.status === 'on_road' || localStart !== null;
+  const startedAt = trip.startedAt ?? localStart;
+  const waitingLoader = trip.status === 'published' || trip.status === 'loading';
+  const canStart = trip.status === 'ready' && !onRoad;
 
   async function send(run: () => Promise<unknown>) {
     setBusy(true);
@@ -259,12 +308,14 @@ export function NextStop() {
   }
 
   const arrived = () => {
-    if (AT_DEPOT.has(trip.status)) {
-      setMessage('You can mark arrival once the trip has left the depot.');
+    if (!onRoad) {
+      setMessage('You can mark arrival once you have started the trip.');
       return;
     }
     void send(() => enqueueAction('ARRIVED', { stopId: stop.id }, trip.id, trip.planVersion));
   };
+  const startTrip = () =>
+    void send(() => enqueueAction('START_TRIP', {}, trip.id, trip.planVersion));
   const acknowledge = () =>
     void send(() =>
       enqueueAction('ACKNOWLEDGEMENT', { stopId: stop.id }, trip.id, trip.planVersion),
@@ -338,7 +389,7 @@ export function NextStop() {
         <button
           type="button"
           onClick={planLock.accept}
-          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg"
+          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-on-primary"
         >
           Accept new list
         </button>
@@ -381,7 +432,7 @@ export function NextStop() {
           type="button"
           onClick={() => void send(onBreak.end)}
           disabled={busy}
-          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg disabled:opacity-60"
+          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-on-primary disabled:opacity-60"
         >
           End break and resume
         </button>
@@ -424,7 +475,7 @@ export function NextStop() {
             type="button"
             onClick={resume}
             disabled={busy}
-            className="flex min-h-[56px] flex-1 items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg disabled:opacity-60"
+            className="flex min-h-[56px] flex-1 items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-on-primary disabled:opacity-60"
           >
             Resume trip
           </button>
@@ -463,7 +514,7 @@ export function NextStop() {
 
       {!online && <OfflineBanner />}
 
-      {phase === 'travel' && AT_DEPOT.has(trip.status) && (
+      {phase === 'travel' && waitingLoader && (
         <section
           className="flex flex-col gap-1 rounded-card bg-surface p-4"
           aria-label="Waiting for the loader"
@@ -477,6 +528,26 @@ export function NextStop() {
             own.
           </p>
         </section>
+      )}
+
+      {phase === 'travel' && canStart && (
+        <section
+          className="flex flex-col gap-1 rounded-card bg-sage p-4"
+          aria-label="Ready to leave"
+          role="status"
+        >
+          <p className="text-[17px] font-semibold leading-[22px] text-ink">Truck is loaded</p>
+          <p className="text-[14px] leading-5 text-muted">
+            Tap Start trip when you leave the depot. The trip goes on the road and the time starts
+            then.
+          </p>
+        </section>
+      )}
+
+      {phase === 'travel' && onRoad && startedAt && (
+        <p className="text-[14px] font-medium leading-5 text-muted">
+          On the road since {timeOf(startedAt)}
+        </p>
       )}
 
       {phase === 'waiting' && (
@@ -523,18 +594,40 @@ export function NextStop() {
             Store confirmed the receipt
             {stop.storeConfirmedAt ? ` at ${timeOf(stop.storeConfirmedAt)}` : ''}
           </p>
+          {stop.storeIssues?.length ? (
+            <ul className="flex flex-col gap-1 pt-1" aria-label="What the store reported">
+              {stop.storeIssues.map((issue, i) => (
+                <li key={i} className="flex items-center gap-2 text-[15px] leading-5 text-ink">
+                  <Icon name="alert" size={15} className="text-warning" />
+                  {issue.qty !== null ? `${issue.qty} × ` : ''}
+                  {issue.itemName} · {issue.reason.replace('_', ' ')}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[14px] leading-5 text-ink">Every line was received.</p>
+          )}
           <p className="text-[14px] leading-5 text-muted">Acknowledge it to see your next stop.</p>
         </section>
       )}
 
       <StopDetails stop={stop} />
 
-      {phase === 'travel' ? (
+      {phase === 'travel' && canStart ? (
+        <button
+          type="button"
+          onClick={startTrip}
+          disabled={busy}
+          className="flex min-h-[60px] items-center justify-center gap-2 rounded-pill bg-primary px-6 text-[18px] font-semibold text-on-primary disabled:opacity-60"
+        >
+          Start trip
+        </button>
+      ) : phase === 'travel' ? (
         <button
           type="button"
           onClick={arrived}
           disabled={busy}
-          className="flex min-h-[60px] items-center justify-center gap-2 rounded-pill bg-primary px-6 text-[18px] font-semibold text-bg disabled:opacity-60"
+          className="flex min-h-[60px] items-center justify-center gap-2 rounded-pill bg-primary px-6 text-[18px] font-semibold text-on-primary disabled:opacity-60"
         >
           <Icon name="pin" size={19} />
           I&apos;ve arrived
@@ -545,7 +638,7 @@ export function NextStop() {
             type="button"
             onClick={acknowledge}
             disabled={busy || phase !== 'ack'}
-            className="flex min-h-[60px] items-center justify-center gap-2 rounded-pill bg-primary px-6 text-[18px] font-semibold text-bg disabled:bg-bg disabled:text-muted"
+            className="flex min-h-[60px] items-center justify-center gap-2 rounded-pill bg-primary px-6 text-[18px] font-semibold text-on-primary disabled:bg-bg disabled:text-muted"
           >
             <Icon name="check" size={19} />
             Acknowledge receipt

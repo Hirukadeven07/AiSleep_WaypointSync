@@ -88,7 +88,7 @@ export function NotifyModal({
           >
             <span
               className={`flex size-5 shrink-0 items-center justify-center rounded-[6px] text-[12px] font-bold leading-[17px] ${
-                on ? 'bg-primary text-bg' : 'border border-mist bg-surface text-transparent'
+                on ? 'bg-primary text-on-primary' : 'border border-mist bg-surface text-transparent'
               }`}
             >
               ✓

@@ -19,11 +19,14 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   prettier,
   {
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'tools/**/*.mjs'],
     languageOptions: {
       globals: {
+        Buffer: 'readonly',
         console: 'readonly',
+        fetch: 'readonly',
         process: 'readonly',
+        URL: 'readonly',
       },
     },
   },

@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { DISPATCH_PHONE, telHref } from '@/lib/driver-format';
 import { enqueueAction } from '@/lib/outbox';
 import { useDriver } from './DriverShell';
+import { depotName } from '@/lib/depots';
 
 function CallCard({
   href,
@@ -112,15 +113,19 @@ export function SosScreen() {
     void enqueueAction('SOS_ALERT', { location: null }, trip?.id ?? null, trip?.planVersion ?? null).catch(() => {});
   }, [trip]);
 
-  // Back to the driver screen the SOS button was pressed on (Home if unknown).
+  // Closing SOS ("I'm safe" or ×) clears the alert for dispatch, then goes back to the screen
+  // the SOS button was pressed on (Home if unknown). It goes through the outbox, so it works offline.
   const close = () => {
+    void enqueueAction('SOS_CLEARED', {}, trip?.id ?? null, trip?.planVersion ?? null).catch(
+      () => {},
+    );
     const from = new URLSearchParams(window.location.search).get('from') ?? '';
     const ok = from.startsWith('/drive') && !from.startsWith('/drive/sos') && !from.startsWith('//');
     router.replace(ok ? from : '/drive');
   };
 
   return (
-    <div className="min-h-dvh bg-sos text-bg">
+    <div className="min-h-dvh bg-sos text-on-primary">
       <div className="mx-auto flex min-h-dvh w-full max-w-[480px] flex-col pt-[env(safe-area-inset-top)]">
         <header className="flex items-center gap-3 px-4 py-[6px]">
           <button
@@ -132,7 +137,7 @@ export function SosScreen() {
             <Icon name="x" size={20} />
           </button>
           <div>
-            <h1 className="text-[18px] font-semibold leading-6 text-bg">Emergency</h1>
+            <h1 className="text-[18px] font-semibold leading-6 text-on-primary">Emergency</h1>
             <p className="text-caption font-medium leading-4 text-sand">Only use when you need help now</p>
           </div>
         </header>
@@ -156,7 +161,7 @@ export function SosScreen() {
             primary
             href={telHref(DISPATCH_PHONE)}
             title="Call dispatcher"
-            subtitle={me?.depotId ? `Dispatch · ${me.depotId}` : 'Dispatch'}
+            subtitle={me?.depotId ? `Dispatch · ${depotName(me.depotId)}` : 'Dispatch'}
             number={DISPATCH_PHONE}
           />
           <CallCard href={telHref('119')} title="Police emergency" subtitle="Sri Lanka Police" number="119" />

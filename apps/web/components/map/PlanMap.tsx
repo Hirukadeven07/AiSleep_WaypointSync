@@ -1,12 +1,21 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { PlanMap as PlanMapData, PlanMapPin, UnplacedStore } from '@waypoint/contracts';
+import type {
+  DropCheck,
+  PlanMap as PlanMapData,
+  PlanMapPin,
+  PlanNextShops,
+  PlanTrip,
+  UnplacedStore,
+} from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { m3Text, orderWindow } from '@/components/plan/format';
 import { districtTone } from './districts';
-import { IslandMap, type IslandMapHandle, type IslandMarker, type MapView } from './IslandMap';
+import { IslandMap, type IslandMapHandle, type IslandMarker, type MapPath, type MapView } from './IslandMap';
 import { MapControls } from './MapControls';
+import { MapLegend } from './MapLegend';
+import { depotLabel } from '@/lib/depots';
 
 const DOT: Record<PlanMapPin['brand'], string> = {
   Fresh: 'bg-fresh',
@@ -18,11 +27,17 @@ const DOT: Record<PlanMapPin['brand'], string> = {
 export function PlanMap({
   date,
   refreshKey,
+  trips,
   onOpenOrder,
+  onPlace,
+  onToast,
 }: {
   date: string;
   refreshKey: string;
+  trips: PlanTrip[];
   onOpenOrder: (orderId: string) => void;
+  onPlace: (orderId: string, storeName: string, tripId: string) => Promise<boolean>;
+  onToast: (toast: { kind: 'ok' | 'error'; title: string; sub: string }) => void;
 }) {
   const mapRef = useRef<IslandMapHandle>(null);
   const [data, setData] = useState<PlanMapData | null>(null);
@@ -32,6 +47,9 @@ export function PlanMap({
   const [draft, setDraft] = useState<{ lat: number; lng: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [placeError, setPlaceError] = useState<string | null>(null);
+  const [tripId, setTripId] = useState<string | null>(null);
+  const [ripple, setRipple] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     let cancel = false;
@@ -47,6 +65,31 @@ export function PlanMap({
       cancel = true;
     };
   }, [date, refreshKey]);
+
+  const chosen = trips.find((trip) => trip.id === tripId) ?? null;
+
+  useEffect(() => {
+    if (tripId && trips.some((trip) => trip.id === tripId)) return;
+    setTripId(trips[0]?.id ?? null);
+  }, [trips, tripId]);
+
+  useEffect(() => {
+    if (!chosen || chosen.stops.length === 0) {
+      setRipple(new Set());
+      return;
+    }
+    let cancel = false;
+    api<PlanNextShops>(`/plan/trips/${chosen.id}/next`)
+      .then((next) => {
+        if (!cancel) setRipple(new Set(next.orderIds));
+      })
+      .catch(() => {
+        if (!cancel) setRipple(new Set());
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [chosen, refreshKey]);
 
   const tones = useMemo(() => {
     const map = new Map<string, ReturnType<typeof districtTone>>();
@@ -87,10 +130,11 @@ export function PlanMap({
         id: pin?.orderId ?? `store:${store.storeId}`,
         lat: store.lat,
         lng: store.lng,
-        dotClass: store.hasOrder ? DOT[store.brand] : 'bg-faint',
+        dotClass: pin ? DOT[store.brand] : 'bg-faint',
         title: store.storeName,
         badges: pin ? [...(pin.chilled ? ['C'] : []), ...(pin.vanOnly ? ['V'] : [])] : [],
         selected: (pin?.orderId ?? `store:${store.storeId}`) === selectedId,
+        pulse: pin && ripple.has(pin.orderId) ? 'ripple' : pin ? 'glow' : undefined,
         size: 'pin',
       };
     });
@@ -99,8 +143,8 @@ export function PlanMap({
         id: `depot:${data.depot.id}`,
         lat: data.depot.lat,
         lng: data.depot.lng,
-        dotClass: 'bg-ink',
-        title: `${data.depot.name} depot`,
+        dotClass: 'bg-scrim',
+        title: depotLabel(data.depot.name),
         size: 'depot',
       });
     }
@@ -109,14 +153,77 @@ export function PlanMap({
         id: 'draft',
         lat: draft.lat,
         lng: draft.lng,
-        dotClass: 'bg-ink',
+        dotClass: 'bg-scrim',
         title: placing?.storeName ?? 'New location',
         selected: true,
         size: 'pin',
       });
     }
     return pins;
-  }, [data, selectedId, draft, placing]);
+  }, [data, selectedId, draft, placing, ripple]);
+
+  const route = useMemo<MapPath[]>(() => {
+    if (!data || !chosen) return [];
+    const byOrder = new Map(data.pins.map((pin) => [pin.orderId, pin]));
+    const coordinates: [number, number][] = [];
+    if (data.depot) coordinates.push([data.depot.lng, data.depot.lat]);
+    for (const stop of [...chosen.stops].sort((a, b) => a.sequence - b.sequence)) {
+      const pin = byOrder.get(stop.orderId);
+      if (pin) coordinates.push([pin.lng, pin.lat]);
+    }
+    if (coordinates.length < 2) return [];
+    return [{ id: chosen.id, coordinates, color: '#415a77', width: 3 }];
+  }, [data, chosen]);
+
+  async function addShop(pin: PlanMapPin) {
+    if (!chosen) {
+      onToast({
+        kind: 'error',
+        title: 'Choose a vehicle first',
+        sub: 'Create the trip in List, then pick it here.',
+      });
+      return;
+    }
+    if (chosen.stops.some((stop) => stop.orderId === pin.orderId)) {
+      onToast({
+        kind: 'ok',
+        title: `${pin.storeName} is already on this truck`,
+        sub: 'Stops stay in delivery-window order.',
+      });
+      return;
+    }
+    setAdding(true);
+    try {
+      const check = await api<DropCheck>('/plan/check', {
+        method: 'POST',
+        body: { orderId: pin.orderId, tripId: chosen.id },
+      });
+      if (!check.canDrop) {
+        onToast({
+          kind: 'error',
+          title: `${pin.storeName} can't go on ${chosen.plate ?? chosen.vehicleId}`,
+          sub: check.blocks[0]?.message ?? 'That shop does not fit this trip.',
+        });
+        return;
+      }
+      const saved = await onPlace(pin.orderId, pin.storeName, chosen.id);
+      if (saved && check.warnings.length > 0) {
+        onToast({
+          kind: 'ok',
+          title: `${pin.storeName} added`,
+          sub: check.warnings.map((warning) => warning.message).join(' '),
+        });
+      }
+    } catch {
+      onToast({
+        kind: 'error',
+        title: `${pin.storeName} could not be checked`,
+        sub: 'Try again.',
+      });
+    } finally {
+      setAdding(false);
+    }
+  }
 
   function startPlace(store: UnplacedStore, at?: { lat: number; lng: number }) {
     setSelectedId(null);
@@ -163,14 +270,18 @@ export function PlanMap({
           tones={tones}
           view={view}
           markers={markers}
+          paths={route}
           picking={placing != null}
           onPick={(lng, lat) => setDraft({ lng, lat })}
           onMarker={(id) => {
             if (placing || id.startsWith('depot:') || id === 'draft') return;
+            const pin = data.pins.find((item) => item.orderId === id);
+            if (pin && !adding) void addShop(pin);
             setSelectedId(id);
           }}
         />
       )}
+      <VehiclePick trips={trips} tripId={tripId} onTrip={setTripId} />
       <Legend />
       <MapControls mapRef={mapRef} />
       {selected && (
@@ -285,38 +396,73 @@ export function PlanMap({
   );
 }
 
+function VehiclePick({
+  trips,
+  tripId,
+  onTrip,
+}: {
+  trips: PlanTrip[];
+  tripId: string | null;
+  onTrip: (id: string) => void;
+}) {
+  return (
+    <label className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-card bg-surface px-3 py-2 shadow-raised">
+      <span className="text-[12px] font-semibold text-muted">Vehicle</span>
+      {trips.length === 0 ? (
+        <span className="text-[13px] font-semibold text-ink">Create one in List first</span>
+      ) : (
+        <select
+          aria-label="Vehicle"
+          className="bg-transparent text-[13px] font-semibold text-ink outline-none"
+          value={tripId ?? ''}
+          onChange={(event) => onTrip(event.target.value)}
+        >
+          {trips.map((trip) => (
+            <option key={trip.id} value={trip.id}>
+              {trip.plate ?? trip.vehicleId}
+              {trip.driverName ? ` · ${trip.driverName}` : ''} · Trip {trip.tripNumber}
+            </option>
+          ))}
+        </select>
+      )}
+    </label>
+  );
+}
+
 function Legend() {
   const row = 'flex items-center gap-2 text-[12px] leading-4 text-ink';
   return (
-    <div className="absolute bottom-4 left-4 w-[200px] rounded-card bg-surface p-3 shadow">
-      <p className="mb-2 text-[12px] font-semibold text-muted">Legend</p>
-      <ul className="flex flex-col gap-1.5">
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-fresh" /> Fresh
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-style" /> Style
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-tech" /> Tech
-        </li>
-        <li className={row}>
-          <span className="size-2.5 rounded-full bg-faint" /> No order
-        </li>
-        <li className={row}>
-          <span className="flex size-3.5 items-center justify-center rounded-full bg-chilled text-[8px] font-bold text-surface">
-            C
-          </span>
-          Chilled
-        </li>
-        <li className={row}>
-          <span className="flex size-3.5 items-center justify-center rounded-full bg-ink text-[8px] font-bold text-surface">
-            V
-          </span>
-          Van only
-        </li>
-      </ul>
-      <p className="mt-2 text-[10px] leading-3 text-muted">Map data © OpenStreetMap · Boundaries © geoBoundaries</p>
-    </div>
+    <MapLegend width="w-[200px]">
+      <li className={row}>
+        <span className="size-2.5 rounded-full bg-fresh" /> Fresh
+      </li>
+      <li className={row}>
+        <span className="size-2.5 rounded-full bg-style" /> Style
+      </li>
+      <li className={row}>
+        <span className="size-2.5 rounded-full bg-tech" /> Tech
+      </li>
+      <li className={row}>
+        <span className="size-2.5 animate-ping rounded-full bg-fresh" /> Shop with an order
+      </li>
+      <li className={row}>
+        <span className="size-2.5 rounded-full bg-faint" /> No order
+      </li>
+      <li className={row}>
+        <span className="h-0.5 w-4 bg-slate" /> Planned line
+      </li>
+      <li className={row}>
+        <span className="flex size-3.5 items-center justify-center rounded-full bg-chilled text-[8px] font-bold text-surface">
+          C
+        </span>
+        Chilled
+      </li>
+      <li className={row}>
+        <span className="flex size-3.5 items-center justify-center rounded-full bg-scrim text-[8px] font-bold text-surface">
+          V
+        </span>
+        Van only
+      </li>
+    </MapLegend>
   );
 }

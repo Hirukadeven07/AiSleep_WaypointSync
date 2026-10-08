@@ -192,7 +192,7 @@ function MoveStopAction({ tripId }: { tripId: string }) {
           type="button"
           disabled={busy || !stopId || !toTripId}
           onClick={() => void confirm()}
-          className="rounded-pill bg-primary px-4 py-2 text-[13px] font-semibold text-bg disabled:opacity-50"
+          className="rounded-pill bg-primary px-4 py-2 text-[13px] font-semibold text-on-primary disabled:opacity-50"
         >
           {busy ? 'Moving…' : 'Move stop'}
         </button>
@@ -315,7 +315,7 @@ export function VehicleActions({
         type="button"
         aria-label="Close"
         onClick={onClose}
-        className="absolute inset-0 bg-ink/35"
+        className="absolute inset-0 bg-scrim/35"
       />
       <aside
         role="dialog"
@@ -362,7 +362,7 @@ export function VehicleActions({
         />
         <Link
           href="/dispatch/map"
-          className="flex items-center gap-2 rounded-pill bg-primary px-4 py-3 text-[14px] font-semibold leading-[19px] text-bg"
+          className="flex items-center gap-2 rounded-pill bg-primary px-4 py-3 text-[14px] font-semibold leading-[19px] text-on-primary"
         >
           <Icon name="crosshair" size={18} />
           Locate on live map

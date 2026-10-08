@@ -4,6 +4,7 @@
  */
 import { Reason } from './reasons';
 import type { Brand, DockType, Depot, Lookup, RuleIssue, ServiceAllowance, TravelLeg } from './types';
+import { depotName } from './names';
 
 export function findTravel(lookup: Lookup, depot: Depot, district: string): TravelLeg | undefined {
   return lookup.travel.find((row) => row.depot === depot && row.district === district);
@@ -21,7 +22,7 @@ export function missingTravelIssue(depot: Depot, district: string): RuleIssue {
   return {
     code: Reason.MISSING_TRAVEL_LEG,
     severity: 'block',
-    message: `No district_travel row for ${depot} → ${district}.`,
+    message: `No travel times from ${depotName(depot)} to ${district}.`,
   };
 }
 
@@ -29,6 +30,6 @@ export function missingAllowanceIssue(brand: Brand, dockType: DockType): RuleIss
   return {
     code: Reason.MISSING_SERVICE_ALLOWANCE,
     severity: 'block',
-    message: `No service_allowance row for ${brand} / ${dockType}.`,
+    message: `No unloading time for ${brand} at a ${dockType.replace('_', ' ')}.`,
   };
 }

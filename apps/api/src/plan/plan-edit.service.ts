@@ -6,6 +6,7 @@ import type {
   Me,
   PlanIssue,
   PlanOrderDetail,
+  PlanVehicleChoice,
   ReasonCode,
   UnassignResult,
 } from '@waypoint/contracts';
@@ -27,6 +28,7 @@ import {
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { tellDriversPlanChanged } from '../driver/driver-notices';
+import { NoticeHub, type RaisedNotice } from '../notifications/notice-hub';
 import { DEPART_MIN, PlanService } from './plan.service';
 import {
   isAtDepot,
@@ -48,6 +50,10 @@ const issue = (i: RuleIssue): PlanIssue => ({
 });
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const KIND = { truck: 'Ambient', van: 'Van' } as const;
+const kg = (n: number) => Math.round(n).toLocaleString('en-US');
+const vehicleKind = (v: { type: string; temp: string }) =>
+  v.type === 'van' ? 'Van' : v.temp === 'reefer' ? 'Refrigerated truck' : 'Ambient truck';
+const CHOICE_RANK = { fits: 0, warn: 1, blocked: 2 } as const;
 
 /** Dispatcher edits to the plan: check a drop, place an order on a trip, take it off again, read one order. */
 @Injectable()
@@ -56,7 +62,13 @@ export class PlanEditService {
     private readonly prisma: PrismaService,
     private readonly plan: PlanService,
     private readonly clock: ClockService,
+    private readonly hub: NoticeHub,
   ) {}
+
+  /** Push notices that were written inside a transaction, once that transaction has committed. */
+  publishRaised(rows: RaisedNotice[]) {
+    this.hub.publishAll(rows);
+  }
 
   depotOf(me: Me): string {
     if (!me.depotId) throw new ForbiddenException('This account has no depot');
@@ -89,7 +101,7 @@ export class PlanEditService {
     if (!isAtDepot(trip.status)) {
       throw new DomainError(
         'PLAN_LOCKED',
-        `Trip ${trip.id} has left the depot and can no longer be changed.`,
+        `${trip.vehicle.numberPlate ?? trip.vehicleId} · Trip ${trip.tripNumber} has left the depot and can no longer be changed.`,
       );
     }
   }
@@ -112,7 +124,7 @@ export class PlanEditService {
       issues.push({
         code: 'BRAND_MISMATCH' as ReasonCode,
         severity: 'block',
-        message: `Trip ${trip.id} is a ${trip.brand} trip; this order is ${order.brand}.`,
+        message: `${trip.vehicle.numberPlate ?? trip.vehicleId} · Trip ${trip.tripNumber} carries ${trip.brand}; ${order.store.displayName ?? order.store.id} is a ${order.brand} store.`,
       });
     }
 
@@ -123,7 +135,7 @@ export class PlanEditService {
       vehicle,
       sorted.map((s) => s.order),
     );
-    const all = [...issues, ...capacity];
+    const all = [...issues, ...capacity, ...this.windowWarnings(order, trip, sorted, lookup)];
     const blocks = all.filter((i) => i.severity === 'block');
     const warnings = all.filter((i) => i.severity === 'warn');
 
@@ -142,6 +154,24 @@ export class PlanEditService {
         minutes: computeTripMinutes(sorted, lookup, trip.depotId as Depot),
       },
     };
+  }
+
+  /** A warning for every stop whose planned arrival falls after its delivery window. */
+  private windowWarnings(order: OrderRow, trip: TripRow, sorted: ReturnType<typeof sortStopsByWindow>, lookup: Lookup): RuleIssue[] {
+    const etas = stopEtas(sorted, lookup, trip.depotId as Depot, DEPART_MIN[trip.brand]);
+    if (!etas) return [];
+    const name = new Map<string, string>();
+    for (const stop of trip.stops) {
+      name.set(stop.order.store.id, stop.order.store.displayName ?? stop.order.store.id);
+    }
+    name.set(order.store.id, order.store.displayName ?? order.store.id);
+    return etas
+      .filter((eta) => eta.atRisk)
+      .map((eta) => ({
+        code: 'WINDOW_AT_RISK' as ReasonCode,
+        severity: 'warn' as const,
+        message: `${name.get(eta.outletId) ?? eta.outletId} would arrive at ${eta.arriveClock}, after its delivery window.`,
+      }));
   }
 
   async check(me: Me, orderId: string, tripId: string): Promise<DropCheck> {
@@ -167,7 +197,7 @@ export class PlanEditService {
     const lookup = await this.plan.loadLookup();
     const depot = this.depotOf(me) as Depot;
 
-    const { fromTripId, placed, resorted, order } = await this.prisma.$transaction(async (tx) => {
+    const { fromTripId, placed, resorted, order, notices } = await this.prisma.$transaction(async (tx) => {
       const order = await this.loadOrder(me, orderId);
       const trip = await this.loadTrip(me, tripId, tx);
       PlanEditService.assertEditable(trip);
@@ -184,7 +214,13 @@ export class PlanEditService {
       let fromTripId: string | null = null;
       if (existing) {
         if (existing.tripId === tripId) {
-          return { fromTripId: null, placed: result.placedSequence, resorted: false, order };
+          return {
+            fromTripId: null,
+            placed: result.placedSequence,
+            resorted: false,
+            order,
+            notices: [] as RaisedNotice[],
+          };
         }
         const source = await this.loadTrip(me, existing.tripId, tx);
         PlanEditService.assertEditable(source);
@@ -194,10 +230,11 @@ export class PlanEditService {
         await tx.tripStop.create({ data: { tripId, orderId, sequence: 9999 } });
       }
       await tx.order.update({ where: { id: orderId }, data: { status: 'planned' } });
-      await this.resequence(tx, tripId, lookup, depot);
-      if (fromTripId) await this.resequence(tx, fromTripId, lookup, depot);
-      return { fromTripId, placed: result.placedSequence, resorted: result.resorted, order };
+      const notices = await this.resequence(tx, tripId, lookup, depot);
+      if (fromTripId) notices.push(...(await this.resequence(tx, fromTripId, lookup, depot)));
+      return { fromTripId, placed: result.placedSequence, resorted: result.resorted, order, notices };
     });
+    this.publishRaised(notices);
 
     return {
       orderId,
@@ -214,16 +251,16 @@ export class PlanEditService {
     const depot = this.depotOf(me) as Depot;
     await this.loadOrder(me, orderId);
 
-    const fromTripId = await this.prisma.$transaction(async (tx) => {
+    const { fromTripId, notices } = await this.prisma.$transaction(async (tx) => {
       const stop = await tx.tripStop.findUnique({ where: { orderId } });
-      if (!stop) return null;
+      if (!stop) return { fromTripId: null, notices: [] as RaisedNotice[] };
       const trip = await this.loadTrip(me, stop.tripId, tx);
       PlanEditService.assertEditable(trip);
       await tx.tripStop.delete({ where: { orderId } });
       await tx.order.update({ where: { id: orderId }, data: { status: 'waiting' } });
-      await this.resequence(tx, stop.tripId, lookup, depot);
-      return stop.tripId;
+      return { fromTripId: stop.tripId, notices: await this.resequence(tx, stop.tripId, lookup, depot) };
     });
+    this.publishRaised(notices);
 
     return {
       orderId,
@@ -236,7 +273,12 @@ export class PlanEditService {
    * and each stop's ETA (read by the store, the driver and the dispatch board).
    * A change to a sent trip also raises its plan version, which pauses the dock until the loader accepts it.
    */
-  async resequence(tx: Prisma.TransactionClient, tripId: string, lookup: Lookup, depot: Depot) {
+  async resequence(
+    tx: Prisma.TransactionClient,
+    tripId: string,
+    lookup: Lookup,
+    depot: Depot,
+  ): Promise<RaisedNotice[]> {
     const trip = await tx.trip.findUniqueOrThrow({
       where: { id: tripId },
       select: { status: true, brand: true },
@@ -266,7 +308,8 @@ export class PlanEditService {
         ...(trip.status !== 'planning' && { planVersion: { increment: 1 } }),
       },
     });
-    if (trip.status !== 'planning') await tellDriversPlanChanged(tx, [tripId]);
+    if (trip.status === 'planning') return [];
+    return tellDriversPlanChanged(tx, [tripId]);
   }
 
   async tripView(me: Me, tripId: string, lookup: Lookup, depot: Depot) {
@@ -309,21 +352,32 @@ export class PlanEditService {
     const taken: Record<string, number> = {};
     for (const t of tripRows) taken[t.vehicleId] = (taken[t.vehicleId] ?? 0) + 1;
 
-    const best = rankVehiclesForOrder({
+    const ranked = rankVehiclesForOrder({
       order: toStopView(order).order,
       outlet: toOutlet(order.store),
       vehicles: vehicles.map(toVehicle),
       trips: views,
       tripsTakenToday: taken,
       lookup,
-    }).find((o) => !o.hardBlocked && o.tripId !== null && o.tripId !== stop?.tripId);
+    }).filter((o) => !o.hardBlocked && o.tripId !== null && o.tripId !== stop?.tripId);
+
+    // Suggest only a trip it really fits: no warning on the drop (other district, over weight or
+    // volume, ...) and the store reached inside its window.
+    let fit: { row: TripRow; result: ReturnType<PlanEditService['evaluate']> } | null = null;
+    for (const option of ranked) {
+      const row = tripRows.find((t) => t.id === option.tripId);
+      if (!row) continue;
+      const result = this.evaluate(order, row, lookup);
+      if (result.blocks.length > 0 || result.warnings.length > 0) continue;
+      const etas = stopEtas(result.sorted, lookup, depotId as Depot, DEPART_MIN[row.brand]) ?? [];
+      if (windowRiskIssues(etas).length > 0) continue;
+      fit = { row, result };
+      break;
+    }
 
     let suggestion: PlanOrderDetail['suggestion'] = null;
-    if (best?.tripId) {
-      const row = tripRows.find((t) => t.id === best.tripId)!;
-      const result = this.evaluate(order, row, lookup);
-      const etas = stopEtas(result.sorted, lookup, depotId as Depot, DEPART_MIN[row.brand]) ?? [];
-      const late = windowRiskIssues(etas).length > 0;
+    if (fit) {
+      const { row, result } = fit;
       const kind =
         row.vehicle.type === 'van'
           ? KIND.van
@@ -334,7 +388,7 @@ export class PlanEditService {
         tripId: row.id,
         label: `${row.vehicle.numberPlate ?? row.vehicleId} · Trip ${row.tripNumber}`,
         detail: `${kind} · ${row.brand} · ${tripAreaLabel(row)} · has room`,
-        fit: `fits as stop ${result.placedSequence}, ${late ? 'window at risk' : 'window met'}`,
+        fit: `fits as stop ${result.placedSequence}, window met`,
       };
     }
 
@@ -357,6 +411,99 @@ export class PlanEditService {
           : null,
       assignedTripId: stop?.tripId ?? null,
       suggestion,
+      vehicles: await this.vehicleChoices(order, lookup, stop?.tripId ?? null, fit?.row.id ?? null),
     };
+  }
+
+  /**
+   * Every truck and van the dispatcher could put the order on: each trip the vehicle already has
+   * that is still at the depot, and a new run while it has fewer than two. Each says whether the
+   * order fits there, so the dispatcher picks the vehicle rather than the plan picking it.
+   */
+  private async vehicleChoices(
+    order: OrderRow,
+    lookup: Lookup,
+    currentTripId: string | null,
+    bestTripId: string | null,
+  ): Promise<PlanVehicleChoice[]> {
+    const depotId = order.store.depotId;
+    const [vehicles, trips] = await Promise.all([
+      this.prisma.vehicle.findMany({
+        where: { depotId, status: 'available' },
+        include: { driver: { select: { id: true, name: true } } },
+        orderBy: { numberPlate: 'asc' },
+      }),
+      this.prisma.trip.findMany({
+        where: { depotId, serviceDate: order.deliveryDate },
+        include: tripInclude,
+        orderBy: { tripNumber: 'asc' },
+      }),
+    ]);
+
+    const choices: PlanVehicleChoice[] = [];
+    const judge = (row: TripRow) => {
+      const { blocks, warnings } = this.evaluate(order, row, lookup);
+      const sent =
+        row.status !== 'planning' && blocks.length === 0
+          ? 'Already sent: the dock must accept the change.'
+          : null;
+      return {
+        status: blocks.length > 0 ? 'blocked' : warnings.length > 0 || sent ? 'warn' : 'fits',
+        note: blocks[0]?.message ?? warnings[0]?.message ?? sent,
+      } as const;
+    };
+
+    for (const v of vehicles) {
+      const plate = v.numberPlate ?? v.id;
+      const mine = trips.filter((t) => t.vehicleId === v.id);
+      for (const row of mine.filter((t) => isAtDepot(t.status))) {
+        const load = row.stops.reduce((sum, s) => sum + s.order.weightKg, 0);
+        choices.push({
+          vehicleId: v.id,
+          vehicleType: v.type,
+          tripId: row.id,
+          tripNumber: row.tripNumber as 1 | 2,
+          label: `${plate} · Trip ${row.tripNumber}`,
+          detail: `${vehicleKind(v)} · ${row.brand} · ${row.stops.length} ${row.stops.length === 1 ? 'stop' : 'stops'} · ${kg(load)} of ${kg(v.weightCapKg)} kg`,
+          ...judge(row),
+          bestFit: row.id === bestTripId,
+          current: row.id === currentTripId,
+        });
+      }
+      const run = ([1, 2] as const).find((n) => !mine.some((t) => t.tripNumber === n));
+      if (mine.length >= 2 || !run) continue;
+      // A trip that does not exist yet: set up for the order's brand and district, no stops.
+      const blank = {
+        id: '',
+        vehicleId: v.id,
+        vehicle: v,
+        depotId,
+        brand: order.brand,
+        tripNumber: run,
+        status: 'planning',
+        district: order.store.district,
+        extraDistricts: [],
+        stops: [],
+      } as unknown as TripRow;
+      choices.push({
+        vehicleId: v.id,
+        vehicleType: v.type,
+        tripId: null,
+        tripNumber: run,
+        label: `${plate} · New trip ${run}`,
+        detail: `${vehicleKind(v)} · empty · ${kg(v.weightCapKg)} kg · ${v.volumeCapM3} m³`,
+        ...judge(blank),
+        bestFit: false,
+        current: false,
+      });
+    }
+
+    return choices.sort(
+      (a, b) =>
+        Number(b.current) - Number(a.current) ||
+        Number(b.bestFit) - Number(a.bestFit) ||
+        CHOICE_RANK[a.status] - CHOICE_RANK[b.status] ||
+        Number(a.tripId === null) - Number(b.tripId === null),
+    );
   }
 }

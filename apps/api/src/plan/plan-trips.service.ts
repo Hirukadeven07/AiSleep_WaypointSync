@@ -1,5 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type {
+  AllocateRequest,
+  AssignResult,
   CreateTripRequest,
   Me,
   NewTripOptions,
@@ -127,8 +129,8 @@ export class PlanTripsService {
         vehicleId: vehicle.id,
         depotId,
         brand: dto.brand,
-        districtId: districts[0].id,
-        extraDistricts: { connect: districts.slice(1).map((d) => ({ id: d.id })) },
+        districtId: districts[0].name,
+        extraDistricts: { connect: districts.slice(1).map((d) => ({ name: d.name })) },
         serviceDate: day,
         tripNumber: dto.tripNumber,
         status: 'planning',
@@ -136,6 +138,32 @@ export class PlanTripsService {
       include: tripInclude,
     });
     return this.plan.planTrip(trip, await this.plan.loadLookup(), depotId as Depot);
+  }
+
+  /**
+   * The dispatcher picked a truck or van for an order. A trip it already has takes the order
+   * directly; a new run is set up for the order's brand and district first, and removed again
+   * when the order cannot go on it, so a refused pick leaves no empty trip behind.
+   */
+  async allocate(me: Me, dto: AllocateRequest): Promise<AssignResult> {
+    if (dto.tripId) return this.edit.assign(me, dto.orderId, dto.tripId);
+    if (!dto.vehicleId || !dto.tripNumber) {
+      throw new BadRequestException('Pick a trip, or a vehicle and a run');
+    }
+    const order = await this.edit.loadOrder(me, dto.orderId);
+    const trip = await this.create(me, {
+      vehicleId: dto.vehicleId,
+      tripNumber: dto.tripNumber,
+      brand: order.brand,
+      districts: [order.store.district.name],
+      date: order.deliveryDate.toISOString().slice(0, 10),
+    });
+    try {
+      return await this.edit.assign(me, dto.orderId, trip.id);
+    } catch (e) {
+      await this.prisma.trip.delete({ where: { id: trip.id } });
+      throw e;
+    }
   }
 
   /**
@@ -162,8 +190,9 @@ export class PlanTripsService {
   }
 
   /**
-   * Put a driver on a trip, or (`null`) go back to the vehicle's registered driver. Allowed until
-   * the trip leaves the depot. A sent trip tells the new driver, and the one taken off it.
+   * A trip is driven by the vehicle's registered driver. That driver stays until they leave;
+   * another driver takes the vehicle only after that. `null` clears a leftover trip assignment
+   * and follows the vehicle's driver. Allowed until the trip leaves the depot.
    */
   async assignDriver(me: Me, tripId: string, driverId: string | null): Promise<PlanTrip> {
     const trip = await this.edit.loadTrip(me, tripId);
@@ -186,6 +215,15 @@ export class PlanTripsService {
         throw new DomainError(
           'DRIVER_UNAVAILABLE',
           `${driver.name} is not an active driver at this depot.`,
+        );
+      }
+      if (driverId !== trip.vehicle.driverId) {
+        const holder = trip.vehicle.driver?.name;
+        throw new DomainError(
+          'DRIVER_UNAVAILABLE',
+          holder
+            ? `${label} stays with ${holder} until that driver leaves.`
+            : `${label} has no driver yet. Set the driver on the vehicle; the next driver takes it after they leave.`,
         );
       }
       // One driver per run: the same driver cannot drive another truck's Trip 1 at the same time.
@@ -297,7 +335,7 @@ export class PlanTripsService {
         brand: trip.brand,
         store: {
           depotId: trip.depotId,
-          districtId: { in: [trip.districtId, ...trip.extraDistricts.map((d) => d.id)] },
+          districtId: { in: [trip.districtId, ...trip.extraDistricts.map((d) => d.name)] },
         },
       },
       include: orderInclude,
@@ -320,5 +358,36 @@ export class PlanTripsService {
         windowCloseMin: view.windowCloseMin,
         weightKg: view.weightKg,
       }));
+  }
+
+  /**
+   * Waiting orders of this trip's brand that the rules allow and that still fit the delivery windows.
+   * Empty until the trip already has a stop, so the map ripples the next shops only after one is chosen.
+   */
+  async nextShops(me: Me, tripId: string): Promise<{ orderIds: string[] }> {
+    const trip = await this.edit.loadTrip(me, tripId);
+    if (trip.stops.length === 0) return { orderIds: [] };
+    const lookup = await this.plan.loadLookup();
+    const rows = await this.prisma.order.findMany({
+      where: {
+        deliveryDate: trip.serviceDate,
+        status: 'waiting',
+        stop: null,
+        brand: trip.brand,
+        store: { depotId: trip.depotId },
+      },
+      include: orderInclude,
+    });
+    return {
+      orderIds: rows
+        .filter((order) => {
+          const result = this.edit.evaluate(order, trip, lookup);
+          return (
+            result.blocks.length === 0 &&
+            !result.warnings.some((warning) => warning.code === 'WINDOW_AT_RISK')
+          );
+        })
+        .map((order) => order.id),
+    };
   }
 }

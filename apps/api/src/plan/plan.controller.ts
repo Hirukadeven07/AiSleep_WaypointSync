@@ -9,6 +9,7 @@ import type {
   NewTripOptions,
   PlanDay,
   PlanMap,
+  PlanNextShops,
   PlanOrderDetail,
   PlanPublishResult,
   PlanStore,
@@ -21,6 +22,7 @@ import type {
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
+  AllocateDto,
   AssignDriverDto,
   CreateTripDto,
   DeferDto,
@@ -93,6 +95,13 @@ export class PlanController {
     return this.edit.assign(me, dto.orderId, dto.tripId);
   }
 
+  /** Put an order on the truck or van the dispatcher picked: one of its trips, or a new run on it. */
+  @Post('allocate')
+  @HttpCode(200)
+  allocate(@CurrentUser() me: AuthUser, @Body() dto: AllocateDto): Promise<AssignResult> {
+    return this.trips.allocate(me, dto);
+  }
+
   /** Take an order off its trip; it goes back to waiting. */
   @Post('unassign')
   @HttpCode(200)
@@ -148,7 +157,7 @@ export class PlanController {
     return this.trips.remove(me, id);
   }
 
-  /** Put a driver on a trip (or `null` for the vehicle's registered driver). */
+  /** Keep the vehicle's driver on the trip. Another driver is refused until the current one leaves. */
   @Post('trips/:id/driver')
   @HttpCode(200)
   assignDriver(
@@ -163,6 +172,12 @@ export class PlanController {
   @Get('trips/:id/suggestions')
   suggestions(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<TripSuggestion[]> {
     return this.trips.suggestions(me, id);
+  }
+
+  /** Waiting orders that still fit this trip's delivery windows. The planning map ripples these. */
+  @Get('trips/:id/next')
+  nextShops(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<PlanNextShops> {
+    return this.trips.nextShops(me, id);
   }
 
   /** What would stop or warn on publish. `tripId` checks that trip only. Saves nothing. */

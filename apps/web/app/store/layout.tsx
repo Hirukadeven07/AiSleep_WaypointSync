@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Me, StoreHome, StoreNotice } from '@waypoint/contracts';
 import { api } from '@/lib/api';
+import { claimNotice, useLiveNotices } from '@/lib/live-notices';
 import { usePoll } from '@/lib/poll';
 import { RoleGate } from '@/components/shell/RoleGate';
 import { PhoneColumn } from '@/components/shell/PhoneColumn';
@@ -19,6 +20,7 @@ import {
   isMuted,
   playChime,
   readLocal,
+  requestStoreRefresh,
   showPopup,
   useStoreSettings,
   writeLocal,
@@ -30,6 +32,7 @@ const TABS: PhoneTab[] = [
   { href: '/store/order', label: 'Order', icon: 'plus', fab: true },
   { href: '/store/updates', label: 'Updates', icon: 'inbox' },
   { href: '/store/receive', label: 'Receive', icon: 'check' },
+  { href: '/store/flags', label: 'Flags', icon: 'alert' },
 ];
 
 const REMINDER_DISMISSED = 'ws_store_reminder_dismissed';
@@ -67,22 +70,36 @@ function StoreShell({ me, children }: { me: Me; children: ReactNode }) {
   }, [refreshNotices, refreshHome]);
 
   // Alert once for each notice that arrives while the app is open; what was already there stays quiet.
+  // The live stream claims the id first, so this poll does not chime again for the same notice.
   const seen = useRef<Set<string>>();
+  const pending = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!notices.data) return;
     const unread = notices.data.filter((n) => !n.read);
     if (!seen.current) {
       seen.current = new Set(unread.map((n) => n.id));
+      pending.current.forEach((id) => seen.current!.add(id));
+      pending.current.clear();
       return;
     }
     const fresh = unread.filter((n) => !seen.current!.has(n.id));
     fresh.forEach((n) => seen.current!.add(n.id));
-    const loud = fresh.filter((n) => !isMuted(n, settings));
+    const loud = fresh.filter((n) => !isMuted(n, settings) && claimNotice(n.id));
     if (!settings.alerts || loud.length === 0) return;
     setToast(loud.length === 1 ? loud[0]!.title : `${loud.length} new updates`);
     if (settings.sound) playChime();
     void showPopup(loud[0]!.title, loud[0]!.body);
   }, [notices.data, settings]);
+
+  useLiveNotices(true, (notice) => {
+    if (seen.current) seen.current.add(notice.id);
+    else pending.current.add(notice.id);
+    requestStoreRefresh();
+    if (!settings.alerts || isMuted(notice, settings)) return;
+    setToast(notice.title);
+    if (settings.sound) playChime();
+    void showPopup(notice.title, notice.body);
+  });
 
   const unread = notices.data?.filter((n) => !n.read && !isMuted(n, settings)).length ?? 0;
 
@@ -102,11 +119,16 @@ function StoreShell({ me, children }: { me: Me; children: ReactNode }) {
     writeLocal(REMINDER_ALERTED, today);
     if (!settings.alerts) return;
     if (settings.sound) playChime();
-    void showPopup('Ordering closes soon', `${formatDuration(left)} left to order for tomorrow.`);
+    void showPopup('Ordering closes soon', `${formatDuration(left)} left to place today's order.`);
   }, [reminderDue, today, left, settings.alerts, settings.sound]);
 
   const showReminder = reminderDue && dismissedDay !== today && pathname !== '/store/order';
-  const tabs = TABS.map((t) => (t.href === '/store/updates' ? { ...t, badge: unread } : t));
+  const openFlags = home.data?.openFlagCount ?? 0;
+  const tabs = TABS.map((t) => {
+    if (t.href === '/store/updates') return { ...t, badge: unread };
+    if (t.href === '/store/flags') return { ...t, badge: openFlags };
+    return t;
+  });
 
   return (
     <div className="lg:flex lg:min-h-dvh">
@@ -132,7 +154,7 @@ function StoreShell({ me, children }: { me: Me; children: ReactNode }) {
                     Ordering closes in {formatDuration(left)}
                   </span>
                   <span className="block text-label text-muted">
-                    Nothing ordered for tomorrow yet. Order now ›
+                    Nothing ordered today yet. Order now ›
                   </span>
                 </Link>
                 <button

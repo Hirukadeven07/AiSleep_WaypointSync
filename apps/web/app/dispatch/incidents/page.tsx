@@ -1,7 +1,12 @@
 'use client';
 
+import { Suspense } from 'react';
 import { Incidents } from '@/components/incidents/Incidents';
 
 export default function Page() {
-  return <Incidents />;
+  return (
+    <Suspense>
+      <Incidents />
+    </Suspense>
+  );
 }

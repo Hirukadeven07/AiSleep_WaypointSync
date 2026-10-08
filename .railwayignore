@@ -1,0 +1,5 @@
+# `railway up` uploads the API build context. The basemap and docs are not needed there.
+apps/web/public/maps/*.pmtiles
+docs
+.claude
+backups

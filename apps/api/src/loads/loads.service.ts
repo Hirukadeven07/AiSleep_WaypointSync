@@ -1,15 +1,18 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import * as argon2 from 'argon2';
 import type { Prisma } from '@prisma/client';
-import type {
-  DepartSummary,
-  LoadFlagView,
-  LoadJob,
-  LoadQueueItem,
-  LoadSheet,
-  LoadStop,
-  OrderLine,
-  PlanLock,
-  PlanLockSlot,
+import {
+  DOCK_LOGIN_PREFIX,
+  type DepartSummary,
+  type LoadFlagView,
+  type LoadJob,
+  type LoadQueueItem,
+  type LoadSheet,
+  type LoadStop,
+  type OrderLine,
+  type PlanLock,
+  type PlanLockSlot,
+  type StartLoadingRequest,
 } from '@waypoint/contracts';
 import { DomainError, loadOrder } from '@waypoint/domain';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -137,11 +140,17 @@ export class LoadsService {
       },
       orderBy: [{ tripNumber: 'asc' }, { vehicleId: 'asc' }],
     });
-    // Jobs the dispatcher marked urgent come first; the rest keep trip order.
-    trips.sort((a, b) => (b.loadingJob?.priority ?? 0) - (a.loadingJob?.priority ?? 0));
+    // Today before tomorrow; within a day, jobs the dispatcher marked urgent come first, then trip order.
+    trips.sort(
+      (a, b) =>
+        a.serviceDate.getTime() - b.serviceDate.getTime() ||
+        (b.loadingJob?.priority ?? 0) - (a.loadingJob?.priority ?? 0),
+    );
     const names = await this.loaderNames(trips.flatMap((t) => t.loadSession?.loaderIds ?? []));
     return trips.map((t) => ({
       tripId: t.id,
+      serviceDate: t.serviceDate.toISOString().slice(0, 10),
+      later: t.serviceDate.toISOString().slice(0, 10) > today,
       vehicle: vehicleView(t.vehicle),
       brand: t.brand,
       district: t.district.name,
@@ -192,22 +201,46 @@ export class LoadsService {
     };
   }
 
-  async start(me: AuthUser, tripId: string): Promise<LoadSheet> {
+  /**
+   * The dock tablet is one shared sign-in, so each person who joins the load confirms who they are
+   * with their loader ID and their own PIN. Several loaders can join one trip. A loader already on
+   * this trip, or still loading another trip that has not departed, is refused.
+   */
+  async start(me: AuthUser, tripId: string, dto: StartLoadingRequest): Promise<LoadSheet> {
     const trip = await this.findTrip(me, tripId);
+    const loaderUser = await this.verifyLoader(me, dto);
+    if (trip.loadSession?.loaderIds.includes(loaderUser.id)) {
+      throw new DomainError('LOADER_ALREADY_ON_TRIP', 'This loader is already on this trip.');
+    }
+    const busy = await this.prisma.loadSession.findFirst({
+      where: {
+        departedAt: null,
+        loaderIds: { has: loaderUser.id },
+        trip: { status: 'loading' },
+      },
+      include: { trip: { include: { vehicle: true } } },
+    });
+    if (busy) {
+      const plate = busy.trip.vehicle.numberPlate ?? busy.trip.vehicleId;
+      throw new DomainError(
+        'LOADER_ON_ANOTHER_TRIP',
+        `${loaderUser.name} is still loading ${plate}. They can join another trip after that one is loaded.`,
+      );
+    }
     if (!trip.loadSession) {
       await this.prisma.loadSession.create({
         data: {
           tripId: trip.id,
-          loaderIds: [me.id],
+          loaderIds: [loaderUser.id],
           startedAt: this.clock.now(),
           ackedPlanVersion: trip.planVersion,
           ackedStopIds: ackedOrders(trip),
         },
       });
-    } else if (!trip.loadSession.loaderIds.includes(me.id)) {
+    } else {
       await this.prisma.loadSession.update({
         where: { tripId: trip.id },
-        data: { loaderIds: { push: me.id } },
+        data: { loaderIds: { push: loaderUser.id } },
       });
     }
     if (trip.status === 'published') {
@@ -219,7 +252,7 @@ export class LoadsService {
         data: { status: 'picking', startedAt: this.clock.now() },
       });
     }
-    await this.openDeliveryNotes(me, trip);
+    await this.openDeliveryNotes(loaderUser.id, trip);
     return this.sheet(me, tripId);
   }
 
@@ -288,11 +321,11 @@ export class LoadsService {
     if (lock.locked) {
       // The delivery notes follow the accepted plan: removed orders leave the truck, added ones start picking.
       await this.removedDeliveryNotes(
-        me,
+        trip.loadSession?.loaderIds.at(-1),
         lock.removed.map((r) => r.orderId),
         trip.planVersion,
       );
-      await this.openDeliveryNotes(me, trip);
+      await this.openDeliveryNotes(trip.loadSession?.loaderIds.at(-1), trip);
     }
     await this.prisma.loadSession.upsert({
       where: { tripId: trip.id },
@@ -305,7 +338,7 @@ export class LoadsService {
       },
       create: {
         tripId: trip.id,
-        loaderIds: [me.id],
+        loaderIds: [],
         startedAt: this.clock.now(),
         ackedPlanVersion: trip.planVersion,
         ackedStopIds: ackedOrders(trip),
@@ -336,7 +369,7 @@ export class LoadsService {
       }),
       this.prisma.trip.update({
         where: { id: trip.id },
-        data: { status: 'on_road', startingTime: departedAt },
+        data: { status: 'ready' },
       }),
       ...(trip.loadingJob
         ? [
@@ -358,7 +391,7 @@ export class LoadsService {
             }),
           ]
         : []),
-      ...(await this.loadedDeliveryNotes(me, trip, departedAt)),
+      ...(await this.loadedDeliveryNotes(trip, departedAt)),
     ]);
     await this.tellDriver(trip);
 
@@ -389,7 +422,7 @@ export class LoadsService {
     await this.notifier.notify({
       userId: driverId,
       title: 'Truck loaded',
-      body: `${plate} is loaded. Trip ${trip.tripNumber} can leave the depot.`,
+      body: `${plate} is loaded. Trip ${trip.tripNumber} starts when you tap Start trip.`,
       link: '/drive/next',
     });
   }
@@ -472,13 +505,41 @@ export class LoadsService {
     }
   }
 
-  private async loaderProfile(me: AuthUser) {
-    return this.prisma.loader.findUnique({ where: { userId: me.id } });
+  private async loaderProfile(userId: string | undefined) {
+    return userId ? this.prisma.loader.findUnique({ where: { userId } }) : null;
+  }
+
+  /**
+   * A loader ID for someone at this depot, plus that loader's own PIN when they have one (a loader
+   * with no PIN set is let in on the ID alone). The dock tablet's own shared account is a loader
+   * with no PIN as well, but it is not a person, so it is refused. One message for every failure.
+   */
+  private async verifyLoader(me: AuthUser, dto: StartLoadingRequest) {
+    const wrong = () =>
+      new BadRequestException({
+        reason: 'WRONG_LOADER_CREDENTIALS',
+        message: 'Loader ID or PIN is wrong.',
+      });
+    const user = await this.prisma.user.findFirst({
+      where: { loginId: { equals: (dto.loaderId ?? '').trim(), mode: 'insensitive' } },
+      include: { loaderProfile: true },
+    });
+    if (
+      !user ||
+      user.role !== 'loader' ||
+      user.loginId.startsWith(DOCK_LOGIN_PREFIX) ||
+      user.depotId !== me.depotId ||
+      user.loaderProfile?.isActive === false ||
+      (user.pinHash && (!dto.pin || !(await argon2.verify(user.pinHash, dto.pin))))
+    ) {
+      throw wrong();
+    }
+    return user;
   }
 
   /** On start, each order gets a delivery note in 'picking' with this loader on it. */
-  private async openDeliveryNotes(me: AuthUser, trip: SheetTrip) {
-    const loader = await this.loaderProfile(me);
+  private async openDeliveryNotes(userId: string | undefined, trip: SheetTrip) {
+    const loader = await this.loaderProfile(userId);
     const now = this.clock.now();
     for (const stop of trip.stops) {
       const order = stop.order;
@@ -534,9 +595,13 @@ export class LoadsService {
   }
 
   /** Orders the dispatcher took off the trip mid-load: their open delivery note gets a 'removed' version. */
-  private async removedDeliveryNotes(me: AuthUser, orderIds: string[], planVersion: number) {
+  private async removedDeliveryNotes(
+    userId: string | undefined,
+    orderIds: string[],
+    planVersion: number,
+  ) {
     if (orderIds.length === 0) return;
-    const loader = await this.loaderProfile(me);
+    const loader = await this.loaderProfile(userId);
     const now = this.clock.now();
     for (const orderId of orderIds) {
       const current = await this.prisma.deliveryNote.findFirst({
@@ -568,8 +633,8 @@ export class LoadsService {
    * At departure each order's delivery note gets a 'loaded' version with the quantities actually
    * loaded, and every dock flag becomes a LoaderFlag for the dispatcher to review.
    */
-  private async loadedDeliveryNotes(me: AuthUser, trip: SheetTrip, at: Date) {
-    const loader = await this.loaderProfile(me);
+  private async loadedDeliveryNotes(trip: SheetTrip, at: Date) {
+    const loader = await this.loaderProfile(trip.loadSession?.loaderIds.at(-1));
     const ops: Prisma.PrismaPromise<unknown>[] = [];
     for (const stop of trip.stops) {
       const order = stop.order;

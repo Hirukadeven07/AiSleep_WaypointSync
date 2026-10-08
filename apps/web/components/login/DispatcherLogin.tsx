@@ -34,14 +34,14 @@ export function DispatcherLogin() {
 
   return (
     <main className="relative min-h-screen bg-bg p-4 lg:flex lg:gap-4">
-      <section className="relative flex min-h-[300px] flex-1 flex-col gap-5 overflow-hidden rounded-shell p-8 sm:p-10 lg:min-h-0 lg:p-14">
+      <section className="relative flex min-h-[300px] flex-1 flex-col gap-5 overflow-hidden rounded-shell p-8 sm:p-10 lg:min-h-0 lg:w-[calc((100%-16px)*0.5402)] lg:flex-none lg:p-14">
         <SkylinePhoto variant="panel" />
         <div className="relative flex items-center gap-3">
           <img alt="" src="/landing/logo-mark.svg" className="size-[39.6px]" />
-          <p className="text-[20px] font-semibold text-bg">Waypoint Sync</p>
+          <p className="text-[20px] font-semibold text-on-primary">Waypoint Sync</p>
         </div>
         <div className="flex-1" />
-        <h2 className="relative text-[36px] font-medium leading-[1.1] text-bg sm:text-[44px] lg:text-[56px] lg:leading-[62px]">
+        <h2 className="relative text-[36px] font-medium leading-[1.1] text-on-primary sm:text-[44px] lg:text-[56px] lg:leading-[62px]">
           One plan.
           <br />
           Every role in sync.
@@ -54,7 +54,7 @@ export function DispatcherLogin() {
           {CHIPS.map((c) => (
             <span
               key={c}
-              className="rounded-pill border border-slate px-[14px] py-[7px] text-[13px] font-medium text-bg"
+              className="rounded-pill border border-slate px-[14px] py-[7px] text-[13px] font-medium text-on-primary"
             >
               {c}
             </span>
@@ -90,7 +90,7 @@ export function DispatcherLogin() {
             Keep me signed in on this computer
           </CheckRow>
           <FormError message={error} />
-          <SubmitButton busy={busy} className="py-[14px]">
+          <SubmitButton busy={busy} className="py-[14px] leading-[21px]">
             Sign in
           </SubmitButton>
           <div className="flex gap-3 rounded-note bg-info-tint p-[14px]">

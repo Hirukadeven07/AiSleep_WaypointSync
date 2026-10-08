@@ -13,8 +13,11 @@ import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { buildDriverDay, DRIVER_TRIP_STATUSES, pickActiveTripId } from './driver-day.mapper';
 import { BREAK_EVENT_TYPES, foldBreaks } from './driver-breaks';
+import { NoticeHub } from '../notifications/notice-hub';
 import { alertLongWaits } from './driver-notices';
 import { ownTripWhere } from './driver-trips';
+import { drivingRoute } from '../map/driving-route';
+import { depotPoint, headingBack, insideDepotCircle, stopIsDone } from '../map/map.logic';
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
 /** How many days ahead the driver sees published trips. */
@@ -28,6 +31,7 @@ const tripSelect = {
   tripNumber: true,
   status: true,
   planVersion: true,
+  startingTime: true,
   vehicle: { select: vehicleSelect },
   stops: {
     orderBy: { sequence: 'asc' },
@@ -43,6 +47,15 @@ const tripSelect = {
         select: {
           id: true,
           urgentNote: true,
+          fieldFlags: {
+            orderBy: { raisedAt: 'asc' },
+            select: {
+              tripId: true,
+              reason: true,
+              qtyFlagged: true,
+              item: { select: { itemName: true } },
+            },
+          },
           store: {
             select: {
               id: true,
@@ -79,6 +92,7 @@ export class DriverService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
+    private readonly hub: NoticeHub,
   ) {}
 
   /** Today's trips for this driver (see `ownTripWhere`), plus published trips on the next few days. */
@@ -112,21 +126,61 @@ export class DriverService {
     ]);
 
     // The phone polls while the driver waits at a store, so this is where a long wait is noticed.
-    await alertLongWaits(
-      this.prisma,
-      this.clock.now(),
-      trips.map((t) => t.id),
+    this.hub.publishAll(
+      await alertLongWaits(
+        this.prisma,
+        this.clock.now(),
+        trips.map((t) => t.id),
+      ),
     );
 
     // The truck the driver is on today; their own vehicle when they have no trip.
     const activeId = pickActiveTripId(trips);
     const vehicle = trips.find((t) => t.id === activeId)?.vehicle ?? registered;
-    return buildDriverDay(serviceDate, vehicle ? { ...vehicle, trips } : null, {
+    const day = buildDriverDay(serviceDate, vehicle ? { ...vehicle, trips } : null, {
       upcoming,
       unreadNotices,
       roadIssue: activeId ? await this.openRoadIssue(activeId) : null,
       break: await this.breakToday(me.id, serviceDate),
     });
+    const active = activeId ? trips.find((trip) => trip.id === activeId) : undefined;
+    if (active && headingBack(active.status, active.stops.map((stop) => stop.status))) {
+      day.returnToDepot = await this.returnLeg(active.id, this.clock.now());
+    }
+    return day;
+  }
+
+  /** How long the drive back should take, from the latest ping or the last shop. */
+  private async returnLeg(tripId: string, now: Date) {
+    const [trip, ping] = await Promise.all([
+      this.prisma.trip.findUnique({
+        where: { id: tripId },
+        select: {
+          endingTime: true,
+          depot: { select: { id: true, name: true, lat: true, lng: true } },
+          stops: {
+            orderBy: { sequence: 'desc' },
+            select: { status: true, order: { select: { store: { select: { lat: true, lng: true } } } } },
+          },
+        },
+      }),
+      this.prisma.locationPing.findFirst({
+        where: { tripId },
+        orderBy: { recordedAt: 'desc' },
+        select: { lat: true, lng: true },
+      }),
+    ]);
+    if (!trip || trip.endingTime) return null;
+    const yard = depotPoint(trip.depot.id, trip.depot.name, trip.depot);
+    if (!yard) return null;
+    const last = trip.stops.find(
+      (stop) => stopIsDone(stop.status) && stop.order.store.lat != null && stop.order.store.lng != null,
+    );
+    const from = ping ?? (last ? { lat: last.order.store.lat!, lng: last.order.store.lng! } : null);
+    if (!from || insideDepotCircle(from, yard)) return null;
+    const leg = await drivingRoute([from, yard]);
+    if (!leg) return null;
+    return { minutes: leg.minutes, etaAt: new Date(now.getTime() + leg.minutes * 60_000).toISOString() };
   }
 
   /** Today's breaks (Asia/Colombo day), from the driver's own BREAK events. */
@@ -153,7 +207,7 @@ export class DriverService {
     const [user, trips] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: me.id },
-        include: { driverProfile: true, vehicle: true },
+        include: { driverProfile: { include: { phones: true } }, vehicle: true },
       }),
       this.prisma.trip.findMany({
         where: { ...ownTripWhere(me.id), serviceDate: { lte: today }, status: { not: 'planning' } },
@@ -170,11 +224,20 @@ export class DriverService {
       }),
     ]);
     const done = new Set(['delivered', 'partial', 'confirmed', 'deferred']);
-    const v = user.vehicle;
+    // The registered vehicle, else the truck of today's active trip (the one Home shows).
+    let v = user.vehicle;
+    if (!v) {
+      const todays = await this.prisma.trip.findMany({
+        where: { ...ownTripWhere(me.id), serviceDate: today, status: { in: DRIVER_TRIP_STATUSES } },
+        select: { id: true, tripNumber: true, status: true, vehicle: true },
+      });
+      const activeId = pickActiveTripId(todays);
+      v = todays.find((t) => t.id === activeId)?.vehicle ?? null;
+    }
     return {
       name: user.name,
       loginId: user.loginId,
-      phone: user.phone,
+      phone: user.driverProfile?.phones[0]?.phoneNumber ?? null,
       depotId: user.depotId,
       licenseNo: user.driverProfile?.licenseNo ?? null,
       licenseExpiry: user.driverProfile?.licenseExpiry?.toISOString().slice(0, 10) ?? null,

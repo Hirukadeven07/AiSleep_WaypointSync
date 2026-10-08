@@ -1,6 +1,7 @@
 import type { PlanDay, PlanSummary } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
-import { clock12, dayLabel } from './format';
+import { addDays, clock12, dayLabel } from './format';
+import { depotLabel } from '@/lib/depots';
 
 function Pill({
   icon,
@@ -24,7 +25,7 @@ function Pill({
       disabled={disabled}
       title={title}
       className={`flex shrink-0 items-center gap-2 rounded-pill px-[18px] py-[11px] text-[14px] font-semibold leading-5 ${
-        primary ? 'bg-primary text-bg' : 'border border-border bg-surface text-ink'
+        primary ? 'bg-primary text-on-primary' : 'border border-border bg-surface text-ink'
       } ${disabled ? 'cursor-default' : ''}`}
     >
       <Icon name={icon} size={16} />
@@ -38,27 +39,34 @@ export function PlanHeader({
   plan,
   view,
   onView,
+  onDate,
   onAutoAssign,
   onNewTrip,
   onPublish,
 }: {
-  plan: Pick<PlanDay, 'date' | 'depotId' | 'cutoffMin' | 'trips'>;
+  plan: Pick<PlanDay, 'date' | 'today' | 'depotId' | 'cutoffMin' | 'trips'>;
   view: 'list' | 'map';
   onView: (view: 'list' | 'map') => void;
+  onDate: (date: string) => void;
   onAutoAssign: () => void;
   onNewTrip: () => void;
   onPublish: () => void;
 }) {
   // The header sends every trip still being planned. Sent trips stay on the board, and more can be added.
   const working = plan.trips.filter((t) => t.status === 'planning' && t.stops.length > 0).length;
+  const nextDay = addDays(plan.today, 1);
+  const title =
+    plan.date === plan.today
+      ? "Plan today's trips"
+      : plan.date === nextDay
+        ? "Plan tomorrow's trips"
+        : `Plan ${dayLabel(plan.date)}`;
   return (
     <header className="flex flex-wrap items-center gap-[10px]">
       <div className="flex min-w-px flex-[1_0_0] flex-col gap-1">
-        <h1 className="whitespace-nowrap text-[34px] font-medium leading-10 text-ink">
-          Plan tomorrow&apos;s trips
-        </h1>
+        <h1 className="whitespace-nowrap text-[34px] font-medium leading-10 text-ink">{title}</h1>
         <p className="whitespace-pre text-[14px] leading-5 text-muted">
-          {`${dayLabel(plan.date)}  ·  ${plan.depotId} depot  ·  orders close ${clock12(plan.cutoffMin)}`}
+          {`${dayLabel(plan.date)}  ·  ${depotLabel(plan.depotId)}  ·  new orders move to the next day at ${clock12(plan.cutoffMin)}`}
         </p>
       </div>
       <Pill icon="sparkle" onClick={onAutoAssign}>
@@ -77,6 +85,26 @@ export function PlanHeader({
         Publish trips
       </Pill>
       <div aria-hidden className="h-7 w-px shrink-0 bg-border" />
+      <div className="flex shrink-0 gap-1 rounded-pill bg-border p-1" role="group" aria-label="Which day's orders">
+        {(
+          [
+            [plan.today, 'Today'],
+            [nextDay, 'Next day'],
+          ] as const
+        ).map(([iso, label]) => (
+          <button
+            key={iso}
+            type="button"
+            aria-pressed={plan.date === iso}
+            onClick={() => onDate(iso)}
+            className={`rounded-pill px-[14px] py-[9px] text-[13px] font-semibold leading-[18px] ${
+              plan.date === iso ? 'bg-surface text-ink' : 'text-muted'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="flex shrink-0 gap-1 rounded-pill bg-border p-1">
         <button
           type="button"
@@ -125,6 +153,29 @@ const timeText = (iso: string) =>
     timeZone: 'Asia/Colombo',
   });
 
+/** What runs out first on an overbooked day, in the dispatcher's words. */
+const LIMIT: Record<
+  Exclude<PlanSummary['limitingResource'], 'none'>,
+  { short: string; why: string }
+> = {
+  weight: {
+    short: 'weight',
+    why: 'The orders weigh more than the free trucks can carry.',
+  },
+  volume: {
+    short: 'space',
+    why: 'The orders need more space than the free trucks have.',
+  },
+  chilled: {
+    short: 'refrigerated trucks',
+    why: 'There are more chilled orders than refrigerated trucks to carry them.',
+  },
+  vans: {
+    short: 'vans',
+    why: 'There are more van-only stores than vans.',
+  },
+};
+
 /** The strip under the header: vehicles free, capacity used and the open-problems button. */
 export function SummaryStrip({
   summary,
@@ -137,7 +188,8 @@ export function SummaryStrip({
 }) {
   const used = Math.min(summary.capacityUsedPct, 100);
   return (
-    <section className="flex items-center gap-6 rounded-[20px] bg-surface px-[18px] py-3">
+    // Wraps onto a second line on narrower screens instead of widening the page.
+    <section className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-[20px] bg-surface px-[18px] py-3">
       <Stat value={String(summary.orderCount)} label="orders" />
       <Stat value={String(summary.waitingSinceYesterday)} label="waiting since yesterday" warn />
       <p className="flex items-center gap-2 whitespace-nowrap">
@@ -157,6 +209,17 @@ export function SummaryStrip({
         </span>
       </p>
       <Stat value={String(summary.movedToLaterCount)} label="moved to later" warn />
+      {summary.overbooked && summary.limitingResource !== 'none' && (
+        <span
+          role="status"
+          title={`${LIMIT[summary.limitingResource].why} Not every order fits: move the ones that cannot to a later day, with a reason.`}
+          className="flex items-center gap-2 whitespace-nowrap rounded-pill bg-warning-tint px-[14px] py-2 text-[13px] leading-[18px] text-ink"
+        >
+          <Icon name="alert" size={15} className="text-warning" />
+          <span className="font-bold">Overbooked</span>
+          <span className="font-semibold">limited by {LIMIT[summary.limitingResource].short}</span>
+        </span>
+      )}
       <span className="min-w-px flex-1" />
       {published ? (
         <span className="flex items-center gap-2 whitespace-nowrap rounded-pill bg-success-tint px-[14px] py-2 text-[13px] leading-[18px] text-success">

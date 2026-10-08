@@ -9,7 +9,8 @@ export interface ChangeDepotRequest {
 
 /** `currentSecret` / `newSecret` are the password for dispatcher and store, the PIN for driver and loader. */
 export interface ChangePasswordRequest {
-  currentSecret: string;
+  /** Leave out only for a PIN role (driver, loader) that has no PIN yet. */
+  currentSecret?: string;
   newSecret: string;
 }
 

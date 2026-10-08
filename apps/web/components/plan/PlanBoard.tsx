@@ -19,7 +19,8 @@ import { usePlanEdit } from './usePlanEdit';
 
 /** The dispatcher's plan board (Figma "Plan v2"). */
 export function PlanBoard() {
-  const { plan, error, reload } = usePlan();
+  const [date, setDate] = useState<string | undefined>(undefined);
+  const { plan, error, reload } = usePlan(date);
   const edit = usePlanEdit(plan, reload);
   const [view, setView] = useState<'list' | 'map'>('list');
 
@@ -33,15 +34,19 @@ export function PlanBoard() {
 
   const firstOver = plan.trips.find((t) => t.state === 'over');
   const modal = edit.modal;
+  const serviceDate = plan.date;
 
-  /** Publishing with nothing open goes straight through; otherwise the check explains what is open. */
+  /**
+   * A trip's own Publish goes straight through when nothing is open. Publishing the whole plan
+   * always asks first, and the check explains anything still open.
+   */
   async function publish(tripId?: string) {
     try {
       const check = await api<PublishCheck>('/plan/publish/check', {
         method: 'POST',
-        body: tripId ? { tripId } : {},
+        body: { date: serviceDate, ...(tripId ? { tripId } : {}) },
       });
-      if (check.problems.length === 0) await publishPlan(edit, false, tripId);
+      if (tripId && check.problems.length === 0) await publishPlan(edit, false, serviceDate, tripId);
       else edit.openModal({ kind: 'publish', check, tripId });
     } catch {
       edit.showToast({ kind: 'error', title: 'The plan could not be checked', sub: 'Try again.' });
@@ -52,7 +57,7 @@ export function PlanBoard() {
     try {
       const proposal = await api<AutoAssignProposal>('/plan/auto-assign', {
         method: 'POST',
-        body: {},
+        body: { date: serviceDate },
       });
       edit.openModal({ kind: 'auto', proposal });
     } catch {
@@ -66,9 +71,11 @@ export function PlanBoard() {
         plan={plan}
         view={view}
         onView={setView}
+        onDate={setDate}
         onAutoAssign={autoAssign}
         onNewTrip={() => edit.openModal({ kind: 'newTrip' })}
-        onPublish={publish}
+        // Not `onPublish={publish}`: the click event would arrive as the trip id.
+        onPublish={() => void publish()}
       />
       <SummaryStrip
         summary={plan.summary}
@@ -94,8 +101,11 @@ export function PlanBoard() {
         ) : (
           <PlanMap
             date={plan.date}
-            refreshKey={`${plan.orders.length}:${plan.trips.map((t) => t.stops.length).join(',')}`}
+            refreshKey={`${plan.orders.length}:${plan.trips.map((t) => `${t.id}:${t.stops.length}`).join(',')}`}
+            trips={plan.trips.filter((trip) => trip.editable)}
             onOpenOrder={(id) => edit.openDrawer(id)}
+            onPlace={(orderId, storeName, tripId) => edit.place(orderId, storeName, tripId)}
+            onToast={edit.showToast}
           />
         )}
       </div>
@@ -105,18 +115,20 @@ export function PlanBoard() {
           orderId={edit.drawerId}
           onClose={edit.closeDrawer}
           onMoveLater={() => edit.openModal({ kind: 'defer', orderId: edit.drawerId! })}
-          onAdd={(detail, tripId) => {
+          onAllocate={(detail, choice) => {
             edit.closeDrawer();
-            void edit.place(detail.order.id, detail.order.storeName, tripId);
+            void edit.allocate(detail.order.id, detail.order.storeName, choice);
           }}
         />
       )}
       {modal?.kind === 'defer' && <DeferModal orderId={modal.orderId} edit={edit} />}
-      {modal?.kind === 'newTrip' && <NewTripModal edit={edit} />}
+      {modal?.kind === 'newTrip' && <NewTripModal date={serviceDate} edit={edit} />}
       {modal?.kind === 'publish' && (
-        <PublishModal check={modal.check} tripId={modal.tripId} edit={edit} />
+        <PublishModal check={modal.check} date={serviceDate} tripId={modal.tripId} edit={edit} />
       )}
-      {modal?.kind === 'auto' && <AutoAssignModal proposal={modal.proposal} edit={edit} />}
+      {modal?.kind === 'auto' && (
+        <AutoAssignModal proposal={modal.proposal} date={serviceDate} edit={edit} />
+      )}
       {modal?.kind === 'removeTrip' && <RemoveTripModal trip={modal.trip} edit={edit} />}
       {edit.toast && <PlanToast toast={edit.toast} />}
     </div>

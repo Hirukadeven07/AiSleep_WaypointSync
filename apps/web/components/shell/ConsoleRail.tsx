@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import type { Me } from '@waypoint/contracts';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { initials } from '@/lib/initials';
+import { useTheme } from '@/lib/theme';
 import { AccountMenu } from './AccountMenu';
 
 export const CONSOLE_NAV: { href: string; label: string; icon: IconName; exact?: boolean }[] = [
@@ -25,6 +26,8 @@ function useActive() {
 /** Desktop navigation: the floating rail with six dispatcher destinations. */
 export function ConsoleRail({ me }: { me: Me }) {
   const isActive = useActive();
+  const { theme, setTheme } = useTheme();
+  const dark = theme === 'dark';
   return (
     <aside className="sticky top-4 hidden h-[calc(100vh-32px)] w-[84px] shrink-0 flex-col items-center gap-[14px] rounded-shell bg-border px-[14px] py-5 md:flex">
       <img alt="Waypoint Sync" src="/brand/logo-mark-on-light.svg" className="size-[39.6px]" />
@@ -54,12 +57,17 @@ export function ConsoleRail({ me }: { me: Me }) {
         );
       })}
       <div className="flex-1" />
-      <span
-        title="Settings"
+      <button
+        type="button"
+        role="switch"
+        aria-checked={dark}
+        aria-label="Dark mode"
+        title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+        onClick={() => setTheme(dark ? 'light' : 'dark')}
         className="flex size-11 items-center justify-center rounded-full bg-surface text-slate"
       >
-        <Icon name="settings" size={20} />
-      </span>
+        <Icon name={dark ? 'moon' : 'sun'} size={20} />
+      </button>
       <AccountMenu
         me={me}
         placement="right"

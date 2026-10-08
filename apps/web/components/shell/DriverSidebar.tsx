@@ -8,6 +8,7 @@ import { initials } from '@/lib/initials';
 import { signOutDriver } from '@/lib/driver-sign-out';
 import { AccountMenu } from './AccountMenu';
 import { DRIVER_TABS } from './driverTabs';
+import { depotLabel } from '@/lib/depots';
 
 /**
  * Desktop navigation for Sync Driver. From `lg` it replaces the phone tab bar, and the raised
@@ -70,13 +71,13 @@ export function DriverSidebar({ me }: { me: Me }) {
         onSignOut={signOutDriver}
         className="flex w-full items-center gap-3 rounded-[16px] bg-bg p-3 text-left"
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-[14px] font-bold text-bg">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-[14px] font-bold text-on-primary">
           {initials(me.name)}
         </span>
         <span className="min-w-0">
           <span className="block truncate text-body font-semibold leading-[18px] text-ink">{me.name}</span>
           <span className="block truncate text-caption font-medium leading-4 text-muted">
-            {me.depotId ? `${me.depotId} depot` : 'Driver'}
+            {me.depotId ? depotLabel(me.depotId) : 'Driver'}
           </span>
         </span>
       </AccountMenu>

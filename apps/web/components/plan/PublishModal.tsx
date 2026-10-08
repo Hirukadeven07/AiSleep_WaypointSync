@@ -7,11 +7,11 @@ import { Modal, ModalIcon, SolidButton } from './Modal';
 import type { PlanEdit } from './usePlanEdit';
 
 /** Sends the plan, then says how many trips and stores it reached (Figma "Published" toast). */
-export async function publishPlan(edit: PlanEdit, anyway: boolean, tripId?: string) {
+export async function publishPlan(edit: PlanEdit, anyway: boolean, date: string, tripId?: string) {
   try {
     const res = await api<PlanPublishResult>('/plan/publish', {
       method: 'POST',
-      body: { anyway, ...(tripId ? { tripId } : {}) },
+      body: { anyway, date, ...(tripId ? { tripId } : {}) },
     });
     await edit.reload();
     edit.closeModal();
@@ -38,14 +38,47 @@ export async function publishPlan(edit: PlanEdit, anyway: boolean, tripId?: stri
 /** Figma "Plan v2 / Publish check": what is still open. A capacity problem blocks; other warnings can go through. */
 export function PublishModal({
   check,
+  date,
   edit,
   tripId,
 }: {
   check: PublishCheck;
+  date: string;
   edit: PlanEdit;
   tripId?: string;
 }) {
   const n = check.problems.length;
+  const trips = `${check.tripCount} ${check.tripCount === 1 ? 'trip' : 'trips'}`;
+  if (n === 0) {
+    // Nothing open: confirm before the whole plan goes to loaders, drivers and stores.
+    return (
+      <Modal label="Publish the plan" width={520} onClose={edit.closeModal}>
+        <ModalIcon tone="bg-success-tint text-success">
+          <Icon name="check" size={22} />
+        </ModalIcon>
+        <h2 className="text-[24px] font-semibold leading-[30px] text-ink">Publish {trips}?</h2>
+        <p className="text-[14px] leading-[21px] text-muted">
+          Nothing is open. Publishing sends {trips} to loaders and drivers, and tells{' '}
+          {check.storeCount} {check.storeCount === 1 ? 'store' : 'stores'} their delivery window.
+        </p>
+        <div className="flex gap-[10px]">
+          <button
+            type="button"
+            onClick={edit.closeModal}
+            className="flex min-w-px flex-1 items-center justify-center rounded-pill border border-border bg-surface px-[18px] py-3 text-[14px] font-semibold leading-5 text-ink"
+          >
+            Back to plan
+          </button>
+          <SolidButton
+            onClick={() => void publishPlan(edit, false, date, tripId)}
+            className="min-w-px flex-1 bg-primary text-on-primary"
+          >
+            Publish {trips}
+          </SolidButton>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal label="Publish check" width={520} onClose={edit.closeModal}>
       <ModalIcon tone="bg-danger-tint text-danger">
@@ -76,12 +109,12 @@ export function PublishModal({
         <button
           type="button"
           disabled={!check.canPublish}
-          onClick={() => void publishPlan(edit, true, tripId)}
+          onClick={() => void publishPlan(edit, true, date, tripId)}
           className="flex min-w-px flex-1 items-center justify-center rounded-pill border border-border bg-surface px-[18px] py-3 text-[14px] font-semibold leading-5 text-ink disabled:opacity-40"
         >
           Publish anyway
         </button>
-        <SolidButton onClick={edit.closeModal} className="min-w-px flex-1 bg-primary text-bg">
+        <SolidButton onClick={edit.closeModal} className="min-w-px flex-1 bg-primary text-on-primary">
           Back to plan
         </SolidButton>
       </div>

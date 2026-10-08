@@ -17,6 +17,9 @@ RUN pnpm install --frozen-lockfile --filter @waypoint/api...
 COPY packages/contracts packages/contracts
 COPY packages/domain packages/domain
 COPY apps/api apps/api
+# Competition CSVs for the seed (default DATA_DIR resolves to /repo/data).
+# Compose still mounts ./data at /data; hosts without a mount (Railway) use this copy.
+COPY data data
 RUN pnpm --filter @waypoint/contracts run build \
     && pnpm --filter @waypoint/domain run build \
     && pnpm --filter @waypoint/api run build

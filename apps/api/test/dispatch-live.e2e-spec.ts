@@ -36,9 +36,9 @@ describe('live day (e2e)', () => {
 
     districtId = (
       await prisma.district.create({
-        data: { name: `DL District ${Date.now()}`, depotId: 'Peliyagoda' },
+        data: { name: `DL District ${Date.now()}`, depotId: 'depo1' },
       })
-    ).id;
+    ).name;
     for (const id of STORES) {
       await prisma.store.create({
         data: {
@@ -46,7 +46,7 @@ describe('live day (e2e)', () => {
           displayName: `Store ${id}`,
           brand: 'Fresh',
           districtId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: 540,
           windowCloseMin: 600,
@@ -58,7 +58,7 @@ describe('live day (e2e)', () => {
         data: {
           id,
           numberPlate: id,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           type: 'van',
           temp: 'ambient',
           weightCapKg: 1500,
@@ -79,7 +79,7 @@ describe('live day (e2e)', () => {
       const t = await prisma.trip.create({
         data: {
           vehicleId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           brand: 'Fresh',
           districtId,
           serviceDate: date(DAY),
@@ -130,6 +130,16 @@ describe('live day (e2e)', () => {
       { status: 'delivered', arrivedAt: at('09:05') },
       { status: 'upcoming' },
     ]);
+    // Home counts the incidents the Incidents page lists, so the breakdown is a logged incident.
+    await prisma.incident.create({
+      data: {
+        type: 'breakdown',
+        tripId: trip.broke,
+        status: 'open',
+        createdAt: at('09:10'),
+        timeline: [{ at: at('09:10').toISOString(), text: 'Dispatch logged the incident' }],
+      },
+    });
     // Not synced: last event from the phone was 47 minutes ago.
     await makeTrip('sync', 'DL-V4', 'on_road', [{ status: 'upcoming', etaMin: 580 }]);
     await makeTrip(
@@ -177,11 +187,12 @@ describe('live day (e2e)', () => {
     process.env.DEMO_NOW = previousDemoNow;
     if (prisma) {
       await prisma.driverEvent.deleteMany({ where: { clientId: { startsWith: 'dl-' } } });
+      await prisma.incident.deleteMany({ where: { trip: { vehicleId: { in: VEHICLES } } } });
       await prisma.trip.deleteMany({ where: { vehicleId: { in: VEHICLES } } });
       await prisma.order.deleteMany({ where: { storeId: { in: STORES } } });
       await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
-      await prisma.district.deleteMany({ where: { id: districtId } });
+      await prisma.district.deleteMany({ where: { name: districtId } });
     }
     await app?.close();
   });
@@ -200,7 +211,7 @@ describe('live day (e2e)', () => {
     const loader = request.agent(app.getHttpServer());
     await loader
       .post('/api/auth/login')
-      .send({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' })
+      .send({ role: 'loader', secret: '123456', depotId: 'depo1' })
       .expect(200);
     await loader.get('/api/dispatch/live').expect(403);
   });
@@ -258,6 +269,16 @@ describe('live day (e2e)', () => {
     expect(body.kpis.incidentsText).toMatch(/breakdown/);
     expect(body.counts.all).toBe(body.trips.length);
     expect(body.tomorrow).toMatchObject({ cutoffMin: 960, minutesToCutoff: 960 - 645 });
+    // Before the cutoff, orders coming in are dated today, so those are the ones counted.
+    const ordersToday = await prisma.order.count({
+      where: {
+        deliveryDate: date(DAY),
+        status: { in: ['waiting', 'planned'] },
+        store: { depotId: 'depo1' },
+      },
+    });
+    expect(ordersToday).toBeGreaterThan(0);
+    expect(body.tomorrow.ordersReceived).toBe(ordersToday);
   });
 
   it('previews and sends a delay notice to the stores that are affected', async () => {
@@ -320,7 +341,7 @@ describe('live day (e2e)', () => {
       prisma.trip.create({
         data: {
           vehicleId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           brand: 'Style',
           districtId,
           serviceDate: date(day),
@@ -358,7 +379,7 @@ describe('live day (e2e)', () => {
     const t = await prisma.trip.create({
       data: {
         vehicleId: 'DL-V3',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         brand: 'Fresh',
         districtId,
         serviceDate: date(DAY),

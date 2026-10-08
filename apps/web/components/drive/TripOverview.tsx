@@ -209,7 +209,7 @@ function StopCard({ stop, state }: { stop: DriverDayStop; state: 'done' | 'next'
             state === 'done'
               ? 'bg-olive-ink text-white'
               : state === 'next'
-                ? 'bg-primary text-bg'
+                ? 'bg-primary text-on-primary'
                 : 'bg-bg text-ink'
           }`}
         >
@@ -232,7 +232,7 @@ function StopCard({ stop, state }: { stop: DriverDayStop; state: 'done' | 'next'
             state === 'done'
               ? 'bg-sage text-success'
               : state === 'next'
-                ? 'bg-primary text-bg'
+                ? 'bg-primary text-on-primary'
                 : 'bg-bg text-muted'
           }`}
         >
@@ -252,7 +252,7 @@ function StopCard({ stop, state }: { stop: DriverDayStop; state: 'done' | 'next'
           {stop.phone ? (
             <a
               href={telHref(stop.phone)}
-              className="flex min-h-[48px] flex-1 items-center justify-center gap-2 rounded-pill bg-primary px-4 text-[15px] font-semibold leading-5 text-bg"
+              className="flex min-h-[48px] flex-1 items-center justify-center gap-2 rounded-pill bg-primary px-4 text-[15px] font-semibold leading-5 text-on-primary"
             >
               <Icon name="phone" size={16} />
               Call store
@@ -340,7 +340,13 @@ export function TripOverview() {
             full?.vehicle?.plate,
             vehicleLabel(full?.vehicle?.type),
             `${doneCount} of ${plural(stops.length, 'stop')} done`,
-            atDepot ? 'at the depot' : trip.status === 'on_road' ? 'on the road' : null,
+            atDepot
+              ? trip.status === 'ready'
+                ? 'loaded, not started'
+                : 'at the depot'
+              : trip.status === 'on_road'
+                ? 'on the road'
+                : null,
           ]
             .filter(Boolean)
             .join(' · ')}
@@ -359,7 +365,7 @@ export function TripOverview() {
               aria-selected={t.id === trip.id}
               onClick={() => setPickedId(t.id)}
               className={`flex min-h-[44px] flex-1 items-center justify-center rounded-pill text-[15px] font-semibold ${
-                t.id === trip.id ? 'bg-primary text-bg' : 'text-muted'
+                t.id === trip.id ? 'bg-primary text-on-primary' : 'text-muted'
               }`}
             >
               Trip {t.tripNumber} · {plural(t.stops.length, 'stop')}

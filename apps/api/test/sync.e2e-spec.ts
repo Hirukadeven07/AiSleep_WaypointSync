@@ -53,16 +53,16 @@ describe('driver sync (e2e)', () => {
     prisma = app.get(PrismaService);
 
     const district = await prisma.district.create({
-      data: { name: `Sync District ${Date.now()}`, depotId: 'Peliyagoda' },
+      data: { name: `Sync District ${Date.now()}`, depotId: 'depo1' },
     });
-    districtId = district.id;
+    districtId = district.name;
     const store = await prisma.store.create({
       data: {
         id: `E2E-STORE-${Date.now()}`,
         displayName: 'Sync Store',
         brand: 'Fresh',
-        districtId: district.id,
-        depotId: 'Peliyagoda',
+        districtId: district.name,
+        depotId: 'depo1',
         dockType: 'street',
         windowOpenMin: 300,
         windowCloseMin: 480,
@@ -81,7 +81,7 @@ describe('driver sync (e2e)', () => {
     await prisma.vehicle.create({
       data: {
         id: vehicleId,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'truck',
         temp: 'reefer',
         weightCapKg: 2500,
@@ -95,14 +95,14 @@ describe('driver sync (e2e)', () => {
         loginId: `driver-${Date.now()}`,
         role: 'driver',
         name: 'Other driver',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         pinHash: 'unused',
       },
     });
     const otherVehicle = await prisma.vehicle.create({
       data: {
         id: `SYNC-OTHER-${Date.now()}`,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'truck',
         temp: 'ambient',
         weightCapKg: 2000,
@@ -114,9 +114,9 @@ describe('driver sync (e2e)', () => {
     const trip = await prisma.trip.create({
       data: {
         vehicleId: vehicleId,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         brand: 'Fresh',
-        districtId: district.id,
+        districtId: district.name,
         serviceDate: date(DAY),
         tripNumber: 1,
         status: 'published',
@@ -128,9 +128,9 @@ describe('driver sync (e2e)', () => {
     const otherTrip = await prisma.trip.create({
       data: {
         vehicleId: otherVehicle.id,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         brand: 'Fresh',
-        districtId: district.id,
+        districtId: district.name,
         serviceDate: date(DAY),
         tripNumber: 2,
         status: 'on_road',
@@ -221,7 +221,7 @@ describe('driver sync (e2e)', () => {
     if (badStopTripId) await prisma.trip.delete({ where: { id: badStopTripId } });
     await prisma.order.deleteMany({ where: { storeId } });
     await prisma.store.delete({ where: { id: storeId } });
-    if (districtId) await prisma.district.deleteMany({ where: { id: districtId } });
+    if (districtId) await prisma.district.deleteMany({ where: { name: districtId } });
     await prisma.vehicle.deleteMany({ where: { id: { startsWith: 'SYNC-' } } });
     if (seededVehicleId) {
       await prisma.vehicle.update({ where: { id: seededVehicleId }, data: { driverId } });
@@ -622,10 +622,14 @@ describe('driver sync (e2e)', () => {
     );
 
     const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
-    const alerts = await prisma.notification.count({
+    const alerts = await prisma.notification.findMany({
       where: { userId: nimal.id, title: 'Driver SOS', body: { contains: 'E2E SOS' } },
     });
-    expect(alerts).toBe(1);
+    expect(alerts).toHaveLength(1);
+    // The notice opens this SOS in the dispatcher's incidents.
+    expect(alerts[0].link).toBe(
+      `/dispatch/incidents?id=${encodeURIComponent(`sos:${incident.id}`)}`,
+    );
 
     // Re-syncing the same SOS must not raise a second incident.
     const again = await driverAgent.post('/api/sync').send(body).expect(200);
@@ -967,5 +971,48 @@ describe('driver sync (e2e)', () => {
     const res = await driverAgent.get('/api/driver/profile').expect(200);
     expect(res.body).toMatchObject({ loginId: 'kasun', vehicle: { id: vehicleId } });
     expect(res.body.recentTrips.map((t: { id: string }) => t.id)).toContain(tripId);
+  });
+
+  it('keeps one open SOS per driver and clears it when the driver marks themselves safe', async () => {
+    await resolveOpenSos();
+    const sos = (clientId: string, type: string, payload: Record<string, unknown>) => ({
+      clientId,
+      driverId,
+      tripId,
+      type,
+      payload,
+      createdOnPhoneAt: '2026-10-01T08:45:00+05:30',
+      seenPlanVersion: 1,
+    });
+    const open = () =>
+      prisma.driverIncident.findMany({
+        where: { driver: { userId: driverId }, incidentType: 'sos', resolvedAt: null },
+      });
+
+    await driverAgent
+      .post('/api/sync')
+      .send({
+        events: [
+          sos('a1a1a1a1-0000-4000-8000-000000000001', 'SOS_ALERT', { location: null }),
+          sos('a1a1a1a1-0000-4000-8000-000000000002', 'SOS_ALERT', { message: 'E2E twice' }),
+        ],
+      })
+      .expect(200);
+    const stillOne = await open();
+    expect(stillOne).toHaveLength(1);
+    expect(stillOne[0]!.message).toBe('E2E twice');
+
+    const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
+    const cleared = await driverAgent
+      .post('/api/sync')
+      .send({ events: [sos('a1a1a1a1-0000-4000-8000-000000000003', 'SOS_CLEARED', {})] })
+      .expect(200);
+    expect(cleared.body.applied).toEqual(['a1a1a1a1-0000-4000-8000-000000000003']);
+    expect(await open()).toHaveLength(0);
+    const safe = await prisma.notification.findMany({
+      where: { userId: nimal.id, title: 'Driver is safe', createdAt: { gte: startedAt } },
+    });
+    expect(safe.length).toBeGreaterThanOrEqual(1);
+    await prisma.notification.deleteMany({ where: { id: { in: safe.map((n) => n.id) } } });
   });
 });

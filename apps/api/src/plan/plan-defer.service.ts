@@ -5,6 +5,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { nextOperatingDay } from '../common/clock/operating-day';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
+import type { RaisedNotice } from '../notifications/notice-hub';
 import { PlanEditService } from './plan-edit.service';
 import { clockText, dayLabel } from './plan-labels';
 import { PlanService } from './plan.service';
@@ -48,17 +49,18 @@ export class PlanDeferService {
     const preview = await this.preview(me, orderId, reason);
     const depot = this.edit.depotOf(me) as Parameters<PlanEditService['resequence']>[3];
 
-    const fromTripId = await this.prisma.$transaction(async (tx) => {
+    const { fromTripId, notices } = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       if (order.status === 'delivered' || order.status === 'partial') {
         throw new DomainError('PLAN_LOCKED', 'This order has already been delivered.');
       }
       const stop = await tx.tripStop.findUnique({ where: { orderId } });
+      let notices: RaisedNotice[] = [];
       if (stop) {
         const trip = await this.edit.loadTrip(me, stop.tripId, tx);
         PlanEditService.assertEditable(trip);
         await tx.tripStop.delete({ where: { orderId } });
-        await this.edit.resequence(tx, stop.tripId, lookup, depot);
+        notices = await this.edit.resequence(tx, stop.tripId, lookup, depot);
       }
       await tx.order.update({
         where: { id: orderId },
@@ -71,8 +73,9 @@ export class PlanDeferService {
           repeatSkip: preview.repeatSkip,
         },
       });
-      return stop?.tripId ?? null;
+      return { fromTripId: stop?.tripId ?? null, notices };
     });
+    this.edit.publishRaised(notices);
 
     const order = await this.edit.loadOrder(me, orderId);
     const users = await this.prisma.user.findMany({

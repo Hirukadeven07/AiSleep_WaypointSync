@@ -64,6 +64,15 @@ export interface DriverDayStop {
   storeConfirmedAt: string | null;
   driverAckAt: string | null;
   flags: DriverDayFlag[];
+  /** What the store reported when it checked the goods on this trip (missing, damaged, ...). */
+  storeIssues: DriverDayStoreIssue[];
+}
+
+/** One line the store flagged at receipt; the driver sees it before acknowledging. */
+export interface DriverDayStoreIssue {
+  itemName: string;
+  qty: number | null;
+  reason: string;
 }
 
 export interface DriverDayTrip {
@@ -73,6 +82,8 @@ export interface DriverDayTrip {
   tripNumber: 1 | 2;
   status: TripStatus;
   planVersion: number;
+  /** When the driver tapped Start trip. Null until then, including while the truck is only loaded. */
+  startedAt: string | null;
   stops: DriverDayStop[];
 }
 
@@ -96,6 +107,11 @@ export interface DriverDayResponse {
   roadIssue: DriverDayRoadIssue | null;
   /** Today's breaks, from the driver's BREAK_START / BREAK_END events. */
   break: DriverDayBreak;
+  /**
+   * Set once every stop on the active trip is done and the truck is still outside the depot circle.
+   * Null while stops remain, or after the truck has arrived back.
+   */
+  returnToDepot: { minutes: number; etaAt: string } | null;
 }
 
 export interface DriverDayBreak {

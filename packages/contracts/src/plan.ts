@@ -67,8 +67,8 @@ export interface PlanTrip {
   minutes: number | null;
   budgetMin: number;
   /**
-   * Who drives it: the driver the dispatcher assigned, else the vehicle's registered driver.
-   * `driverAssigned` is true only for an explicit assignment.
+   * Who drives it: the vehicle's registered driver. `driverAssigned` is true only when a trip
+   * row still names a driver explicitly; the plan screen does not offer another driver.
    */
   driverId: string | null;
   driverName: string | null;
@@ -84,7 +84,7 @@ export interface PlanDriver {
   vehicleId: string | null;
 }
 
-/** POST /plan/trips/:id/driver. `null` goes back to the vehicle's registered driver. */
+/** POST /plan/trips/:id/driver. Only the vehicle's driver is accepted. `null` follows that driver. */
 export interface AssignDriverRequest {
   driverId: string | null;
 }
@@ -112,13 +112,15 @@ export interface PlanSummary {
 
 export interface PlanDay {
   date: string; // YYYY-MM-DD
+  /** Today in Asia/Colombo, so the board can offer today and the next day. */
+  today: string;
   depotId: string;
   /** Orders close at this minute of the day. */
   cutoffMin: number;
   orders: PlanOrder[];
   movedToLater: PlanOrder[];
   trips: PlanTrip[];
-  /** Active drivers at the depot, for the trip's driver picker. */
+  /** Active drivers at the depot. A trip shows the one registered on its vehicle. */
   drivers: PlanDriver[];
   districts: string[];
   summary: PlanSummary;
@@ -165,6 +167,11 @@ export interface UnassignResult {
   fromTrip: PlanTrip | null;
 }
 
+/** GET /plan/trips/:id/next. Waiting orders that still fit this trip's delivery windows. */
+export interface PlanNextShops {
+  orderIds: string[];
+}
+
 export interface PlanOrderLine {
   id: string;
   name: string;
@@ -189,6 +196,36 @@ export interface PlanOrderDetail {
     detail: string;
     fit: string;
   } | null;
+  /** Every truck and van the dispatcher can pick for this order, best first. */
+  vehicles: PlanVehicleChoice[];
+}
+
+/**
+ * One truck or van in the order drawer's picker: a trip it already has, or a new run on it.
+ * `fits` goes on cleanly, `warn` can go on with a warning, `blocked` cannot take the order.
+ */
+export interface PlanVehicleChoice {
+  vehicleId: string;
+  vehicleType: 'truck' | 'van';
+  /** Null for a new trip; allocating then sets one up for the order's brand and district. */
+  tripId: string | null;
+  tripNumber: 1 | 2;
+  label: string; // "WP-1190 · Trip 1" or "WP-1190 · New trip 2"
+  detail: string; // "Refrigerated truck · 3 stops · 1,240 of 3,000 kg"
+  status: 'fits' | 'warn' | 'blocked';
+  /** The first block or warning, in words. */
+  note: string | null;
+  bestFit: boolean;
+  /** The order is already on this trip. */
+  current: boolean;
+}
+
+/** POST /plan/allocate. `tripId` puts the order on that trip; `vehicleId` + `tripNumber` sets up a new trip first. */
+export interface AllocateRequest {
+  orderId: string;
+  tripId?: string;
+  vehicleId?: string;
+  tripNumber?: 1 | 2;
 }
 
 /** Why a dispatcher can move an order to a later day. */

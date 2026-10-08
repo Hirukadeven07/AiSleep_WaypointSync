@@ -36,6 +36,13 @@ export interface DriverDayStopRow {
   order: {
     id: string;
     urgentNote: string | null;
+    /** Store-raised issues on the order; only this trip's are shown. */
+    fieldFlags?: {
+      tripId: string | null;
+      reason: string;
+      qtyFlagged: number | null;
+      item: { itemName: string } | null;
+    }[];
     store: {
       id: string;
       displayName: string | null;
@@ -60,6 +67,8 @@ export interface DriverDayTripRow {
   tripNumber: number;
   status: TripStatus;
   planVersion: number;
+  /** Set when the driver taps Start trip. */
+  startingTime?: Date | null;
   stops: DriverDayStopRow[];
 }
 
@@ -103,7 +112,7 @@ function mapFlag(flag: DriverDayFlagRow): DriverDayFlag {
   };
 }
 
-function mapStop(stop: DriverDayStopRow): DriverDayStop {
+function mapStop(stop: DriverDayStopRow, tripId?: string): DriverDayStop {
   const { store } = stop.order;
   const phones = store.phones.map(({ label, phoneNo }) => ({ label, phoneNo }));
   return {
@@ -132,6 +141,13 @@ function mapStop(stop: DriverDayStopRow): DriverDayStop {
     storeConfirmedAt: iso(stop.storeConfirmedAt),
     driverAckAt: iso(stop.driverAckAt),
     flags: stop.flags.map(mapFlag),
+    storeIssues: (stop.order.fieldFlags ?? [])
+      .filter((f) => !tripId || f.tripId === tripId)
+      .map((f) => ({
+        itemName: f.item?.itemName ?? 'Whole delivery',
+        qty: f.qtyFlagged,
+        reason: f.reason,
+      })),
   };
 }
 
@@ -142,7 +158,10 @@ function mapTrip(trip: DriverDayTripRow, serviceDate: string): DriverDayTrip {
     tripNumber: trip.tripNumber as DriverDayTrip['tripNumber'],
     status: trip.status,
     planVersion: trip.planVersion,
-    stops: [...trip.stops].sort((a, b) => a.sequence - b.sequence).map(mapStop),
+    startedAt: iso(trip.startingTime ?? null),
+    stops: [...trip.stops]
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((stop) => mapStop(stop, trip.id)),
   };
 }
 
@@ -166,6 +185,7 @@ export function buildDriverDay(
     unreadNotices: extras.unreadNotices ?? 0,
     roadIssue: extras.roadIssue ?? null,
     break: extras.break ?? { onBreakSince: null, usedMin: 0, allowanceMin: BREAK_ALLOWANCE_MIN },
+    returnToDepot: null,
   };
   if (!vehicle) return { ...common, vehicle: null, trips: [], activeTripId: null };
 

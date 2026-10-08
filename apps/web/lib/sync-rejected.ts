@@ -47,9 +47,12 @@ const ACTION: Partial<Record<DriverEventType, string>> = {
   ACKNOWLEDGEMENT: 'Your acknowledgement',
   ROAD_ISSUE: 'Your road issue report',
   SOS_ALERT: 'Your SOS',
+  SOS_CLEARED: '"I\'m safe"',
   FUEL_READING: 'Your fuel reading',
   BREAK_START: 'Your break start',
   BREAK_END: 'Your break end',
+  START_TRIP: 'Start trip',
+  END_TRIP: 'End trip',
 };
 
 const WHY: Record<RejectedAction['reason'], string> = {
@@ -62,6 +65,7 @@ const WHY: Record<RejectedAction['reason'], string> = {
   DRIVER_MISMATCH: 'it was saved by another driver on this phone',
   INVALID_PAYLOAD: 'some details were missing or wrong',
   INVALID_EVENT: 'the app sent something the server did not understand',
+  TRIP_NOT_READY: 'the trip is not ready for that yet',
   UNKNOWN: 'the server refused it',
 };
 
