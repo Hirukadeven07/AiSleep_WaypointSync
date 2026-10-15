@@ -7,6 +7,7 @@ import type {
   DropCheck,
   PlanDay,
   PlanTrip,
+  PlanVehicleChoice,
   PublishCheck,
   UnassignResult,
 } from '@waypoint/contracts';
@@ -188,6 +189,45 @@ export function usePlanEdit(plan: PlanDay | null, reload: () => Promise<void>) {
     [reload],
   );
 
+  /** Put an order on the truck or van the dispatcher picked. A new run is set up on the vehicle first. */
+  const allocate = useCallback(
+    async (orderId: string, storeName: string, choice: PlanVehicleChoice) => {
+      if (choice.tripId) return place(orderId, storeName, choice.tripId);
+      try {
+        const res = await api<AssignResult>('/plan/allocate', {
+          method: 'POST',
+          body: { orderId, vehicleId: choice.vehicleId, tripNumber: choice.tripNumber },
+        });
+        await reload();
+        setJustAdded(orderId);
+        setFocus((f) => ({ id: res.trip.id, n: (f?.n ?? 0) + 1 }));
+        setToast({
+          kind: 'ok',
+          title: `${storeName} allocated to ${tripName(res.trip)}`,
+          sub: `New trip ${res.trip.tripNumber} set up for ${res.trip.brand} · ${res.trip.district}`,
+          undo: () => {
+            void api('/plan/unassign', { method: 'POST', body: { orderId } })
+              .then(() => api(`/plan/trips/${res.trip.id}`, { method: 'DELETE' }))
+              .then(reload)
+              .finally(() => {
+                setToast(null);
+                setJustAdded(null);
+              });
+          },
+        });
+        return true;
+      } catch (e) {
+        setToast({
+          kind: 'error',
+          title: `${storeName} can't go on ${choice.label.split(' · ')[0]}`,
+          sub: reason(e),
+        });
+        return false;
+      }
+    },
+    [place, reload],
+  );
+
   const drop = useCallback(
     (tripId: string) => {
       if (!drag) return;
@@ -236,6 +276,7 @@ export function usePlanEdit(plan: PlanDay | null, reload: () => Promise<void>) {
     drop,
     dropOnQueue,
     place,
+    allocate,
     dismissToast,
     bringBack,
     openDrawer: setDrawerId,

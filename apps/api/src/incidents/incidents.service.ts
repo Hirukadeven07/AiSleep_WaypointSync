@@ -9,6 +9,7 @@ import type { Prisma } from '@prisma/client';
 import type {
   IncidentDetail,
   IncidentKind,
+  LogIncidentRequest,
   IncidentList,
   IncidentState,
   IncidentStop,
@@ -62,6 +63,8 @@ const dayText = (d: Date) =>
   });
 /** Trips that can break down: loaded or on the road. */
 const BREAKABLE = ['loading', 'ready', 'on_road'];
+/** Trips a delay, a quiet driver or a long wait can be logged on: sent and not finished. */
+const LOGGABLE = ['published', 'loading', 'ready', 'on_road', 'breakdown'];
 
 const KIND_TITLE: Record<IncidentKind, string> = {
   breakdown: 'broke down',
@@ -69,21 +72,48 @@ const KIND_TITLE: Record<IncidentKind, string> = {
   quiet_driver: 'has gone quiet',
   wait_timeout: 'has waited too long at a store',
   missing_items: 'is short of items',
+  sos: 'has raised an SOS',
 };
-const KIND_REASON: Record<IncidentKind, string> = {
-  breakdown: 'a breakdown',
-  delay: 'a delay',
-  quiet_driver: 'a driver who has gone quiet',
-  wait_timeout: 'a long wait at a store',
-  missing_items: 'missing items',
+/** What a store is told about each kind of incident, given the truck's plate. */
+const STORE_DELAY: Record<IncidentKind, (plate: string) => string> = {
+  breakdown: (p) =>
+    `The truck bringing your delivery (${p}) has broken down. We are arranging another way to get your goods to you and will send the new time.`,
+  delay: (p) =>
+    `Your delivery on ${p} is running late. We will send the new arrival time as soon as we have it.`,
+  quiet_driver: (p) =>
+    `We have lost contact with the truck bringing your delivery (${p}), so it may be late. We will update you as soon as we hear from it.`,
+  wait_timeout: (p) =>
+    `The truck bringing your delivery (${p}) was held up at an earlier store and may be late. We will send the new time.`,
+  missing_items: (p) =>
+    `Some items for your delivery on ${p} are short. We will tell you what is coming and when.`,
+  // Stores are never told about an SOS; this only keeps the table complete.
+  sos: (p) =>
+    `The truck bringing your delivery (${p}) has been held up. We will send the new time.`,
 };
+/** Timeline line for the Acknowledge button; its presence hides the button. */
+const ACKNOWLEDGED_TEXT = 'You acknowledged it; the trip carries on as it is';
+
 const KIND_HEAD: Record<IncidentKind, string> = {
   breakdown: 'Breakdown',
   delay: 'Delay',
   quiet_driver: 'Driver gone quiet',
   wait_timeout: 'Long wait at a store',
   missing_items: 'Missing items',
+  sos: 'SOS',
 };
+
+/** An SOS a driver raised is listed with the incidents; its id is `sos:` + the DriverIncident id. */
+const SOS_PREFIX = 'sos:';
+const isSosId = (id: string) => id.startsWith(SOS_PREFIX);
+const sosRawId = (id: string) => id.slice(SOS_PREFIX.length);
+const SOS_SAFE_TEXT = 'The driver marked themselves safe';
+
+const sosInclude = {
+  driver: { include: { user: true, phones: true } },
+  vehicle: true,
+  trip: { include: { district: true, stops: { select: { status: true } } } },
+} satisfies Prisma.DriverIncidentInclude;
+type SosRow = Prisma.DriverIncidentGetPayload<{ include: typeof sosInclude }>;
 
 /** What is kept in Incident.timeline: plain log lines, plus one `resolution` entry once resolved. */
 type Entry = {
@@ -122,6 +152,15 @@ type Missing = {
   flags: (Prisma.LoadFlagGetPayload<object> & { stop: TripRow['stops'][number] })[];
 };
 
+/** "12 min", "3 h", "2 days": an age or a duration people can read at a glance. */
+const durationText = (min: number) => {
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h`;
+  const days = Math.floor(h / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+};
+
 const stateOf = (status: string): IncidentState =>
   status === 'resolved' || status === 'closed'
     ? 'resolved'
@@ -156,12 +195,17 @@ export class IncidentsService {
     if (!user) return null;
     return {
       name: person(user.name),
-      phone: user.driverProfile?.phones[0]?.phoneNumber ?? user.phone ?? null,
+      phone: user.driverProfile?.phones[0]?.phoneNumber ?? null,
     };
   }
 
   private minutesSince(d: Date) {
     return Math.max(0, Math.round((this.clock.now().getTime() - d.getTime()) / 60000));
+  }
+
+  /** "12 min ago", "3 h ago", "2 days ago". */
+  private ago(d: Date) {
+    return `${durationText(this.minutesSince(d))} ago`;
   }
 
   private summary(i: IncidentRow): IncidentSummary {
@@ -184,7 +228,7 @@ export class IncidentsService {
       line:
         state === 'resolved'
           ? `${resolution?.resolution?.line ?? 'Resolved'} · ${timeOf(new Date(resolution?.at ?? i.createdAt))}`
-          : `Reported by ${reporter} · ${timeOf(i.createdAt)} · ${this.minutesSince(i.createdAt)} min ago`,
+          : `Reported by ${reporter} · ${timeOf(i.createdAt)} · ${this.ago(i.createdAt)}`,
       brand: t.brand,
       state,
       stopsAffected: state !== 'resolved' && remaining > 0 ? remaining : null,
@@ -193,15 +237,175 @@ export class IncidentsService {
     };
   }
 
+  // The three filters below decide what is "open" for everyone: the Incidents page lists exactly
+  // these rows, and Home counts exactly these rows, so the two cannot disagree.
+
+  /** Logged incidents from the last 7 days that are not resolved or closed. */
+  private openLoggedWhere(depotId: string, since: Date): Prisma.IncidentWhereInput {
+    return {
+      trip: { depotId },
+      createdAt: { gte: since },
+      status: { notIn: ['resolved', 'closed'] },
+    };
+  }
+
+  /** Missing goods the loader flagged on a trip that has not left the depot yet. */
+  private missingFlagWhere(depotId: string, day: Date): Prisma.LoadFlagWhereInput {
+    return {
+      type: 'missing',
+      stop: {
+        trip: { depotId, serviceDate: day, status: { in: ['published', 'loading', 'ready'] } },
+      },
+    };
+  }
+
+  /** Today's SOS alerts nobody has handled. An old one nobody closed does not haunt later days. */
+  private openSosWhere(depotId: string, today: string): Prisma.DriverIncidentWhereInput {
+    return {
+      incidentType: 'sos',
+      resolvedAt: null,
+      raisedAt: { gte: new Date(`${today}T00:00:00+05:30`) },
+      OR: [{ trip: { depotId } }, { vehicle: { depotId } }],
+    };
+  }
+
+  /**
+   * The kind of every open incident at the depot, one entry each: logged incidents, trips with
+   * missing items, and SOS alerts. Home shows this count and breakdown.
+   */
+  async openKinds(depotId: string): Promise<IncidentKind[]> {
+    const today = this.clock.today();
+    const day = new Date(`${today}T00:00:00Z`);
+    const since = new Date(day);
+    since.setUTCDate(since.getUTCDate() - 7);
+    const [logged, flags, sos] = await Promise.all([
+      this.prisma.incident.findMany({
+        where: this.openLoggedWhere(depotId, since),
+        select: { type: true },
+      }),
+      this.prisma.loadFlag.findMany({
+        where: this.missingFlagWhere(depotId, day),
+        select: { stop: { select: { tripId: true } } },
+      }),
+      this.prisma.driverIncident.count({ where: this.openSosWhere(depotId, today) }),
+    ]);
+    return [
+      ...logged.map((i) => i.type as IncidentKind),
+      // One per trip, as the list shows it.
+      ...[...new Set(flags.map((f) => f.stop.tripId))].map((): IncidentKind => 'missing_items'),
+      ...Array.from({ length: sos }, (): IncidentKind => 'sos'),
+    ];
+  }
+
+  private sosSummary(d: SosRow): IncidentSummary {
+    const name = person(d.driver.user.name);
+    const plate = d.vehicle ? (d.vehicle.numberPlate ?? d.vehicle.id) : null;
+    const resolved = d.resolvedAt !== null;
+    const state: IncidentState = resolved ? 'resolved' : d.acknowledgedAt ? 'acknowledged' : 'open';
+    return {
+      id: `${SOS_PREFIX}${d.id}`,
+      kind: 'sos',
+      title: `SOS from ${name}${plate ? ` on ${plate}` : ''}`,
+      line: resolved
+        ? `${d.resolution ?? 'Handled by dispatch'} · ${timeOf(d.resolvedAt!)}`
+        : `${d.message ?? 'No message'} · raised ${timeOf(d.raisedAt)} · ${this.ago(d.raisedAt)}`,
+      brand: d.trip?.brand ?? null,
+      state,
+      stopsAffected: null,
+      outcome: resolved ? (d.resolution === SOS_SAFE_TEXT ? 'Driver safe' : 'Handled') : null,
+      createdAt: d.raisedAt.toISOString(),
+    };
+  }
+
+  private async sosRow(me: Me, rawId: string): Promise<SosRow> {
+    const depotId = this.depotOf(me);
+    const row = await this.prisma.driverIncident.findFirst({
+      where: {
+        id: rawId,
+        incidentType: 'sos',
+        OR: [{ trip: { depotId } }, { vehicle: { depotId } }],
+      },
+      include: sosInclude,
+    });
+    if (!row) throw new NotFoundException('SOS not found');
+    return row;
+  }
+
+  private async sosDetail(me: Me, rawId: string): Promise<IncidentDetail> {
+    const d = await this.sosRow(me, rawId);
+    const s = this.sosSummary(d);
+    const name = person(d.driver.user.name);
+    const t = d.trip;
+    const left = t ? t.stops.filter((x) => !DONE.has(x.status)).length : 0;
+    const kind = d.vehicle
+      ? d.vehicle.type === 'van'
+        ? 'Van'
+        : d.vehicle.temp === 'reefer'
+          ? 'Refrigerated'
+          : 'Ambient'
+      : null;
+    const end = d.resolvedAt ?? this.clock.now();
+    const minutes = Math.max(0, Math.round((end.getTime() - d.raisedAt.getTime()) / 60000));
+    const at = (x: Date) => x.toISOString();
+    const timeline = [
+      { at: at(d.raisedAt), text: `${shortName(d.driver.user.name)} raised an SOS` },
+      ...(d.message ? [{ at: at(d.raisedAt), text: `Message: ${d.message}` }] : []),
+      ...(d.acknowledgedAt ? [{ at: at(d.acknowledgedAt), text: 'You opened the SOS' }] : []),
+      ...(d.resolvedAt
+        ? [{ at: at(d.resolvedAt), text: d.resolution ?? 'Handled by dispatch' }]
+        : []),
+    ];
+    return {
+      ...s,
+      subtitle: `SOS  ·  raised ${timeOf(d.raisedAt)} by ${name} (driver)`,
+      status: `${d.resolvedAt ? 'Resolved' : 'Active'} · ${durationText(minutes)}`,
+      stops: [],
+      replacements: [],
+      details: {
+        vehicle: d.vehicle ? `${d.vehicle.numberPlate ?? d.vehicle.id} · ${kind}` : 'No vehicle',
+        trip: t ? `Trip ${t.tripNumber} · ${t.brand} · ${t.district.name}` : 'No trip today',
+        goods: t
+          ? `${left} of ${t.stops.length} ${t.stops.length === 1 ? 'stop' : 'stops'} left`
+          : '-',
+        driver: { name, phone: d.driver.phones[0]?.phoneNumber ?? null },
+      },
+      timeline,
+      resolution: null,
+      recoverable: false,
+      notify: null,
+      acknowledged: d.acknowledgedAt !== null,
+      location:
+        d.lat !== null && d.lng !== null
+          ? {
+              text: `${d.lat.toFixed(4)}, ${d.lng.toFixed(4)}`,
+              mapUrl: `https://www.google.com/maps/search/?api=1&query=${d.lat},${d.lng}`,
+            }
+          : null,
+    };
+  }
+
+  /** Dispatch has dealt with a driver's SOS. Clears it on the board, the Incidents page and the driver's phone. */
+  async resolveSos(me: Me, rawId: string, note?: string): Promise<{ ok: true }> {
+    const sos = await this.sosRow(me, rawId);
+    if (!sos.resolvedAt) {
+      const now = this.clock.now();
+      await this.prisma.driverIncident.update({
+        where: { id: sos.id },
+        data: {
+          resolvedAt: now,
+          acknowledgedAt: sos.acknowledgedAt ?? now,
+          acknowledgedBy: sos.acknowledgedBy ?? me.id,
+          resolution: note?.trim() || 'Handled by dispatch',
+        },
+      });
+    }
+    return { ok: true };
+  }
+
   /** Missing goods the loader flagged on a trip that has not left the depot yet. */
   private async missingItems(depotId: string, day: Date): Promise<Missing[]> {
     const flags = await this.prisma.loadFlag.findMany({
-      where: {
-        type: 'missing',
-        stop: {
-          trip: { depotId, serviceDate: day, status: { in: ['published', 'loading', 'ready'] } },
-        },
-      },
+      where: this.missingFlagWhere(depotId, day),
       include: {
         stop: { include: { order: { include: orderInclude } } },
       },
@@ -239,25 +443,40 @@ export class IncidentsService {
     const day = new Date(`${this.clock.today()}T00:00:00Z`);
     const since = new Date(day);
     since.setUTCDate(since.getUTCDate() - 7);
-    const [rows, missing] = await Promise.all([
+    const today = this.clock.today();
+    const [rows, missing, sosOpen, sosDone] = await Promise.all([
       this.prisma.incident.findMany({
         where: { trip: { depotId }, createdAt: { gte: since } },
         include: { trip: { include: tripInclude } },
         orderBy: { createdAt: 'desc' },
       }),
       this.missingItems(depotId, day),
+      this.prisma.driverIncident.findMany({
+        where: this.openSosWhere(depotId, today),
+        include: sosInclude,
+      }),
+      this.prisma.driverIncident.findMany({
+        where: {
+          incidentType: 'sos',
+          resolvedAt: { not: null },
+          raisedAt: { gte: since },
+          OR: [{ trip: { depotId } }, { vehicle: { depotId } }],
+        },
+        include: sosInclude,
+      }),
     ]);
-    const all = rows.map((r) => this.summary(r));
+    const all = [...rows.map((r) => this.summary(r)), ...sosDone.map((d) => this.sosSummary(d))];
     // A breakdown comes first, then the newest.
+    const urgent = (i: IncidentSummary) => i.kind === 'breakdown' || i.kind === 'sos';
     const newest = (a: IncidentSummary, b: IncidentSummary) =>
-      Number(b.kind === 'breakdown') - Number(a.kind === 'breakdown') ||
-      b.createdAt.localeCompare(a.createdAt);
+      Number(urgent(b)) - Number(urgent(a)) || b.createdAt.localeCompare(a.createdAt);
     const resolved = all.filter((i) => i.state === 'resolved').sort(newest);
     return {
       date: this.clock.today(),
       active: [
         ...all.filter((i) => i.state !== 'resolved'),
         ...missing.map((m) => this.missingSummary(m)),
+        ...sosOpen.map((d) => this.sosSummary(d)),
       ].sort(newest),
       resolved,
       resolvedThisWeek: resolved.length,
@@ -301,9 +520,12 @@ export class IncidentsService {
   ): Promise<Candidate[]> {
     const depotId = this.depotOf(me);
     const nowMin = this.clock.minutesNow();
+    // Trips on the breakdown's day, and today's: an old breakdown must not offer a truck that is
+    // on the road right now.
+    const days = [trip.serviceDate, new Date(`${this.clock.today()}T00:00:00Z`)];
     const [vehicles, today] = await Promise.all([
       this.prisma.vehicle.findMany({ where: { depotId } }),
-      this.prisma.trip.findMany({ where: { depotId, serviceDate: trip.serviceDate } }),
+      this.prisma.trip.findMany({ where: { depotId, serviceDate: { in: days } } }),
     ]);
     const views = sortStopsByWindow(remaining.map((s) => toStopView(s.order)));
     const weight = remaining.reduce((n, s) => n + s.order.weightKg, 0);
@@ -381,6 +603,7 @@ export class IncidentsService {
   }
 
   async detail(me: Me, id: string): Promise<IncidentDetail> {
+    if (isSosId(id)) return this.sosDetail(me, sosRawId(id));
     if (id.startsWith('missing:')) return this.missingDetail(me, id.slice('missing:'.length));
     const row = await this.load(me, id);
     const t = row.trip;
@@ -406,7 +629,7 @@ export class IncidentsService {
     return {
       ...s,
       subtitle: `${KIND_HEAD[s.kind]}  ·  reported ${timeOf(row.createdAt)}${byDispatch ? ' by dispatch' : driver ? ` by ${driver.name} (driver)` : ''}`,
-      status: `${s.state === 'resolved' ? 'Resolved' : 'Active'} · ${minutes} min`,
+      status: `${s.state === 'resolved' ? 'Resolved' : 'Active'} · ${durationText(minutes)}`,
       stops:
         done?.resolution && (s.state === 'resolved' || remaining.length === 0)
           ? done.resolution.stops
@@ -438,7 +661,18 @@ export class IncidentsService {
             tripId: done.resolution.tripId,
           }
         : null,
+      location: null,
       recoverable,
+      notify:
+        s.state === 'resolved'
+          ? null
+          : {
+              message: (STORE_DELAY[row.type as IncidentKind] ?? STORE_DELAY.delay)(
+                t.vehicle.numberPlate ?? t.vehicleId,
+              ),
+              stores: new Set(remaining.map((x) => x.order.storeId)).size,
+            },
+      acknowledged: log.some((e) => e.text === ACKNOWLEDGED_TEXT),
     };
   }
 
@@ -455,7 +689,7 @@ export class IncidentsService {
     return {
       ...s,
       subtitle: `${KIND_HEAD.missing_items}  ·  reported ${timeOf(m.flags[0].createdAt)} by the loader`,
-      status: `Active · ${this.minutesSince(m.flags[0].createdAt)} min`,
+      status: `Active · ${durationText(this.minutesSince(m.flags[0].createdAt))}`,
       stops: m.flags.map((f) => ({
         id: f.id,
         storeName: f.stop.order.store.displayName ?? f.stop.order.store.id,
@@ -477,6 +711,9 @@ export class IncidentsService {
       })),
       resolution: null,
       recoverable: false,
+      notify: null,
+      acknowledged: false,
+      location: null,
     };
   }
 
@@ -506,6 +743,53 @@ export class IncidentsService {
    * incident opens, so the remaining stops can be recovered from the incidents screen.
    * Logging the same trip twice returns the open incident.
    */
+  /**
+   * An incident the dispatcher logs by hand. A breakdown goes through reportBreakdown (it stops the
+   * trip); the others open on the trip with the note on the timeline. Logging the same open kind
+   * on a trip again returns the one already open.
+   */
+  async log(me: Me, dto: LogIncidentRequest): Promise<IncidentDetail> {
+    if (dto.type === 'breakdown') return this.reportBreakdown(me, dto.tripId, dto.note);
+    const depotId = this.depotOf(me);
+    const trip = await this.prisma.trip.findFirst({ where: { id: dto.tripId, depotId } });
+    if (!trip) throw new NotFoundException('Trip not found');
+    if (!LOGGABLE.includes(trip.status)) {
+      throw new BadRequestException(
+        `A ${trip.status.replace('_', ' ')} trip cannot have an incident logged`,
+      );
+    }
+    const open = await this.prisma.incident.findFirst({
+      where: { tripId: trip.id, type: dto.type, status: { notIn: ['resolved', 'closed'] } },
+    });
+    const now = this.clock.now();
+    const note = dto.note?.trim();
+    // One open incident per kind and trip: a second report adds its note to the open one.
+    if (open) {
+      if (note) {
+        await this.save(open.id, open.timeline, [
+          { at: now.toISOString(), text: `Dispatch added: ${note}` },
+        ]);
+      }
+      return this.detail(me, open.id);
+    }
+    const created = await this.prisma.incident.create({
+      data: {
+        type: dto.type,
+        tripId: trip.id,
+        status: 'open',
+        createdAt: now,
+        timeline: [
+          {
+            at: now.toISOString(),
+            text: `Dispatch logged the incident${note ? `: ${note}` : ''}`,
+            by: 'dispatcher',
+          },
+        ] as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return this.detail(me, created.id);
+  }
+
   async reportBreakdown(me: Me, tripId: string, note?: string): Promise<IncidentDetail> {
     const depotId = this.depotOf(me);
     const trip = await this.prisma.trip.findFirst({ where: { id: tripId, depotId } });
@@ -538,22 +822,49 @@ export class IncidentsService {
     return this.detail(me, created.id);
   }
 
-  async acknowledge(me: Me, id: string): Promise<IncidentDetail> {
+  /**
+   * Opening an incident marks it seen once ("You opened the incident"); the claim on the status
+   * keeps two views opening it together from both adding the line. `explicit` is the Acknowledge
+   * button: "You acknowledged it" is recorded once and the trip carries on as it is.
+   */
+  async acknowledge(me: Me, id: string, explicit = false): Promise<IncidentDetail> {
+    if (isSosId(id)) {
+      // Opening an SOS marks it seen once; handling it is "Mark handled".
+      const sos = await this.sosRow(me, sosRawId(id));
+      if (!sos.acknowledgedAt && !sos.resolvedAt) {
+        await this.prisma.driverIncident.updateMany({
+          where: { id: sos.id, acknowledgedAt: null },
+          data: { acknowledgedAt: this.clock.now(), acknowledgedBy: me.id },
+        });
+      }
+      return this.detail(me, id);
+    }
     if (id.startsWith('missing:')) return this.detail(me, id);
     const row = await this.load(me, id);
-    if (stateOf(row.status) === 'open') {
-      await this.save(
-        id,
-        row.timeline,
-        [{ at: this.clock.now().toISOString(), text: 'You opened the incident' }],
-        'acknowledged',
-      );
+    const now = this.clock.now().toISOString();
+    const claimed = await this.prisma.incident.updateMany({
+      where: { id, status: { notIn: ['acknowledged', 'resolved', 'closed'] } },
+      data: { status: 'acknowledged' },
+    });
+    const add: Entry[] = [];
+    if (claimed.count === 1) add.push({ at: now, text: 'You opened the incident' });
+    if (explicit && !entries(row.timeline).some((e) => e.text === ACKNOWLEDGED_TEXT)) {
+      add.push({ at: now, text: ACKNOWLEDGED_TEXT });
+    }
+    if (add.length > 0) {
+      const fresh = await this.load(me, id);
+      await this.save(id, fresh.timeline, add);
     }
     return this.detail(me, id);
   }
 
   /** Close an incident that has nothing left to recover (or never had stops to move). */
   async close(me: Me, id: string): Promise<IncidentDetail> {
+    if (isSosId(id)) {
+      // "Mark handled": the same clearing the Home card does.
+      await this.resolveSos(me, sosRawId(id));
+      return this.detail(me, id);
+    }
     if (id.startsWith('missing:')) {
       throw new BadRequestException("This clears once the loader's flag is dealt with");
     }
@@ -595,6 +906,9 @@ export class IncidentsService {
   }
 
   async reopen(me: Me, id: string): Promise<IncidentDetail> {
+    if (isSosId(id)) {
+      throw new BadRequestException('An SOS cannot be reopened; the driver raises a new one');
+    }
     const row = await this.load(me, id);
     if (stateOf(row.status) !== 'resolved') {
       throw new BadRequestException('This incident is not resolved');
@@ -610,6 +924,7 @@ export class IncidentsService {
 
   /** Tell the stores still waiting on the trip to expect a delay; the incident stays open. */
   async notifyStores(me: Me, id: string): Promise<IncidentDetail> {
+    if (isSosId(id)) throw new BadRequestException('An SOS has no stores to notify');
     const row = await this.load(me, id);
     if (stateOf(row.status) === 'resolved') {
       throw new BadRequestException('This incident is already resolved');
@@ -622,7 +937,9 @@ export class IncidentsService {
       await this.tellStore(
         storeId,
         'Delivery delayed',
-        `Your delivery on ${t.vehicle.numberPlate ?? t.vehicleId} is delayed by ${KIND_REASON[row.type as IncidentKind]}. We will send the new time as soon as it is sorted.`,
+        (STORE_DELAY[row.type as IncidentKind] ?? STORE_DELAY.delay)(
+          t.vehicle.numberPlate ?? t.vehicleId,
+        ),
       );
     }
     await this.save(id, row.timeline, [
@@ -648,6 +965,7 @@ export class IncidentsService {
 
   /** Recover from a breakdown: a replacement takes the stops, they move to the next day, or both. */
   async resolve(me: Me, id: string, dto: ResolveRequest): Promise<IncidentDetail> {
+    if (isSosId(id)) throw new BadRequestException('Use "Mark handled" to clear an SOS');
     const row = await this.load(me, id);
     if (row.type !== 'breakdown') {
       throw new BadRequestException('Only a breakdown can be recovered from here');

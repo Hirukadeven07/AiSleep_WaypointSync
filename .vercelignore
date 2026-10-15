@@ -1,0 +1,16 @@
+# `vercel deploy` from the repo root. Vercel builds apps/web; skip installs, build output, secrets and API-only data.
+node_modules
+**/node_modules
+**/.next
+**/dist
+*.tsbuildinfo
+.env
+data
+backups
+docs
+.claude
+.railway
+.env.local
+.vercel
+# Over the 100 MB file limit; served via BASEMAP_URL (next.config.js)
+apps/web/public/maps/sri-lanka.pmtiles

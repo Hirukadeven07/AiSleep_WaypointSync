@@ -11,10 +11,8 @@ import type {
 } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
-import { messageOf } from '@/lib/api-error';
 import { kgText, m3Text, stopCount, stopWindow, tone, vehicleKind } from './format';
 import { dragImage } from './OrderQueue';
-import { Select } from './Select';
 import type { PlanEdit } from './usePlanEdit';
 
 const TILE: Record<Brand, string> = {
@@ -76,7 +74,7 @@ function DropHint({ check }: { check: DropCheck }) {
   const refused = !check.canDrop;
   return (
     <span
-      className={`pointer-events-none absolute right-4 top-full z-10 flex -translate-y-1/2 items-center gap-2 rounded-pill px-4 py-[10px] text-[13px] font-semibold leading-[18px] text-bg ${
+      className={`pointer-events-none absolute right-4 top-full z-10 flex -translate-y-1/2 items-center gap-2 rounded-pill px-4 py-[10px] text-[13px] font-semibold leading-[18px] text-on-primary ${
         refused ? 'bg-danger' : 'bg-primary'
       }`}
     >
@@ -168,7 +166,7 @@ function EmptyTrip({ trip, edit }: { trip: PlanTrip; edit: PlanEdit }) {
             <button
               type="button"
               onClick={() => void addAll()}
-              className="rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[17px] text-bg"
+              className="rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[17px] text-on-primary"
             >
               Add all {suggestions.length}
             </button>
@@ -205,52 +203,19 @@ function EmptyTrip({ trip, edit }: { trip: PlanTrip; edit: PlanEdit }) {
 }
 
 /**
- * Who drives the trip. "Vehicle's driver" follows the vehicle's registered driver; picking a name
- * puts that driver on this trip, and the driver's phone shows it from then on.
+ * The vehicle's registered driver. That person stays on the vehicle until they leave, so the
+ * trip does not offer a driver list.
  */
-function DriverPicker({
-  trip,
-  drivers,
-  edit,
-}: {
-  trip: PlanTrip;
-  drivers: PlanDriver[];
-  edit: PlanEdit;
-}) {
-  const [busy, setBusy] = useState(false);
+function VehicleDriver({ trip, drivers }: { trip: PlanTrip; drivers: PlanDriver[] }) {
   const own = drivers.find((d) => d.vehicleId === trip.vehicleId);
-  const options = [
-    { value: '', label: own ? `Vehicle's driver (${own.name})` : "Vehicle's driver (none)" },
-    ...drivers.map((d) => ({
-      value: d.id,
-      label: d.vehicleId === trip.vehicleId ? `${d.name} · this vehicle` : d.name,
-    })),
-  ];
-
-  async function pick(value: string) {
-    setBusy(true);
-    try {
-      await api<PlanTrip>(`/plan/trips/${trip.id}/driver`, {
-        method: 'POST',
-        body: { driverId: value || null },
-      });
-      await edit.reload();
-    } catch (e) {
-      edit.showToast({ kind: 'error', title: 'Driver not changed', sub: messageOf(e) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  const name = own?.name ?? (trip.driverAssigned ? null : trip.driverName);
   return (
-    <Select
-      label="Driver"
-      value={trip.driverAssigned ? (trip.driverId ?? '') : ''}
-      options={options}
-      onChange={(v) => void pick(v)}
-      searchable
-      disabled={busy || !trip.editable}
-    />
+    <span className="flex min-w-px items-center gap-[6px] rounded-pill bg-bg py-2 pl-3 pr-[10px]">
+      <span className="text-[12px] font-medium leading-[15px] text-muted">Driver</span>
+      <span className="truncate text-[12px] font-semibold leading-[15px] text-ink">
+        {name ? `${name} · this vehicle` : 'No driver on this vehicle'}
+      </span>
+    </span>
   );
 }
 
@@ -381,7 +346,7 @@ function TripRow({
           <button
             type="button"
             onClick={() => onPublish(trip.id)}
-            className="flex shrink-0 items-center gap-[6px] whitespace-nowrap rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[15px] text-bg"
+            className="flex shrink-0 items-center gap-[6px] whitespace-nowrap rounded-pill bg-primary px-3 py-[6px] text-[12px] font-semibold leading-[15px] text-on-primary"
           >
             <Icon name="send" size={12} />
             Publish
@@ -431,8 +396,7 @@ function TripRow({
             </div>
           ))}
           <div className="flex items-center gap-3 pt-1">
-            <span className="text-[12px] font-semibold leading-[15px] text-muted">Driver</span>
-            <DriverPicker trip={trip} drivers={drivers} edit={edit} />
+            <VehicleDriver trip={trip} drivers={drivers} />
           </div>
           <div className="flex items-center gap-3 pb-2">
             <p className="min-w-px flex-1 text-[12px] font-medium leading-[15px] text-muted">

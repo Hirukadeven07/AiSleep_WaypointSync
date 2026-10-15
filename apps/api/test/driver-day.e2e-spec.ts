@@ -77,7 +77,7 @@ describe('driver day (e2e)', () => {
     return prisma.trip.create({
       data: {
         vehicleId: data.vehicleId,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         brand: 'Fresh',
         districtId,
         serviceDate: date(data.serviceDate),
@@ -102,9 +102,9 @@ describe('driver day (e2e)', () => {
     const stamp = Date.now();
     districtName = `Day District ${stamp}`;
     const district = await prisma.district.create({
-      data: { name: districtName, depotId: 'Peliyagoda' },
+      data: { name: districtName, depotId: 'depo1' },
     });
-    districtId = district.id;
+    districtId = district.name;
 
     const named = await prisma.store.create({
       data: {
@@ -112,7 +112,7 @@ describe('driver day (e2e)', () => {
         displayName: 'Day Store',
         brand: 'Fresh',
         districtId,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         dockType: 'street',
         windowOpenMin: 300,
         windowCloseMin: 480,
@@ -132,7 +132,7 @@ describe('driver day (e2e)', () => {
         id: `DAY-STORE-B-${stamp}`,
         brand: 'Fresh',
         districtId,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         dockType: 'street',
         windowOpenMin: 360,
         windowCloseMin: 600,
@@ -152,7 +152,7 @@ describe('driver day (e2e)', () => {
       data: {
         id: vehicleId,
         numberPlate: `DAY-${stamp}`,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'truck',
         temp: 'reefer',
         weightCapKg: 2500,
@@ -166,7 +166,7 @@ describe('driver day (e2e)', () => {
         loginId: `dayd-${stamp}`,
         role: 'driver',
         name: 'Other day driver',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         pinHash: 'unused',
       },
     });
@@ -175,7 +175,7 @@ describe('driver day (e2e)', () => {
     await prisma.vehicle.create({
       data: {
         id: otherVehicleId,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'van',
         temp: 'ambient',
         weightCapKg: 2000,
@@ -244,7 +244,7 @@ describe('driver day (e2e)', () => {
     await prisma.trip.deleteMany({ where: { vehicleId: { in: vehicleIds } } });
     await prisma.order.deleteMany({ where: { storeId: { in: [namedStoreId, bareStoreId] } } });
     await prisma.store.deleteMany({ where: { id: { in: [namedStoreId, bareStoreId] } } });
-    if (districtId) await prisma.district.delete({ where: { id: districtId } });
+    if (districtId) await prisma.district.delete({ where: { name: districtId } });
     await prisma.vehicle.deleteMany({ where: { id: { in: vehicleIds } } });
     if (seededVehicleId) {
       await prisma.vehicle.update({ where: { id: seededVehicleId }, data: { driverId } });
@@ -396,30 +396,16 @@ describe('driver day (e2e)', () => {
     }
   });
 
-  it('lets dispatch put another driver on a trip and tells both drivers', async () => {
+  it('keeps the vehicle driver and refuses a different driver on the trip', async () => {
     const dispatcher = await login({ role: 'dispatcher', loginId: 'nimal', secret: 'waypoint' });
     try {
-      const given = await dispatcher
+      const refused = await dispatcher
         .post(`/api/plan/trips/${liveTripId}/driver`)
         .send({ driverId: otherDriverId })
-        .expect(200);
-      expect(given.body).toMatchObject({
-        driverId: otherDriverId,
-        driverName: 'Other day driver',
-        driverAssigned: true,
-      });
+        .expect(409);
+      expect(refused.body.reason).toBe('DRIVER_UNAVAILABLE');
       const day = (await driverAgent.get('/api/driver/day').expect(200)).body as DriverDayResponse;
-      expect(day.trips.map((t) => t.id)).not.toContain(liveTripId);
-      expect(
-        await prisma.notification.count({
-          where: { userId: otherDriverId, title: { startsWith: 'You are driving' } },
-        }),
-      ).toBe(1);
-      expect(
-        await prisma.notification.count({
-          where: { userId: driverId, title: { endsWith: 'moved to another driver' } },
-        }),
-      ).toBe(1);
+      expect(day.trips.map((t) => t.id)).toContain(liveTripId);
 
       // A trip that has left the depot keeps its driver; an unknown driver is not found.
       const left = await dispatcher

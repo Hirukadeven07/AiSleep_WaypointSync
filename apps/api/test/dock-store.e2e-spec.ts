@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import * as argon2 from 'argon2';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -87,17 +88,17 @@ describe('loader dock and store (e2e)', () => {
     });
 
     const district = await prisma.district.create({
-      data: { name: `E2E District ${Date.now()}`, depotId: 'Peliyagoda' },
+      data: { name: `E2E District ${Date.now()}`, depotId: 'depo1' },
     });
-    ids.district = district.id;
+    ids.district = district.name;
     const store = (id: string) =>
       prisma.store.create({
         data: {
           id,
           displayName: id,
           brand: 'Fresh',
-          districtId: district.id,
-          depotId: 'Peliyagoda',
+          districtId: district.name,
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: 300,
           windowCloseMin: 480,
@@ -109,7 +110,7 @@ describe('loader dock and store (e2e)', () => {
     await prisma.vehicle.create({
       data: {
         id: 'E2E-REEFER',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'truck',
         temp: 'reefer',
         weightCapKg: 3000,
@@ -123,9 +124,9 @@ describe('loader dock and store (e2e)', () => {
 
     const base = {
       vehicleId: 'E2E-REEFER',
-      depotId: 'Peliyagoda',
+      depotId: 'depo1',
       brand: 'Fresh' as const,
-      districtId: district.id,
+      districtId: district.name,
       serviceDate: date(DAY),
     };
     const loadTrip = await prisma.trip.create({
@@ -135,7 +136,7 @@ describe('loader dock and store (e2e)', () => {
     await prisma.loadingJob.create({
       data: {
         tripId: loadTrip.id,
-        depot: 'Peliyagoda',
+        depot: 'depo1',
         assignedById: dispatcher.id,
         bay: 'Bay-9',
         instructions: 'Chilled first.',
@@ -182,24 +183,47 @@ describe('loader dock and store (e2e)', () => {
           createdAt: { gte: startedAt },
         },
       });
+      await prisma.driverEvent.deleteMany({ where: { tripId: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.trip.deleteMany({ where: { id: { in: [ids.loadTrip, ids.storeTrip] } } });
       await prisma.order.deleteMany({ where: { storeId: { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] } } });
       await prisma.user.update({ where: { loginId: 'sunil' }, data: { storeId: sunilStoreId } });
       await prisma.vehicle.deleteMany({ where: { id: 'E2E-REEFER' } });
       await prisma.store.deleteMany({ where: { id: { in: ['E2E-A', 'E2E-B', 'E2E-HOME'] } } });
-      await prisma.district.deleteMany({ where: { id: ids.district } });
+      await prisma.district.deleteMany({ where: { name: ids.district } });
     }
     await app?.close();
   });
 
   describe('loader', () => {
     it('lists the published trip and loads it last stop first', async () => {
-      const loader = await login({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' });
+      const loader = await login({ role: 'loader', secret: '123456', depotId: 'depo1' });
       const queue = await loader.get('/api/loads').expect(200);
       const card = queue.body.find((t: { tripId: string }) => t.tripId === ids.loadTrip);
       expect(card.job).toMatchObject({ bay: 'Bay-9', status: 'assigned' });
 
-      const started = await loader.post(`/api/loads/${ids.loadTrip}/start`).expect(200);
+      // Each loader confirms their own ID and PIN; a wrong PIN, a stranger's ID or no PIN adds no one.
+      // The dock tablet's own account has no PIN, but it is not a loader who can join the load.
+      const start = (body: object) => loader.post(`/api/loads/${ids.loadTrip}/start`).send(body);
+      for (const body of [
+        { loaderId: 'sampath', pin: '9999' },
+        { loaderId: 'nobody', pin: '1234' },
+        { loaderId: 'nimal', pin: '1234' },
+        { loaderId: 'dock-depo1' },
+      ]) {
+        const refused = await start(body).expect(400);
+        expect(refused.body.reason).toBe('WRONG_LOADER_CREDENTIALS');
+      }
+      expect(await prisma.loadSession.findUnique({ where: { tripId: ids.loadTrip } })).toBeNull();
+      // A loader with no PIN set is let in on the ID alone, and a PIN is then not asked for.
+      await prisma.user.update({ where: { loginId: 'sampath' }, data: { pinHash: null } });
+      await start({ loaderId: 'SAMPATH' }).expect(200);
+      await prisma.loadSession.delete({ where: { tripId: ids.loadTrip } });
+      await prisma.user.update({
+        where: { loginId: 'sampath' },
+        data: { pinHash: await argon2.hash('1234') },
+      });
+
+      const started = await start({ loaderId: 'sampath', pin: '1234' }).expect(200);
       expect(started.body.status).toBe('loading');
       expect(started.body.loadOrder.map((s: { sequence: number }) => s.sequence)).toEqual([2, 1]);
       expect(started.body.session.loaderNames).toContain('Sampath (Loader)');
@@ -218,7 +242,7 @@ describe('loader dock and store (e2e)', () => {
     });
 
     it('flags a line, locks on a plan change, and departs after acknowledging', async () => {
-      const loader = await login({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' });
+      const loader = await login({ role: 'loader', secret: '123456', depotId: 'depo1' });
       const sheet = (await loader.get(`/api/loads/${ids.loadTrip}`).expect(200)).body;
       const stop = sheet.loadOrder[0];
       const flagged = await loader
@@ -285,7 +309,38 @@ describe('loader dock and store (e2e)', () => {
         where: { id: ids.loadTrip },
         include: { loadingJob: true },
       });
-      expect(trip.status).toBe('on_road');
+      expect(trip.status).toBe('ready');
+      expect(trip.startingTime).toBeNull();
+
+      const kasun = await prisma.user.findUniqueOrThrow({ where: { loginId: 'kasun' } });
+      await prisma.trip.update({
+        where: { id: ids.loadTrip },
+        data: { assignedDriverId: kasun.id },
+      });
+      const driver = await login({ role: 'driver', loginId: 'kasun', secret: '1234' });
+      const startedAt = MORNING;
+      const clientId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      await prisma.driverEvent.deleteMany({ where: { clientId } });
+      const synced = await driver
+        .post('/api/sync')
+        .send({
+          events: [
+            {
+              clientId,
+              driverId: kasun.id,
+              tripId: ids.loadTrip,
+              type: 'START_TRIP',
+              payload: {},
+              createdOnPhoneAt: startedAt,
+              seenPlanVersion: 2,
+            },
+          ],
+        })
+        .expect(200);
+      expect(synced.body.applied).toEqual([clientId]);
+      const moving = await prisma.trip.findUniqueOrThrow({ where: { id: ids.loadTrip } });
+      expect(moving.status).toBe('on_road');
+      expect(moving.startingTime?.toISOString()).toBe(new Date(startedAt).toISOString());
       expect(trip.loadingJob?.status).toBe('handed_over');
 
       // Loading order is LIFO, so loadOrder[0] is E2E-B; its first line by name is Bread (3).
@@ -311,10 +366,108 @@ describe('loader dock and store (e2e)', () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
       await store.get('/api/loads').expect(403);
     });
+
+    it('lets several loaders join one trip and frees a loader after that trip is loaded', async () => {
+      const plate = 'WP E2E-OPEN';
+      const stores = ['E2E-C', 'E2E-D'];
+      const vehicles = ['E2E-VAN-1', 'E2E-VAN-2'];
+      const logins = ['E2E-L1', 'E2E-L2'];
+      const tripIds: string[] = [];
+      const clear = async () => {
+        await prisma.deliveryNote.deleteMany({ where: { order: { storeId: { in: stores } } } });
+        await prisma.trip.deleteMany({ where: { id: { in: tripIds } } });
+        await prisma.trip.deleteMany({ where: { vehicleId: { in: vehicles } } });
+        await prisma.order.deleteMany({ where: { storeId: { in: stores } } });
+        await prisma.vehicle.deleteMany({ where: { id: { in: vehicles } } });
+        await prisma.store.deleteMany({ where: { id: { in: stores } } });
+        await prisma.user.deleteMany({ where: { loginId: { in: logins } } });
+      };
+      const loader = await login({ role: 'loader', secret: '123456', depotId: 'depo1' });
+      try {
+        await clear();
+        for (const id of stores) {
+          await prisma.store.create({
+            data: {
+              id,
+              displayName: id,
+              brand: 'Fresh',
+              districtId: ids.district,
+              depotId: 'depo1',
+              dockType: 'street',
+              windowOpenMin: 300,
+              windowCloseMin: 480,
+            },
+          });
+        }
+        for (const [loginId, name] of [
+          ['E2E-L1', 'E2E Loader One'],
+          ['E2E-L2', 'E2E Loader Two'],
+        ] as const) {
+          await prisma.user.create({
+            data: {
+              loginId,
+              role: 'loader',
+              name,
+              depotId: 'depo1',
+              loaderProfile: { create: {} },
+            },
+          });
+        }
+        for (const [index, vehicleId] of vehicles.entries()) {
+          await prisma.vehicle.create({
+            data: {
+              id: vehicleId,
+              numberPlate: index === 0 ? plate : 'WP E2E-NEXT',
+              depotId: 'depo1',
+              type: 'truck',
+              temp: 'reefer',
+              weightCapKg: 3000,
+              volumeCapM3: 20,
+            },
+          });
+          const placed = await order(stores[index]!, [{ name: 'Milk', qty: 1, itemId: 'F-MILK' }]);
+          const trip = await prisma.trip.create({
+            data: {
+              vehicleId,
+              depotId: 'depo1',
+              brand: 'Fresh',
+              districtId: ids.district,
+              serviceDate: date(DAY),
+              tripNumber: 1,
+              status: 'published',
+            },
+          });
+          tripIds.push(trip.id);
+          await prisma.tripStop.create({
+            data: { tripId: trip.id, orderId: placed.id, sequence: 1 },
+          });
+        }
+
+        const start = (tripId: string, loaderId: string) =>
+          loader.post(`/api/loads/${tripId}/start`).send({ loaderId });
+        const first = await start(tripIds[0]!, 'E2E-L1').expect(200);
+        expect(first.body.session.loaderNames).toEqual(['E2E Loader One']);
+        const both = await start(tripIds[0]!, 'E2E-L2').expect(200);
+        expect(both.body.session.loaderNames).toEqual(['E2E Loader One', 'E2E Loader Two']);
+
+        const again = await start(tripIds[0]!, 'E2E-L1').expect(409);
+        expect(again.body.reason).toBe('LOADER_ALREADY_ON_TRIP');
+
+        const busy = await start(tripIds[1]!, 'E2E-L1').expect(409);
+        expect(busy.body.reason).toBe('LOADER_ON_ANOTHER_TRIP');
+        expect(busy.body.message).toContain(plate);
+
+        await loader.post(`/api/loads/${tripIds[0]}/depart`).send({ planVersion: 1 }).expect(200);
+        const freed = await start(tripIds[1]!, 'E2E-L1').expect(200);
+        expect(freed.body.session.loaderNames).toEqual(['E2E Loader One']);
+      } finally {
+        await clear();
+      }
+    });
   });
 
   describe('store', () => {
-    it('takes orders before 16:00 and refuses them after', async () => {
+    it('takes orders before 16:00 and dates them for the next day after', async () => {
       const store = await login({ role: 'store', loginId: 'sunil', secret: 'waypoint' });
       const nimal = await prisma.user.findUniqueOrThrow({ where: { loginId: 'nimal' } });
       const newOrders = () =>
@@ -326,7 +479,7 @@ describe('loader dock and store (e2e)', () => {
         .post('/api/store/orders')
         .send({ lines: [{ catalogueId: 'F-MILK', qty: 2 }] })
         .expect(201);
-      expect(placed.body.deliveryDate).toBe('2026-10-02');
+      expect(placed.body.deliveryDate).toBe(DAY);
       // The depot's dispatcher hears about it under Planning.
       expect(await newOrders()).toBe(before + 1);
       expect(placed.body.status).toBe('waiting');
@@ -338,14 +491,15 @@ describe('loader dock and store (e2e)', () => {
         const late = await store
           .post('/api/store/orders')
           .send({ lines: [{ catalogueId: 'F-MILK', qty: 2 }] })
-          .expect(409);
-        expect(late.body.reason).toBe('AFTER_CUTOFF');
+          .expect(201);
+        expect(late.body.deliveryDate).toBe('2026-10-02');
+        expect(late.body.status).toBe('waiting');
       } finally {
         process.env.DEMO_NOW = MORNING;
       }
     });
 
-    it('delivers an order on the next operating day, skipping a closed one', async () => {
+    it('dates the order as the day it is placed, even when the next day is closed', async () => {
       const days = [date('2026-10-02'), date('2026-10-03')];
       const saved = await prisma.calendarDay.findMany({ where: { id: { in: days } } });
       const row = (id: Date, isOperating: boolean) => ({
@@ -375,7 +529,7 @@ describe('loader dock and store (e2e)', () => {
           .post('/api/store/orders')
           .send({ lines: [{ catalogueId: 'F-MILK', qty: 1 }] })
           .expect(201);
-        expect(placed.body.deliveryDate).toBe('2026-10-03');
+        expect(placed.body.deliveryDate).toBe(DAY);
       } finally {
         await prisma.calendarDay.deleteMany({ where: { id: { in: days } } });
         for (const { id, ...rest } of saved) {
@@ -434,10 +588,33 @@ describe('loader dock and store (e2e)', () => {
       });
       expect(stop.order.status).toBe('partial');
       expect(confirmed.body.issues).toEqual([
-        expect.objectContaining({ reason: 'missing', qty: 1, driverDecision: 'pending' }),
+        expect.objectContaining({
+          reason: 'missing',
+          qty: 1,
+          driverDecision: 'pending',
+          resolveStatus: false,
+        }),
       ]);
       const flag = await prisma.fieldFlag.findFirstOrThrow({ where: { orderId: stop.orderId } });
-      expect(flag).toMatchObject({ tripId: ids.storeTrip, itemId: 'F-MILK', severity: 'medium' });
+      expect(flag).toMatchObject({
+        tripId: ids.storeTrip,
+        itemId: 'F-MILK',
+        severity: 'medium',
+        resolveStatus: false,
+      });
+      const flags = (await store.get('/api/store/flags').expect(200)).body;
+      expect(flags).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: flag.id,
+            reason: 'missing',
+            qty: 1,
+            driverDecision: 'pending',
+            resolveStatus: false,
+            raisedAt: expect.any(String),
+          }),
+        ]),
+      );
       expect(
         await prisma.notification.count({
           where: { userId: kasun.id, title: 'E2E-HOME checked the goods' },

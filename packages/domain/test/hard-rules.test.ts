@@ -35,7 +35,7 @@ describe('hard rules — refuse the drop', () => {
   });
 
   it('refuses a Kandy outlet on a Peliyagoda vehicle', () => {
-    const candidate = stop({ id: 'OUT-K', depot: 'Kandy', district: 'Kandy' });
+    const candidate = stop({ id: 'OUT-K', depot: 'depo2', district: 'Kandy' });
     const issues = evaluateDrop({ vehicle: truck, currentStops: empty, candidate, lookup });
     expect(issues.map((issue) => issue.code)).toContain(Reason.WRONG_DEPOT);
   });
@@ -106,7 +106,7 @@ describe('hard rules — refuse the drop', () => {
       travel: [
         {
           district: 'Colombo',
-          depot: 'Peliyagoda',
+          depot: 'depo1',
           depotToDistrictKm: 1,
           depotToDistrictFreeflowMin: 270,
           interStopKm: 1,

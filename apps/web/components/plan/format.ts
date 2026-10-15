@@ -23,6 +23,13 @@ export const orderWindow = (o: Pick<PlanOrder, 'windowOpenMin' | 'windowCloseMin
 export const stopWindow = (s: { windowOpenMin: number; windowCloseMin: number }) =>
   `${clock(s.windowOpenMin)}-${clock(s.windowCloseMin)}`;
 
+/** "2026-10-01" plus one day -> "2026-10-02". Dates are calendar days, not instants. */
+export function addDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 /** "2026-10-01" -> "Wed, 1 Oct". */
 export function dayLabel(iso: string) {
   const d = new Date(`${iso}T00:00:00Z`);

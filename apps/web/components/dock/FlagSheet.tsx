@@ -33,7 +33,7 @@ export function FlagSheet({
       <button
         type="button"
         aria-label="Close"
-        className="absolute inset-0 bg-ink/40"
+        className="absolute inset-0 bg-scrim/40"
         onClick={onClose}
       />
       <form

@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import type { LoadQueueItem } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { usePoll } from '@/lib/poll';
@@ -8,6 +10,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusChip } from '@/components/ui/StatusChip';
 import { Icon } from '@/components/ui/Icon';
 import { JobNote } from '@/components/dock/JobNote';
+import { StartLoadingSheet } from '@/components/dock/StartLoadingSheet';
 
 /** L2: published trips for this depot, today and tomorrow's plan, in loading order. */
 export default function DockQueuePage() {
@@ -37,24 +40,40 @@ export default function DockQueuePage() {
         />
       )}
 
-      <ul className="grid gap-md sm:grid-cols-2 lg:grid-cols-3">
-        {data?.map((t) => (
-          <li key={t.tripId}>
-            <QueueCard trip={t} />
-          </li>
-        ))}
-      </ul>
+      {/* Today's trips first, then tomorrow's plan (loaded the evening before), each under a heading. */}
+      {(
+        [
+          ['Today', data?.filter((t) => !t.later) ?? []],
+          ['Tomorrow', data?.filter((t) => t.later) ?? []],
+        ] as const
+      ).map(([day, trips]) =>
+        trips.length === 0 ? null : (
+          <div key={day} className="space-y-sm">
+            <h2 className="text-title font-semibold text-ink">
+              {day} <span className="text-label font-normal text-muted">· {trips.length}</span>
+            </h2>
+            <ul className="grid gap-md sm:grid-cols-2 lg:grid-cols-3">
+              {trips.map((t) => (
+                <li key={t.tripId}>
+                  <QueueCard trip={t} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ),
+      )}
     </section>
   );
 }
 
 function QueueCard({ trip }: { trip: LoadQueueItem }) {
   const started = trip.status !== 'published';
-  return (
-    <Link
-      href={`/dock/${trip.tripId}`}
-      className="flex h-full flex-col gap-md rounded-card bg-surface p-lg outline-none ring-primary focus-visible:ring-2"
-    >
+  const router = useRouter();
+  const [adding, setAdding] = useState(false);
+  const cardClass =
+    'flex h-full w-full flex-col gap-md rounded-card bg-surface p-lg text-left outline-none ring-primary focus-visible:ring-2';
+  const body = (
+    <>
       <div className="flex items-start justify-between gap-sm">
         <div className="min-w-0">
           <p className="truncate text-title text-ink">{trip.vehicle.plate ?? trip.vehicle.id}</p>
@@ -84,18 +103,66 @@ function QueueCard({ trip }: { trip: LoadQueueItem }) {
       </p>
 
       <JobNote job={trip.job} compact />
-
-      <div className="mt-auto flex items-center justify-between gap-sm">
-        <p className="flex min-w-0 items-center gap-xs text-label text-muted">
-          <Icon name="user" size={16} />
-          <span className="truncate">
-            {trip.loaderNames.length ? trip.loaderNames.join(', ') : 'Nobody loading yet'}
-          </span>
-        </p>
-        <span className="shrink-0 rounded-pill bg-primary px-md py-sm text-label text-on-primary">
-          {started ? 'Continue' : 'Start loading'}
+    </>
+  );
+  const actions = (
+    <div className="mt-auto flex items-center justify-between gap-sm">
+      <p className="flex min-w-0 items-center gap-xs text-label text-muted">
+        <Icon name="user" size={16} />
+        <span className="truncate">
+          {trip.loaderNames.length ? trip.loaderNames.join(', ') : 'Nobody loading yet'}
         </span>
-      </div>
-    </Link>
+      </p>
+      <span className="flex shrink-0 gap-xs">
+        {started && (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="rounded-pill border border-mist bg-surface px-md py-sm text-label text-ink"
+          >
+            Add a loader
+          </button>
+        )}
+        {started ? (
+          <Link
+            href={`/dock/${trip.tripId}`}
+            className="rounded-pill bg-primary px-md py-sm text-label text-on-primary"
+          >
+            Continue
+          </Link>
+        ) : (
+          <span className="rounded-pill bg-primary px-md py-sm text-label text-on-primary">
+            Start loading
+          </span>
+        )}
+      </span>
+    </div>
+  );
+  // Starting a truck asks who is loading. A truck already being loaded can still take more loaders.
+  return (
+    <>
+      {started ? (
+        <div className={cardClass}>
+          <Link href={`/dock/${trip.tripId}`} className="flex flex-col gap-md outline-none">
+            {body}
+          </Link>
+          {actions}
+        </div>
+      ) : (
+        <button type="button" onClick={() => setAdding(true)} className={cardClass}>
+          {body}
+          {actions}
+        </button>
+      )}
+      {adding && (
+        <StartLoadingSheet
+          tripId={trip.tripId}
+          title={started ? 'Add loaders' : 'Start loading'}
+          initialNames={trip.loaderNames}
+          onClose={() => setAdding(false)}
+          onContinue={() => router.push(`/dock/${trip.tripId}`)}
+        />
+      )}
+    </>
   );
 }

@@ -3,6 +3,7 @@ import type {
   DispatcherNotices,
   LiveDay,
   LocateMap,
+  LocateRoute,
   MoveOptions,
   MoveStopResult,
   NotifyPreview,
@@ -24,10 +25,16 @@ export class DispatchController {
     private readonly maps: MapService,
   ) {}
 
-  /** Drivers placed on the last store they reached. `depot` switches which yard is highlighted. */
+  /** Drivers on the road. `depot` switches which yard is highlighted. */
   @Get('map')
   map(@CurrentUser() me: AuthUser, @Query('depot') depot?: string): Promise<LocateMap> {
     return this.maps.locate(me, depot);
+  }
+
+  /** Road path and return estimate for the vehicle selected on the live map. */
+  @Get('map/trips/:id')
+  mapRoute(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<LocateRoute> {
+    return this.maps.tripRoute(me, id);
   }
 
   /** Where each stop the driver has not reached could move (another of today's trips at the depot). */

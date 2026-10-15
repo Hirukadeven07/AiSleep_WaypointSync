@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nest
 import type {
   CatalogueItem,
   StoreDelivery,
+  StoreFlag,
   StoreHome,
   StoreNotice,
   StoreOrderDetail,
@@ -60,6 +61,11 @@ export class StoreController {
   @Delete('orders/:id')
   cancelOrder(@CurrentUser() me: AuthUser, @Param('id') id: string): Promise<{ ok: true }> {
     return this.store.cancelOrder(me, id);
+  }
+
+  @Get('flags')
+  flags(@CurrentUser() me: AuthUser): Promise<StoreFlag[]> {
+    return this.store.flags(me);
   }
 
   @Get('deliveries')

@@ -4,6 +4,7 @@
  */
 import { Reason } from '../reasons';
 import type { Order, RuleIssue, StopView, Vehicle } from '../types';
+import { vehicleName } from '../names';
 
 export type CapacitySnapshot = {
   usedWeightKg: number;
@@ -39,14 +40,14 @@ export function capacityIssues(vehicle: Vehicle, stops: StopView[], asBlock: boo
     issues.push({
       code: Reason.OVER_WEIGHT,
       severity,
-      message: `Weight ${snap.usedWeightKg} kg exceeds cap ${snap.weightCapKg} kg on ${vehicle.id}.`,
+      message: `${vehicleName(vehicle)} would carry ${snap.usedWeightKg} kg; its limit is ${snap.weightCapKg} kg.`,
     });
   }
   if (snap.overVolume) {
     issues.push({
       code: Reason.OVER_VOLUME,
       severity,
-      message: `Volume ${snap.usedVolumeM3} m³ exceeds cap ${snap.volumeCapM3} m³ on ${vehicle.id}.`,
+      message: `${vehicleName(vehicle)} would carry ${snap.usedVolumeM3} m³; its limit is ${snap.volumeCapM3} m³.`,
     });
   }
 

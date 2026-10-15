@@ -18,7 +18,7 @@ export function useSignIn() {
     try {
       const res = await api<LoginResponse>('/auth/login', { method: 'POST', body });
       rememberRole(body.role);
-      rememberLoginId(body.role, remember ? body.loginId : null);
+      rememberLoginId(body.role, remember ? (body.loginId ?? null) : null);
       router.push(res.home);
     } catch (err) {
       setError(

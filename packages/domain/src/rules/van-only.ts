@@ -3,6 +3,7 @@
  */
 import { Reason } from '../reasons';
 import type { RuleIssue, StopView, Vehicle } from '../types';
+import { outletName, vehicleName } from '../names';
 
 export function checkVanOnly(vehicle: Vehicle, candidate: StopView): RuleIssue[] {
   if (candidate.outlet.parkingConstraint !== 'van_only' || vehicle.type === 'van') {
@@ -13,7 +14,7 @@ export function checkVanOnly(vehicle: Vehicle, candidate: StopView): RuleIssue[]
     {
       code: Reason.VAN_ONLY,
       severity: 'block',
-      message: `Outlet ${candidate.outlet.id} is van-only; vehicle ${vehicle.id} is a ${vehicle.type}.`,
+      message: `${outletName(candidate.outlet)} takes vans only; ${vehicleName(vehicle)} is a ${vehicle.type}.`,
     },
   ];
 }

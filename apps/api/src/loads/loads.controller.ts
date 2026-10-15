@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Post } from '@nestjs/co
 import type { DepartSummary, LoadQueueItem, LoadSheet } from '@waypoint/contracts';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
-import { DepartDto, FlagDto, TakenOffDto } from './dto/loads.dto';
+import { DepartDto, FlagDto, StartLoadingDto, TakenOffDto } from './dto/loads.dto';
 import { LoadsService } from './loads.service';
 
 @Controller('loads')
@@ -22,8 +22,12 @@ export class LoadsController {
 
   @Post(':tripId/start')
   @HttpCode(200)
-  start(@CurrentUser() me: AuthUser, @Param('tripId') tripId: string): Promise<LoadSheet> {
-    return this.loads.start(me, tripId);
+  start(
+    @CurrentUser() me: AuthUser,
+    @Param('tripId') tripId: string,
+    @Body() dto: StartLoadingDto,
+  ): Promise<LoadSheet> {
+    return this.loads.start(me, tripId, dto);
   }
 
   @Post(':tripId/flags')

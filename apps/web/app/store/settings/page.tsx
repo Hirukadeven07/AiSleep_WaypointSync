@@ -85,7 +85,7 @@ export default function StoreSettingsPage() {
         <div className="space-y-sm rounded-card bg-surface p-lg">
           <p className="text-title text-ink">Order cutoff reminder</p>
           <p className="text-label text-muted">
-            Reminds you before ordering closes, when nothing is ordered for tomorrow yet.
+            Reminds you before ordering closes, when nothing is ordered today yet.
           </p>
           <div className="flex gap-sm" role="radiogroup" aria-label="Order cutoff reminder">
             {REMINDER_OPTIONS.map((min) => (

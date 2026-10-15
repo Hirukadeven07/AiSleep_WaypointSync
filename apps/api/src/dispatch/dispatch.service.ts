@@ -25,13 +25,14 @@ import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { BREAK_EVENT_TYPES, foldBreaks } from '../driver/driver-breaks';
 import { alertLongWaits } from '../driver/driver-notices';
+import { IncidentsService } from '../incidents/incidents.service';
+import { NoticeHub } from '../notifications/notice-hub';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { tripAreaLabel } from '../plan/plan.mapper';
+import { SYNC_STALE_MIN } from '../map/map.logic';
 
 /** A trip counts as late from this many minutes past a stop's window. */
 const LATE_MIN = 5;
-/** A trip on the road that has not synced for this long is shown as "Not synced". */
-const SYNC_STALE_MIN = 20;
 /** A stop is "at risk" when its ETA is within this many minutes of the end of its window. */
 const AT_RISK_MIN = 15;
 const DONE = new Set(['delivered', 'confirmed', 'partial', 'deferred']);
@@ -41,7 +42,39 @@ const person = (name: string) => name.replace(/\s*\(.*\)\s*$/, '').trim();
 
 const driverInclude = { include: { driverProfile: { include: { phones: true } } } } as const;
 
-type ReceiptLine = { name: string; orderedQty: number; receivedQty: number; issue: string | null };
+type ReceiptLine = {
+  name: string;
+  orderedQty: number;
+  receivedQty: number;
+  issue: string | null;
+  issues?: { type: string; qty: number }[];
+};
+
+/** One note for the stop. A single problem stays "1 item damaged"; mixed counts are listed. */
+function receiptNote(lines: ReceiptLine[]): string | null {
+  const flagged = lines.filter(
+    (l) => l.issue || l.issues?.some((i) => i.qty > 0),
+  );
+  if (flagged.length === 0) return null;
+  const mixed = flagged.some((l) => (l.issues?.filter((i) => i.qty > 0).length ?? 0) > 1);
+  if (!mixed && flagged.every((l) => l.issue)) {
+    return `${flagged.length} ${flagged.length === 1 ? 'item' : 'items'} ${flagged[0]!.issue}`;
+  }
+  return flagged
+    .flatMap((l) =>
+      (l.issues ?? [])
+        .filter((i) => i.qty > 0)
+        .map((i) => `${i.qty} ${i.type === 'wrong_quantity' ? 'wrong qty' : i.type}`),
+    )
+    .join(', ');
+}
+
+function damagedQty(line: ReceiptLine): number {
+  const listed = line.issues?.find((i) => i.type === 'damaged' && i.qty > 0)?.qty;
+  if (listed) return listed;
+  if (line.issue === 'damaged') return Math.max(1, line.orderedQty - line.receivedQty);
+  return 0;
+}
 
 /** The live day: every trip that has been published, with where it is and what needs attention. */
 @Injectable()
@@ -50,6 +83,8 @@ export class DispatchService {
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
     @Inject(NOTIFIER) private readonly notifier: Notifier,
+    private readonly hub: NoticeHub,
+    private readonly incidents: IncidentsService,
   ) {}
 
   /** The stores a delay would reach (their ETA misses the window or is within 15 minutes of it) and the message they would get. */
@@ -108,30 +143,13 @@ export class DispatchService {
     return { sent: stores.length };
   }
 
-  /** Dispatch has dealt with a driver's SOS. Clears the alert on the board and on the driver's phone. */
+  /**
+   * Dispatch has dealt with a driver's SOS (the Home card's "Handled"). It is the same clearing the
+   * Incidents page's "Mark handled" does, so both leave the SOS resolved on the board, in the
+   * Incidents list and on the driver's phone.
+   */
   async resolveSos(me: Me, id: string, note?: string): Promise<{ ok: true }> {
-    if (!me.depotId) throw new ForbiddenException('This account has no depot');
-    const sos = await this.prisma.driverIncident.findFirst({
-      where: {
-        id,
-        incidentType: 'sos',
-        OR: [{ trip: { depotId: me.depotId } }, { vehicle: { depotId: me.depotId } }],
-      },
-    });
-    if (!sos) throw new NotFoundException('SOS not found');
-    if (!sos.resolvedAt) {
-      const now = this.clock.now();
-      await this.prisma.driverIncident.update({
-        where: { id },
-        data: {
-          resolvedAt: now,
-          acknowledgedAt: sos.acknowledgedAt ?? now,
-          acknowledgedBy: sos.acknowledgedBy ?? me.id,
-          resolution: note?.trim() || 'Handled by dispatch',
-        },
-      });
-    }
-    return { ok: true };
+    return this.incidents.resolveSos(me, id, note);
   }
 
   /** The dispatcher's unseen notifications, newest first, grouped by where they lead. */
@@ -215,30 +233,35 @@ export class DispatchService {
         where: { deliveryDate: day, movedFromDate: { not: null }, store: { depotId } },
         select: { status: true, stop: { select: { id: true } } },
       }),
+      // Orders placed before the cutoff are for today; from the cutoff they are for the next day.
       this.prisma.order.count({
         where: {
-          deliveryDate: nextDay,
+          deliveryDate: this.clock.minutesNow() < ORDER_CUTOFF_MIN ? day : nextDay,
           status: { in: ['waiting', 'planned'] },
           store: { depotId },
         },
       }),
-      // Driver SOS alerts that dispatch has not resolved yet.
+      // Today's driver SOS alerts that are still open: an old one nobody closed does not haunt
+      // every later day.
       this.prisma.driverIncident.findMany({
         where: {
           incidentType: 'sos',
           resolvedAt: null,
+          raisedAt: { gte: new Date(`${date}T00:00:00+05:30`) },
           OR: [{ trip: { depotId } }, { vehicle: { depotId } }],
         },
-        include: { driver: { include: { user: true } }, vehicle: true },
+        include: { driver: { include: { user: true, phones: true } }, vehicle: true },
         orderBy: { raisedAt: 'asc' },
       }),
     ]);
 
     // Dispatch is alerted once per long wait, whether the board or the driver's phone notices first.
-    await alertLongWaits(
-      this.prisma,
-      now,
-      rows.map((t) => t.id),
+    this.hub.publishAll(
+      await alertLongWaits(
+        this.prisma,
+        now,
+        rows.map((t) => t.id),
+      ),
     );
 
     // A driver on a break shows on their trip's card.
@@ -286,7 +309,7 @@ export class DispatchService {
     const attention: AttentionItem[] = [];
     const trips: LiveTrip[] = rows.map((t) => {
       const driver = t.assignedDriver ?? t.vehicle.driver;
-      const phone = driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null;
+      const phone = driver?.driverProfile?.phones[0]?.phoneNumber ?? null;
       const plate = t.vehicle.numberPlate ?? t.vehicleId;
 
       const onRoad = t.status === 'on_road';
@@ -295,7 +318,6 @@ export class DispatchService {
         const lines = (Array.isArray(s.receipt?.lineResults)
           ? s.receipt?.lineResults
           : []) as unknown as ReceiptLine[];
-        const issues = lines.filter((l) => l.issue);
         const open = !DONE.has(s.status);
         const miss = open && s.etaMin != null ? s.etaMin - s.order.store.windowCloseMin : 0;
         return {
@@ -308,9 +330,7 @@ export class DispatchService {
           etaMin: s.etaMin,
           arrivedAt: s.arrivedAt?.toISOString() ?? null,
           confirmed: s.storeConfirmedAt !== null,
-          issueNote: issues.length
-            ? `${issues.length} ${issues.length === 1 ? 'item' : 'items'} ${issues[0].issue}`
-            : null,
+          issueNote: receiptNote(lines),
           missBy: miss > 0 ? miss : null,
         };
       });
@@ -366,13 +386,14 @@ export class DispatchService {
         const lines = (Array.isArray(s.receipt?.lineResults)
           ? s.receipt?.lineResults
           : []) as unknown as ReceiptLine[];
-        const bad = lines.find((l) => l.issue === 'damaged');
+        const bad = lines.find((l) => damagedQty(l) > 0);
         if (bad) {
+          const qty = damagedQty(bad);
           attention.push({
             id: `damaged-${s.id}`,
             kind: 'damaged',
-            title: `1 item damaged on ${plate} (store report)`,
-            text: `${s.order.store.displayName ?? s.order.store.id} · ${bad.name} · ${Math.max(1, bad.orderedQty - bad.receivedQty)} of ${bad.orderedQty} damaged`,
+            title: `${qty} ${qty === 1 ? 'item' : 'items'} damaged on ${plate} (store report)`,
+            text: `${s.order.store.displayName ?? s.order.store.id} · ${bad.name} · ${qty} of ${bad.orderedQty} damaged`,
             tripId: t.id,
             phone: null,
           });
@@ -493,8 +514,6 @@ export class DispatchService {
       .sort((a, b) => a.getTime() - b.getTime());
 
     const late = trips.filter((t) => t.live === 'late');
-    const breakdowns = trips.filter((t) => t.live === 'breakdown').length;
-    const missingTrips = trips.filter((t) => t.missingCount > 0).length;
     const dispatched = trips.filter((t) =>
       ['on_road', 'breakdown', 'completed'].includes(t.status),
     ).length;
@@ -507,15 +526,23 @@ export class DispatchService {
         title: `SOS from ${person(d.driver.user.name)}${d.vehicle ? ` on ${d.vehicle.numberPlate ?? d.vehicle.id}` : ''}`,
         text: `${d.message ?? 'No message'} · raised ${clockText(d.raisedAt)}.`,
         tripId: d.tripId ?? '',
-        phone: d.driver.user.phone ?? null,
+        phone: d.driver.phones[0]?.phoneNumber ?? null,
         incidentId: d.id,
       });
     }
-    const sosOpen = sosRows.length;
+    // The same open incidents the Incidents page lists (logged, missing items and today's SOS),
+    // from one shared source, so this count and that page's "N active" always match.
+    const kinds = await this.incidents.openKinds(depotId);
+    const kindCount = (k: string) => kinds.filter((x) => x === k).length;
+    const sosOpen = kindCount('sos');
+    const breakdowns = kindCount('breakdown');
+    const missingOpen = kindCount('missing_items');
+    const otherOpen = kinds.length - sosOpen - breakdowns - missingOpen;
     const incidentParts = [
       sosOpen > 0 ? `${sosOpen} SOS` : null,
       breakdowns > 0 ? `${breakdowns} ${breakdowns === 1 ? 'breakdown' : 'breakdowns'}` : null,
-      missingTrips > 0 ? `${missingTrips} missing ${missingTrips === 1 ? 'item' : 'items'}` : null,
+      otherOpen > 0 ? `${otherOpen} other` : null,
+      missingOpen > 0 ? `${missingOpen} missing ${missingOpen === 1 ? 'item' : 'items'}` : null,
     ].filter(Boolean);
 
     const minutesNow = this.clock.minutesNow();
@@ -536,7 +563,7 @@ export class DispatchService {
         avgLateMin: late.length
           ? Math.round(late.reduce((sum, t) => sum + (t.lateMin ?? 0), 0) / late.length)
           : 0,
-        openIncidents: sosOpen + breakdowns + missingTrips,
+        openIncidents: kinds.length,
         incidentsText: incidentParts.join(' · '),
       },
       counts: {
@@ -596,7 +623,7 @@ export class DispatchService {
         vehicleType: t.vehicle.type,
         vehicleTemp: t.vehicle.temp,
         driverName: driver ? person(driver.name) : null,
-        driverPhone: driver?.driverProfile?.phones[0]?.phoneNumber ?? driver?.phone ?? null,
+        driverPhone: driver?.driverProfile?.phones[0]?.phoneNumber ?? null,
         status: t.status,
         live: t.status === 'planning' ? 'planned' : 'assigned',
         lateMin: null,

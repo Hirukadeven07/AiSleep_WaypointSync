@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import type { DriverNotice } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
+import { LIVE_NOTICE } from '@/lib/live-notices';
 import { OfflineBanner } from './OfflineBanner';
 import { useDriver } from './DriverShell';
 
@@ -38,6 +39,12 @@ export function DriverNotices() {
   useEffect(() => {
     void load();
   }, [load, online]);
+
+  useEffect(() => {
+    const onNotice = () => void load();
+    window.addEventListener(LIVE_NOTICE, onNotice);
+    return () => window.removeEventListener(LIVE_NOTICE, onNotice);
+  }, [load]);
 
   // Opening the list reads every unread notice; the home badge then catches up.
   useEffect(() => {

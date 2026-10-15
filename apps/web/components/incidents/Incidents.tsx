@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { IncidentDetail as Detail, IncidentList as List } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { usePoll } from '@/lib/poll';
 import { IncidentDetail } from './IncidentDetail';
 import { IncidentList } from './IncidentList';
+import { LogIncidentModal } from './LogIncidentModal';
 
 type Filter = 'active' | 'resolved' | 'all';
 
@@ -19,13 +21,14 @@ export function Incidents() {
   const [picked, setPicked] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [toast, setToast] = useState<{ title: string; sub: string } | null>(null);
+  const [logging, setLogging] = useState(false);
   const opened = useRef(new Set<string>());
 
-  // "Truck broke down" links here with ?id=<incident> so the new breakdown opens straight away.
+  // "Truck broke down" and a driver's SOS notice link here with ?id=<incident> so it opens straight away.
+  const linked = useSearchParams().get('id');
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get('id');
-    if (id) setPicked(id);
-  }, []);
+    if (linked) setPicked(linked);
+  }, [linked]);
 
   useEffect(() => {
     if (!toast) return;
@@ -105,8 +108,7 @@ export function Incidents() {
           </div>
           <button
             type="button"
-            disabled
-            title="Logging an incident by hand is not built yet"
+            onClick={() => setLogging(true)}
             className="shrink-0 whitespace-pre rounded-pill border border-border bg-surface px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-ink"
           >
             {'+  Log incident'}
@@ -121,7 +123,7 @@ export function Incidents() {
               aria-pressed={filter === f.id}
               onClick={() => setFilter(f.id)}
               className={`rounded-pill px-4 py-[10px] text-[13px] font-semibold leading-[18px] ${
-                filter === f.id ? 'bg-primary text-bg' : 'bg-surface text-ink'
+                filter === f.id ? 'bg-primary text-on-primary' : 'bg-surface text-ink'
               }`}
             >
               {f.label}
@@ -168,12 +170,32 @@ export function Incidents() {
           )}
         </div>
       </div>
+      {logging && (
+        <LogIncidentModal
+          onClose={() => setLogging(false)}
+          onLogged={async (incident) => {
+            // Already open for this trip: the note went onto that incident, not a new one.
+            const existing = list.active.some((i) => i.id === incident.id);
+            setLogging(false);
+            setFilter('active');
+            setPicked(incident.id);
+            setDetail(incident);
+            await refresh();
+            setToast({
+              title: existing ? 'Added to the open incident' : 'Incident logged',
+              sub: incident.title,
+            });
+          }}
+        />
+      )}
       {toast && (
         <div
           role="status"
           className="fixed right-6 top-6 z-40 flex max-w-[320px] flex-col gap-[2px] rounded-[16px] bg-primary px-4 py-3"
         >
-          <span className="text-[13px] font-bold leading-[18px] text-bg">{toast.title}</span>
+          <span className="text-[13px] font-bold leading-[18px] text-on-primary">
+            {toast.title}
+          </span>
           <span className="text-[12px] leading-[17px] text-sand">{toast.sub}</span>
         </div>
       )}

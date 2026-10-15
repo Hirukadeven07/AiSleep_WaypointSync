@@ -206,7 +206,7 @@ async function seedOps(prisma: PrismaClient) {
     : null;
 
   const onRoad = await prisma.trip.findFirst({
-    where: { status: 'on_road', depotId: 'Peliyagoda' },
+    where: { status: 'on_road', depotId: 'depo1' },
     include: {
       stops: {
         orderBy: { sequence: 'asc' },
@@ -216,7 +216,7 @@ async function seedOps(prisma: PrismaClient) {
     orderBy: { publishedAt: 'desc' },
   });
   const published = await prisma.trip.findFirst({
-    where: { status: 'published', depotId: 'Peliyagoda' },
+    where: { status: 'published', depotId: 'depo1' },
     include: {
       stops: {
         orderBy: { sequence: 'asc' },
@@ -246,7 +246,7 @@ async function seedOps(prisma: PrismaClient) {
     await prisma.loadingJob.create({
       data: {
         tripId: published.id,
-        depot: 'Peliyagoda',
+        depot: 'depo1',
         assignedById: dispatcher.id,
         bay: 'Bay-2',
         instructions: 'Chill first. Confirm DN version before handing over.',
@@ -331,6 +331,7 @@ async function seedOps(prisma: PrismaClient) {
         reasonDetail: 'One milk crate arrived with a split bottle.',
         severity: 'medium',
         driverDecision: 'pending',
+        resolveStatus: false,
       },
     });
   }
@@ -420,7 +421,7 @@ async function seedOps(prisma: PrismaClient) {
   // Dummy rows for tables the rest of seed never writes. Use yesterday's completed
   // trip — never the published trip on the loader queue or sunil's live arrived receive stop.
   const done = await prisma.trip.findFirst({
-    where: { status: 'completed', depotId: 'Peliyagoda' },
+    where: { status: 'completed', depotId: 'depo1' },
     include: {
       stops: {
         orderBy: { sequence: 'asc' },
@@ -474,7 +475,6 @@ async function seedOps(prisma: PrismaClient) {
           issue: null,
         })),
         chilledWasCold: true,
-        photoKey: 'receipts/demo.png',
         signaturePhotoKey: 'signatures/demo.png',
         signedByUserId: manager?.id ?? null,
         signedAt: confirmedAt,

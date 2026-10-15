@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Post, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import type { LoginResponse, Me } from '@waypoint/contracts';
+import type { LoginResponse, Me, Profile } from '@waypoint/contracts';
 import { Public } from '../common/decorators/public.decorator';
 import {
   AuthedRequest,
@@ -44,5 +44,11 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthUser): Me {
     return user;
+  }
+
+  /** Login id, phone, depot or store, and this session's times, for the account card. */
+  @Get('me/profile')
+  profile(@CurrentUser() user: AuthUser, @Req() req: AuthedRequest): Promise<Profile> {
+    return this.auth.profile(user.id, req.sessionId);
   }
 }

@@ -11,7 +11,7 @@ import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { PlanDeferService } from './plan-defer.service';
 import { PlanEditService } from './plan-edit.service';
-import { PlanService } from './plan.service';
+import { DEPART_MIN, PlanService } from './plan.service';
 import { orderInclude, toOutlet, toStopView, toVehicle, tripInclude, usedPct } from './plan.mapper';
 
 const dateOnly = (iso: string) => new Date(`${iso}T00:00:00Z`);
@@ -71,6 +71,8 @@ export class PlanAutoService {
       trips: views,
       tripsTakenToday: taken,
       lookup,
+      // Windows are checked from the booklet departures, as the publish check does.
+      departAtMin: DEPART_MIN,
     });
     return { depotId, day, waiting, trips, vehicles, assignments, taken };
   }

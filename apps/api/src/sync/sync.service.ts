@@ -15,6 +15,7 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { ownTripWhere, tripDriverId } from '../driver/driver-trips';
+import { stopIsDone } from '../map/map.logic';
 import {
   NOTIFIER,
   type NotificationInput,
@@ -241,33 +242,86 @@ export class SyncService {
           update: {},
         });
         const vehicle = await this.driverVehicle(tx, me.id, tripId);
-        await tx.driverIncident.create({
-          data: {
-            driverId: driver.id,
-            tripId,
-            vehicleId: vehicle?.id ?? null,
-            incidentType: 'sos',
-            severity,
-            message,
-            lat,
-            lng,
-            raisedAt: happenedAt,
-          },
+        // One open SOS per driver: pressing again updates it instead of adding a second alert.
+        const open = await tx.driverIncident.findFirst({
+          where: { driverId: driver.id, incidentType: 'sos', resolvedAt: null },
+          orderBy: { raisedAt: 'desc' },
         });
+        let sosId: string;
+        if (open) {
+          sosId = open.id;
+          await tx.driverIncident.update({
+            where: { id: open.id },
+            data: {
+              tripId: tripId ?? open.tripId,
+              vehicleId: vehicle?.id ?? open.vehicleId,
+              severity,
+              message: message ?? open.message,
+              lat: lat ?? open.lat,
+              lng: lng ?? open.lng,
+            },
+          });
+        } else {
+          const created = await tx.driverIncident.create({
+            data: {
+              driverId: driver.id,
+              tripId,
+              vehicleId: vehicle?.id ?? null,
+              incidentType: 'sos',
+              severity,
+              message,
+              lat,
+              lng,
+              raisedAt: happenedAt,
+            },
+          });
+          sosId = created.id;
+        }
 
         const depotId = vehicle?.depotId ?? me.depotId;
         const dispatchers = await tx.user.findMany({
           where: { role: 'dispatcher', ...(depotId ? { depotId } : {}) },
           select: { id: true },
         });
-        const body = `${me.name} raised an SOS${message ? `: ${message}` : '.'}`;
+        const body = `${me.name} raised an SOS${open ? ' again' : ''}${message ? `: ${message}` : '.'}`;
         return {
           stale,
           notifications: dispatchers.map((user) => ({
             userId: user.id,
             title: 'Driver SOS',
             body,
-            link: '/dispatch/incidents',
+            // Opens this SOS in the incidents list (its id there is `sos:` + the DriverIncident id).
+            link: `/dispatch/incidents?id=${encodeURIComponent(`sos:${sosId}`)}`,
+          })),
+        };
+      }
+
+      case 'SOS_CLEARED': {
+        // The driver closed SOS ("I'm safe"): resolve their open SOS and tell dispatch.
+        const trip =
+          (await this.lookupTripForDriver(tx, me.id, event.tripId ?? null)) ??
+          (await this.activeTripForDriver(me.id, tx));
+        const tripId = trip?.id ?? null;
+        const stale = await this.shouldMarkStale(tx, event, tripId);
+        await this.recordEvent(tx, me, event, tripId);
+        const cleared = await tx.driverIncident.updateMany({
+          where: { driver: { userId: me.id }, incidentType: 'sos', resolvedAt: null },
+          data: { resolvedAt: happenedAt, resolution: 'The driver marked themselves safe' },
+        });
+        if (cleared.count === 0) return { stale, notifications: [] };
+        const vehicle = await this.driverVehicle(tx, me.id, tripId);
+        const depotId = vehicle?.depotId ?? me.depotId;
+        const dispatchers = await tx.user.findMany({
+          where: { role: 'dispatcher', ...(depotId ? { depotId } : {}) },
+          select: { id: true },
+        });
+        return {
+          stale,
+          notifications: dispatchers.map((user) => ({
+            userId: user.id,
+            title: 'Driver is safe',
+            body: `${me.name} closed the SOS and says they are safe.`,
+            link: '/dispatch',
           })),
         };
       }
@@ -394,6 +448,57 @@ export class SyncService {
         const tripId = trip?.id ?? null;
         const stale = await this.shouldMarkStale(tx, event, tripId);
         await this.recordEvent(tx, me, event, tripId);
+        return { stale, notifications: [] };
+      }
+
+      case 'START_TRIP': {
+        const found =
+          (await this.lookupTripForDriver(tx, me.id, event.tripId ?? null)) ??
+          (await this.activeTripForDriver(me.id, tx));
+        if (!found) throw new RejectedEvent('NO_ACTIVE_TRIP');
+        const current = await tx.trip.findUnique({
+          where: { id: found.id },
+          select: { id: true, status: true, startingTime: true },
+        });
+        if (!current) throw new RejectedEvent('NO_ACTIVE_TRIP');
+        if (current.status !== 'on_road' && current.status !== 'ready') {
+          throw new RejectedEvent('TRIP_NOT_READY');
+        }
+        const stale = await this.shouldMarkStale(tx, event, current.id);
+        await this.recordEvent(tx, me, event, current.id);
+        if (current.status === 'ready') {
+          await tx.trip.update({
+            where: { id: current.id },
+            data: { status: 'on_road', startingTime: current.startingTime ?? happenedAt },
+          });
+        }
+        return { stale, notifications: [] };
+      }
+
+      case 'END_TRIP': {
+        const found =
+          (await this.lookupTripForDriver(tx, me.id, event.tripId ?? null)) ??
+          (await this.activeTripForDriver(me.id, tx));
+        if (!found) throw new RejectedEvent('NO_ACTIVE_TRIP');
+        const current = await tx.trip.findUnique({
+          where: { id: found.id },
+          select: { id: true, status: true, endingTime: true, stops: { select: { status: true } } },
+        });
+        if (!current) throw new RejectedEvent('NO_ACTIVE_TRIP');
+        if (current.status !== 'on_road' && current.status !== 'completed') {
+          throw new RejectedEvent('TRIP_NOT_READY');
+        }
+        if (current.stops.some((stop) => !stopIsDone(stop.status))) {
+          throw new RejectedEvent('TRIP_NOT_READY');
+        }
+        const stale = await this.shouldMarkStale(tx, event, current.id);
+        await this.recordEvent(tx, me, event, current.id);
+        if (current.status === 'on_road') {
+          await tx.trip.update({
+            where: { id: current.id },
+            data: { status: 'completed', endingTime: current.endingTime ?? happenedAt },
+          });
+        }
         return { stale, notifications: [] };
       }
 

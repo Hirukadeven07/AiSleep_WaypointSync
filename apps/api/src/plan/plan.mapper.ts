@@ -62,6 +62,7 @@ const asDepot = (id: string) => id as Depot;
 export function toOutlet(store: OrderRow['store']): Outlet {
   return {
     id: store.id,
+    name: store.displayName ?? undefined,
     brand: store.brand,
     district: store.district.name,
     depot: asDepot(store.depotId),
@@ -90,6 +91,7 @@ export function toStopView(row: OrderRow): StopView {
 export function toVehicle(row: VehicleRow): Vehicle {
   return {
     id: row.id,
+    name: row.numberPlate ?? undefined,
     type: row.type,
     temp: row.temp,
     weightCapKg: row.weightCapKg,

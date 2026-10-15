@@ -46,14 +46,14 @@ describe("Sehara's dispatch work (e2e)", () => {
       await prisma.district.create({
         data: {
           name: `SH District ${Date.now()}`,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           depotToDistrictKm: 20,
           depotToDistrictMin: 30,
           interStopKm: 3,
           interStopMin: 10,
         },
       })
-    ).id;
+    ).name;
     if (
       !(await prisma.serviceAllowance.findUnique({
         where: { brand_dockType: { brand: 'Fresh', dockType: 'street' } },
@@ -71,7 +71,7 @@ describe("Sehara's dispatch work (e2e)", () => {
           displayName: `Store ${id}`,
           brand: 'Fresh',
           districtId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: 540,
           windowCloseMin: 900,
@@ -86,7 +86,7 @@ describe("Sehara's dispatch work (e2e)", () => {
         data: {
           id,
           numberPlate: id,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           type: 'truck',
           temp: 'ambient',
           weightCapKg: 3000,
@@ -107,7 +107,7 @@ describe("Sehara's dispatch work (e2e)", () => {
       const t = await prisma.trip.create({
         data: {
           vehicleId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           brand: 'Fresh',
           districtId,
           serviceDate: date(DAY),
@@ -216,7 +216,7 @@ describe("Sehara's dispatch work (e2e)", () => {
       await prisma.user.deleteMany({ where: { loginId: STORE_LOGIN } });
       await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
-      await prisma.district.deleteMany({ where: { id: districtId } });
+      await prisma.district.deleteMany({ where: { name: districtId } });
       if (addedAllowance) {
         await prisma.serviceAllowance.deleteMany({ where: { brand: 'Fresh', dockType: 'street' } });
       }

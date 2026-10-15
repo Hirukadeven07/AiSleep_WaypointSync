@@ -37,6 +37,19 @@ describe('auth (e2e)', () => {
     expect(cookie).toContain('ws_session=');
     expect(cookie).toContain('HttpOnly');
     await agent.get('/api/me').expect(200);
+
+    // The account card's details.
+    const profile = (await agent.get('/api/me/profile').expect(200)).body;
+    expect(profile).toMatchObject({
+      loginId: 'nimal',
+      role: 'dispatcher',
+      depot: { id: 'depo1' },
+      store: null,
+    });
+    expect(Date.parse(profile.signedInAt)).toBeLessThanOrEqual(
+      Date.parse(profile.sessionExpiresAt),
+    );
+    await request(app.getHttpServer()).get('/api/me/profile').expect(401);
   });
 
   it('rejects a wrong password', async () => {
@@ -46,12 +59,32 @@ describe('auth (e2e)', () => {
       .expect(401);
   });
 
+  it('unlocks a dock with the depot dock password, not a loader ID', async () => {
+    const dock = request.agent(app.getHttpServer());
+    const res = await dock
+      .post('/api/auth/login')
+      .send({ role: 'loader', secret: '123456', depotId: 'depo1' })
+      .expect(200);
+    expect(res.body.home).toBe('/dock');
+    expect((await dock.get('/api/me').expect(200)).body).toMatchObject({
+      role: 'loader',
+      depotId: 'depo1',
+    });
+    for (const body of [
+      { role: 'loader', secret: '654321', depotId: 'depo1' },
+      { role: 'loader', secret: '123456' },
+      { role: 'loader', secret: '123456', depotId: 'no-such-depot' },
+    ]) {
+      await request(app.getHttpServer()).post('/api/auth/login').send(body).expect(401);
+    }
+  });
+
   it('forbids a driver from a dispatcher route', async () => {
     const agent = request.agent(app.getHttpServer());
     await agent
       .post('/api/auth/login')
       .send({ role: 'driver', loginId: 'kasun', secret: '1234' })
       .expect(200);
-    await agent.get('/api/orders').expect(403);
+    await agent.get('/api/plan').expect(403);
   });
 });

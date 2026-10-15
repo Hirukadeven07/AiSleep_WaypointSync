@@ -1,31 +1,24 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { rememberedLoginId } from '@/lib/roles';
 import {
   CheckRow,
   Field,
   FormError,
-  InputBox,
   Keypad,
   SkylinePhoto,
   SubmitButton,
   SwitchRole,
-  TextInput,
 } from './parts';
 import { useSignIn } from './useSignIn';
+import { DEPOTS } from '@/lib/depots';
 
-const DEPOTS = ['Peliyagoda', 'Kandy'];
 const CODE_LENGTH = 6;
 
 export function LoaderLogin() {
-  const { signIn, busy, error, clearError } = useSignIn();
-  const [depotId, setDepotId] = useState(DEPOTS[0]!);
-  const [loginId, setLoginId] = useState('');
-  useEffect(() => {
-    setLoginId((cur) => cur || (rememberedLoginId('loader') ?? ''));
-  }, []);
+  const { signIn, busy, error } = useSignIn();
+  const [depotId, setDepotId] = useState(DEPOTS[0]!.id);
   const [code, setCode] = useState('');
   const [keep, setKeep] = useState(true);
 
@@ -34,9 +27,9 @@ export function LoaderLogin() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    // The API identifies a loader by id and depot. The dock password is sent along so the
-    // server can start enforcing it without another client change.
-    void signIn({ role: 'loader', loginId: loginId.trim(), depotId, ...(code ? { secret: code } : {}) }, keep);
+    // The depot and its shared dock password. Each loader confirms their own ID and PIN later, when
+    // they start loading a truck.
+    void signIn({ role: 'loader', depotId, secret: code }, keep);
   }
 
   return (
@@ -45,17 +38,17 @@ export function LoaderLogin() {
         <SkylinePhoto variant="panel" />
         <div className="relative flex items-center gap-3">
           <img alt="" src="/landing/logo-mark.svg" className="size-[39.6px]" />
-          <p className="text-[20px] font-semibold text-bg">Waypoint Sync</p>
+          <p className="text-[20px] font-semibold text-on-primary">Waypoint Sync</p>
         </div>
         <div className="flex-1" />
-        <h2 className="relative text-[32px] font-semibold leading-[1.15] text-bg md:text-[40px] md:leading-[46px]">
+        <h2 className="relative text-[32px] font-semibold leading-[1.15] text-on-primary md:text-[40px] md:leading-[46px]">
           Dock login
         </h2>
         <p className="relative text-[15px] leading-[22px] text-sand">
-          Shared tablet at the loading dock. Everyone on the loader team knows this password.
+          Shared tablet at the loading dock. Unlock it with the depot's dock password; each loader confirms their own ID and PIN when they start a truck.
         </p>
         <div className="relative">
-          <span className="inline-flex rounded-pill border border-slate px-4 py-2 text-[13px] font-medium text-bg">
+          <span className="inline-flex rounded-pill border border-slate px-4 py-2 text-[13px] font-medium text-on-primary">
             Loader
           </span>
         </div>
@@ -69,40 +62,24 @@ export function LoaderLogin() {
           <Field label="Depot">
             <div className="flex w-full gap-[10px]" role="radiogroup" aria-label="Depot">
               {DEPOTS.map((d) => {
-                const on = d === depotId;
+                const on = d.id === depotId;
                 return (
                   <button
-                    key={d}
+                    key={d.id}
                     type="button"
                     role="radio"
                     aria-checked={on}
-                    onClick={() => setDepotId(d)}
+                    onClick={() => setDepotId(d.id)}
                     className={`flex flex-1 items-center gap-[10px] rounded-note px-[14px] py-3 text-left ${
                       on ? 'border-2 border-slate bg-info-tint' : 'border-2 border-transparent bg-bg'
                     }`}
                   >
                     <Icon name="pin" size={18} className="text-slate" />
-                    <span className="text-[15px] font-bold text-ink">{d}</span>
+                    <span className="text-[15px] font-bold text-ink">{d.name}</span>
                   </button>
                 );
               })}
             </div>
-          </Field>
-
-          <Field label="Loader ID">
-            <InputBox tone="tint">
-              <TextInput
-                value={loginId}
-                onChange={(e) => {
-                  setLoginId(e.target.value);
-                  clearError();
-                }}
-                autoCapitalize="none"
-                autoComplete="username"
-                required
-                className="text-[16px] font-medium"
-              />
-            </InputBox>
           </Field>
 
           <Field label="Dock password">
@@ -123,7 +100,7 @@ export function LoaderLogin() {
             Keep this dock unlocked for the shift
           </CheckRow>
           <FormError message={error} />
-          <SubmitButton busy={busy} disabled={!loginId.trim()} busyLabel="Unlocking…" className="py-[15px] text-[16px]">
+          <SubmitButton busy={busy} disabled={code.length !== CODE_LENGTH} busyLabel="Unlocking…" className="py-[15px] text-[16px]">
             Unlock dock
           </SubmitButton>
         </form>

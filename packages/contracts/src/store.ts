@@ -2,7 +2,10 @@ import type { Brand, ItemType, OrderStatus, StopStatus } from './status';
 import type { OrderLine, StockLevel } from './order';
 import type { FlagType } from './dock';
 
-/** Orders for tomorrow are refused from 16:00 Asia/Colombo. */
+/**
+ * At 16:00 Asia/Colombo the order day rolls forward. Before that, an order is for today.
+ * From 16:00 it is for the next day, and the store can keep ordering.
+ */
 export const ORDER_CUTOFF_MIN = 16 * 60;
 
 /**
@@ -63,6 +66,13 @@ export interface StoreIssue {
   qty: number | null;
   reason: string;
   driverDecision: 'pending' | 'accepted' | 'rejected';
+  /** False until a replacement of this item is ordered, or the flag is marked solved. */
+  resolveStatus: boolean;
+}
+
+/** One flagged line for this store, including when it was raised. */
+export interface StoreFlag extends StoreIssue {
+  raisedAt: string;
 }
 
 /** One stop on the trip for the store's progress strip; `isYou` marks this store's stop. */
@@ -107,10 +117,14 @@ export interface StoreHome {
   cutoffMin: number;
   nowMin: number;
   today: string;
+  /** The day a new order is dated: today before 16:00, the next day from 16:00. */
+  orderDate: string;
   delivery: StoreDelivery | null;
   nextOrder: StoreOrderView | null;
   deferral: StoreOrderView | null;
   unreadNotices: number;
+  /** Flags for this store that are still unresolved. */
+  openFlagCount: number;
   phones: { label: 'shop' | 'manager' | 'warehouse'; phoneNo: string }[];
 }
 
@@ -123,10 +137,19 @@ export interface PlaceOrderRequest {
   urgentNote?: string;
 }
 
+/** How many units of one line are missing, damaged, or the wrong quantity. */
+export interface ReceiptIssueQty {
+  type: FlagType;
+  qty: number;
+}
+
 export interface ReceiptLine {
   orderLineId: string;
   receivedQty: number;
+  /** One problem for the whole short count. Ignored when `issues` is sent. */
   issue?: FlagType;
+  /** Separate counts, so one line can be partly missing and partly damaged. */
+  issues?: ReceiptIssueQty[];
 }
 
 export interface ReceiptRequest {

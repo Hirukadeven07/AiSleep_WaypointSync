@@ -2,6 +2,93 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme tokens (tailwind.config.ts reads them). Light is the Figma; dark keeps the same roles. */
+:root {
+  color-scheme: light;
+  --c-ink: 13 27 42;
+  --c-primary: 27 38 59;
+  --c-slate: 65 90 119;
+  --c-muted: 91 107 127;
+  --c-mist: 201 209 218;
+  --c-border: 227 231 236;
+  --c-bg: 244 246 248;
+  --c-faint: 148 163 184;
+  --c-hairline: 238 241 244;
+  --c-surface: 255 255 255;
+  --c-text: 13 27 42;
+  --c-olive-ink: 107 115 64;
+  --c-olive: 195 202 146;
+  --c-olive-tint: 230 233 204;
+  --c-success: 94 125 47;
+  --c-success-tint: 237 240 216;
+  --c-warning: 194 124 14;
+  --c-warning-tint: 247 236 214;
+  --c-danger: 197 48 48;
+  --c-danger-tint: 248 227 227;
+  --c-info: 65 90 119;
+  --c-info-tint: 225 232 240;
+  --c-fresh: 107 115 64;
+  --c-fresh-tint: 230 233 204;
+  --c-style: 164 90 107;
+  --c-style-tint: 237 220 224;
+  --c-tech: 140 122 85;
+  --c-tech-tint: 239 230 211;
+  --c-chilled: 43 138 158;
+  --c-chilled-tint: 221 239 242;
+  --c-banner: 236 239 243;
+  --c-peek: 217 225 234;
+  --c-sage: 220 227 220;
+  --c-wash: 247 249 251;
+  --c-danger-wash: 252 241 241;
+  --c-danger-line: 232 180 180;
+  --c-olive-wash: 243 245 230;
+  --c-blue: 59 110 168;
+  --c-quiet: 110 123 138;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --c-ink: 230 235 241;
+  --c-primary: 74 106 154;
+  --c-slate: 159 182 209;
+  --c-muted: 154 168 184;
+  --c-mist: 58 74 94;
+  --c-border: 38 54 74;
+  --c-bg: 14 22 33;
+  --c-faint: 107 122 140;
+  --c-hairline: 31 43 58;
+  --c-surface: 22 33 48;
+  --c-text: 230 235 241;
+  --c-olive-ink: 143 154 82;
+  --c-olive: 140 148 85;
+  --c-olive-tint: 46 50 28;
+  --c-success: 122 154 63;
+  --c-success-tint: 38 48 26;
+  --c-warning: 212 138 26;
+  --c-warning-tint: 58 45 20;
+  --c-danger: 224 72 72;
+  --c-danger-tint: 61 28 28;
+  --c-info: 159 182 209;
+  --c-info-tint: 29 42 58;
+  --c-fresh: 176 186 120;
+  --c-fresh-tint: 46 50 28;
+  --c-style: 208 133 150;
+  --c-style-tint: 58 34 40;
+  --c-tech: 196 172 120;
+  --c-tech-tint: 53 44 28;
+  --c-chilled: 72 176 198;
+  --c-chilled-tint: 22 51 58;
+  --c-banner: 28 39 53;
+  --c-peek: 34 48 68;
+  --c-sage: 31 42 34;
+  --c-wash: 19 29 41;
+  --c-danger-wash: 42 23 23;
+  --c-danger-line: 107 48 48;
+  --c-olive-wash: 31 35 20;
+  --c-blue: 106 156 216;
+  --c-quiet: 138 151 166;
+}
+
 html {
   scroll-behavior: smooth;
 }

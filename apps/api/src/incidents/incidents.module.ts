@@ -8,5 +8,6 @@ import { IncidentsService } from './incidents.service';
   imports: [NotificationsModule, PlanModule],
   controllers: [IncidentsController],
   providers: [IncidentsService],
+  exports: [IncidentsService],
 })
 export class IncidentsModule {}

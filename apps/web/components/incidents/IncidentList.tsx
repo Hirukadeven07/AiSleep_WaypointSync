@@ -8,6 +8,7 @@ const KIND_TAG: Record<IncidentKind, { label: string; text: string }> = {
   quiet_driver: { label: 'Driver quiet', text: 'text-warning' },
   wait_timeout: { label: 'Long wait', text: 'text-warning' },
   missing_items: { label: 'Missing items', text: 'text-warning' },
+  sos: { label: 'SOS', text: 'text-danger' },
 };
 const BRAND_TEXT: Record<Brand, string> = {
   Fresh: 'text-fresh',
@@ -15,12 +16,12 @@ const BRAND_TEXT: Record<Brand, string> = {
   Tech: 'text-tech',
 };
 
-/** Card colours: an active breakdown is red, anything else active is amber, a resolved one is grey. */
+/** Card colours: an active breakdown or SOS is red, anything else active is amber, a resolved one is grey. */
 export function toneOf(i: Pick<IncidentSummary, 'kind' | 'state'>) {
   if (i.state === 'resolved') {
     return { card: 'bg-bg', border: 'border-success', dot: 'bg-success', tint: 'bg-success-tint' };
   }
-  return i.kind === 'breakdown'
+  return i.kind === 'breakdown' || i.kind === 'sos'
     ? { card: 'bg-danger-tint', border: 'border-danger', dot: 'bg-danger', tint: 'bg-danger-tint' }
     : {
         card: 'bg-warning-tint',
@@ -72,7 +73,7 @@ function Card({
         ) : (
           <>
             <Pill className={kind.text}>{kind.label}</Pill>
-            <Pill className={BRAND_TEXT[i.brand]}>{i.brand}</Pill>
+            {i.brand && <Pill className={BRAND_TEXT[i.brand]}>{i.brand}</Pill>}
             {i.stopsAffected != null && (
               <Pill className="text-ink">
                 {i.stopsAffected} {i.stopsAffected === 1 ? 'stop' : 'stops'} affected

@@ -5,12 +5,14 @@ import type { StoreHome } from '@waypoint/contracts';
 import { api } from '@/lib/api';
 import { formatMinutes } from '@/lib/clock';
 import { usePoll } from '@/lib/poll';
+import { useOnStoreRefresh } from '@/components/store/settings';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { StatusChip } from '@/components/ui/StatusChip';
 import {
   DeferralCard,
   HandoffTimeline,
+  TruckTracker,
   IssueList,
   PageTitle,
   SPLIT,
@@ -22,7 +24,8 @@ import {
 
 /** S1: delivery window, order cutoff countdown, today's delivery and any deferral. */
 export default function StoreHomePage() {
-  const { data, error } = usePoll(() => api<StoreHome>('/store/home'), 15_000);
+  const { data, error, refresh } = usePoll(() => api<StoreHome>('/store/home'), 15_000);
+  useOnStoreRefresh(refresh);
   const nowMin = useServerMinutes(data?.nowMin);
 
   if (!data) {
@@ -36,7 +39,7 @@ export default function StoreHomePage() {
     );
   }
 
-  const open = nowMin !== undefined && nowMin < data.cutoffMin;
+  const forToday = data.orderDate === data.today;
   const left = nowMin !== undefined ? data.cutoffMin - nowMin : 0;
   const canReceive = data.delivery && ['arrived', 'waiting'].includes(data.delivery.status);
 
@@ -55,15 +58,15 @@ export default function StoreHomePage() {
               </p>
             </div>
             <div
-              className={`rounded-card p-md ${open ? (left <= 60 ? 'bg-warning-tint' : 'bg-surface') : 'bg-border'}`}
+              className={`rounded-card p-md ${forToday ? (left <= 60 ? 'bg-warning-tint' : 'bg-surface') : 'bg-surface'}`}
             >
               <p className="text-caption text-muted">
-                Order cutoff {formatMinutes(data.cutoffMin)}
+                {forToday ? `Order cutoff ${formatMinutes(data.cutoffMin)}` : 'Ordering for'}
               </p>
               <p
-                className={`text-title ${open ? (left <= 60 ? 'text-warning' : 'text-ink') : 'text-muted'}`}
+                className={`text-title ${forToday && left <= 60 ? 'text-warning' : 'text-ink'}`}
               >
-                {open ? `${formatDuration(left)} left` : 'Ordering closed'}
+                {forToday ? `${formatDuration(left)} left` : formatDate(data.orderDate)}
               </p>
             </div>
           </div>
@@ -80,17 +83,15 @@ export default function StoreHomePage() {
               <p className="text-label text-muted">
                 {data.nextOrder
                   ? `${formatDate(data.nextOrder.deliveryDate)} · ${data.nextOrder.units} units · ${data.nextOrder.status}`
-                  : 'Nothing ordered for tomorrow yet.'}
+                  : 'Nothing ordered today yet.'}
               </p>
             </div>
-            {open && (
-              <Link
-                href="/store/order"
-                className="shrink-0 rounded-pill bg-olive px-md py-sm text-label font-semibold text-ink"
-              >
-                Order
-              </Link>
-            )}
+            <Link
+              href="/store/order"
+              className="shrink-0 rounded-pill bg-olive px-md py-sm text-label font-semibold text-ink"
+            >
+              Order
+            </Link>
           </div>
 
           {data.phones.length > 0 && (
@@ -143,6 +144,7 @@ export default function StoreHomePage() {
                   {data.delivery.driverName ? ` · ${data.delivery.driverName}` : ''} ·{' '}
                   {data.delivery.lines.length} lines
                 </p>
+                <TruckTracker delivery={data.delivery} />
                 <HandoffTimeline delivery={data.delivery} />
                 <IssueList delivery={data.delivery} />
               </>

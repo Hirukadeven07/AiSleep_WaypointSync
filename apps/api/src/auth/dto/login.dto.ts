@@ -5,8 +5,10 @@ export class LoginDto implements LoginRequest {
   @IsIn(['dispatcher', 'store', 'loader', 'driver'])
   role: Role;
 
+  /** Not used for the dock sign-in (loader): the depot and its dock password identify the tablet. */
+  @IsOptional()
   @IsString()
-  loginId: string;
+  loginId?: string;
 
   @IsOptional()
   @IsString()

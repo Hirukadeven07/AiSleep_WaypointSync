@@ -47,6 +47,15 @@ const CHANGED = 'ws:store-settings';
 export const STORE_REFRESH = 'ws:store-refresh';
 export const requestStoreRefresh = () => window.dispatchEvent(new Event(STORE_REFRESH));
 
+/** Reloads a store screen as soon as a notice arrives, instead of waiting for the next poll. */
+export function useOnStoreRefresh(refresh: () => void) {
+  useEffect(() => {
+    const run = () => refresh();
+    window.addEventListener(STORE_REFRESH, run);
+    return () => window.removeEventListener(STORE_REFRESH, run);
+  }, [refresh]);
+}
+
 export function readLocal(key: string): string | null {
   try {
     return window.localStorage.getItem(key);

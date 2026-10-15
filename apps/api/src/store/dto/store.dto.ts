@@ -15,6 +15,7 @@ import {
 import type {
   FlagType,
   PlaceOrderRequest,
+  ReceiptIssueQty,
   ReceiptLine,
   ReceiptRequest,
   StockLevel,
@@ -53,6 +54,16 @@ export class PlaceOrderDto implements PlaceOrderRequest {
   urgentNote?: string;
 }
 
+class ReceiptIssueDto implements ReceiptIssueQty {
+  @IsIn(['missing', 'damaged', 'wrong_quantity'])
+  type: FlagType;
+
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  qty: number;
+}
+
 class ReceiptLineDto implements ReceiptLine {
   @IsString()
   orderLineId: string;
@@ -64,6 +75,13 @@ class ReceiptLineDto implements ReceiptLine {
   @IsOptional()
   @IsIn(['missing', 'damaged', 'wrong_quantity'])
   issue?: FlagType;
+
+  /** Counts per problem. Together they cannot exceed what was ordered. */
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => ReceiptIssueDto)
+  @ArrayMinSize(1)
+  issues?: ReceiptIssueDto[];
 }
 
 export class ReceiptDto implements ReceiptRequest {

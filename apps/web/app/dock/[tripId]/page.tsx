@@ -16,6 +16,7 @@ import { FlagSheet } from '@/components/dock/FlagSheet';
 import { JobNote } from '@/components/dock/JobNote';
 import { LoadSummary } from '@/components/dock/LoadSummary';
 import { PlanLockBanner } from '@/components/dock/PlanLockBanner';
+import { StartLoadingSheet } from '@/components/dock/StartLoadingSheet';
 
 const FLAG_LABEL = { missing: 'Missing', damaged: 'Damaged', wrong_quantity: 'Wrong qty' } as const;
 
@@ -62,6 +63,8 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
   const { data, error, loading, refresh } = usePoll(() => api<LoadSheet>(`/loads/${tripId}`));
   const [sheet, setSheet] = useState<LoadSheet>();
   const [busy, setBusy] = useState(false);
+  // Open while loaders add themselves (ID and PIN) to start loading or join the load.
+  const [adding, setAdding] = useState(false);
   const [flagging, setFlagging] = useState<{ stopId: string; line: OrderLine }>();
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'danger' | 'warning' }>();
   const clearToast = useCallback(() => setToast(undefined), []);
@@ -116,7 +119,6 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
   const locked = sheet.lock.locked;
   const added = new Set(sheet.lock.added);
   const allDone = allLines.length > 0 && doneCount === allLines.length;
-  const addedNames = sheet.loadOrder.filter((s) => added.has(s.stopId)).map((s) => s.storeName);
 
   return (
     <section className="space-y-md pb-[96px]">
@@ -140,8 +142,12 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
       {locked && (
         <PlanLockBanner
           lock={sheet.lock}
-          addedNames={addedNames}
           busy={busy}
+          onTakenOff={(orderId) =>
+            run(() =>
+              api<LoadSheet>(`/loads/${tripId}/taken-off`, { method: 'POST', body: { orderId } }),
+            )
+          }
           onAcknowledge={() =>
             run(
               () => api<LoadSheet>(`/loads/${tripId}/ack`, { method: 'POST' }),
@@ -158,12 +164,8 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
             The last stop goes in first, so the first delivery is at the doors. Start when you are
             at the truck.
           </p>
-          <Button
-            className="w-full"
-            disabled={busy}
-            onClick={() => run(() => api<LoadSheet>(`/loads/${tripId}/start`, { method: 'POST' }))}
-          >
-            {busy ? 'Starting…' : 'Start loading'}
+          <Button className="w-full" disabled={busy} onClick={() => setAdding(true)}>
+            Start loading
           </Button>
         </div>
       ) : (
@@ -177,6 +179,14 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
               Loading: {sheet.session.loaderNames.join(', ')}
             </p>
           )}
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => setAdding(true)}
+            className="mt-xs text-label font-semibold text-slate disabled:opacity-50"
+          >
+            + Add a loader
+          </button>
         </div>
       )}
 
@@ -189,7 +199,8 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
             key={stop.stopId}
             stop={stop}
             loadIndex={i + 1}
-            isNew={added.has(stop.stopId)}
+            // Added by a plan change: marked from the lock until departure.
+            isNew={stop.isNew || added.has(stop.stopId)}
             ticks={ticks}
             flagged={flaggedLines}
             onTick={toggle}
@@ -231,6 +242,16 @@ export default function LoadChecklistPage({ params }: { params: { tripId: string
         </div>
       )}
 
+      {adding && (
+        <StartLoadingSheet
+          tripId={tripId}
+          title={started ? 'Add loaders' : 'Start loading'}
+          initialNames={sheet.session?.loaderNames ?? []}
+          onSheet={setSheet}
+          onClose={() => setAdding(false)}
+          onContinue={() => setAdding(false)}
+        />
+      )}
       {flagging && (
         <FlagSheet
           stopId={flagging.stopId}

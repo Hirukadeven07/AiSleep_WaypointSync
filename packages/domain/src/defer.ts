@@ -4,6 +4,7 @@
  */
 import { Reason } from './reasons';
 import type { Order, Outlet, RuleIssue } from './types';
+import { outletName } from './names';
 
 export type DeferInput = {
   order: Order;
@@ -30,7 +31,7 @@ export function deferOrder(input: DeferInput): DeferResult {
     warnings.push({
       code: Reason.REPEAT_SKIP,
       severity: 'warn',
-      message: `Outlet ${input.outlet.id} was deferred on the previous run.`,
+      message: `${outletName(input.outlet)} was moved to a later day on the previous run too.`,
     });
   }
 

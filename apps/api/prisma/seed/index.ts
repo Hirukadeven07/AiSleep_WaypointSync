@@ -13,6 +13,7 @@ import { seedTeamErd } from './team-erd';
 import { seedDispatchDemo } from './dispatch-demo';
 import { seedDepotOrders } from './depot-orders';
 import { seedDepotTrips } from './depot-trips';
+import { linkDemoDriver, seedLicenceExpiry, seedSpineDemo } from './spine-demo';
 
 const prisma = new PrismaClient();
 
@@ -28,7 +29,7 @@ async function truncateAll() {
 
 async function seedUsers() {
   const store = await prisma.store.findFirst({
-    where: { depotId: 'Peliyagoda', brand: 'Fresh' },
+    where: { depotId: 'depo1', brand: 'Fresh' },
     orderBy: { id: 'asc' },
   });
   if (!store)
@@ -39,7 +40,7 @@ async function seedUsers() {
       loginId: 'nimal',
       role: 'dispatcher' as const,
       name: 'Nimal (Dispatcher)',
-      depotId: 'Peliyagoda',
+      depotId: 'depo1',
       passwordHash: await argon2.hash('waypoint'),
     },
     {
@@ -53,13 +54,15 @@ async function seedUsers() {
       loginId: 'sampath',
       role: 'loader' as const,
       name: 'Sampath (Loader)',
-      depotId: 'Peliyagoda',
+      depotId: 'depo1',
+      // His own PIN: he confirms himself with it at "Start loading".
+      pinHash: await argon2.hash('1234'),
     },
     {
       loginId: 'kasun',
       role: 'driver' as const,
       name: 'Kasun (Driver)',
-      depotId: 'Peliyagoda',
+      depotId: 'depo1',
       pinHash: await argon2.hash('1234'),
     },
   ];
@@ -172,7 +175,7 @@ async function seedFleetDrivers() {
   const passwordHash = await argon2.hash('waypont');
   const depots = await prisma.depot.findMany({ select: { id: true } });
   const depotIds = depots.map((d) => d.id);
-  const fallbackDepot = vehicles[0]?.depotId ?? depotIds[0] ?? 'Peliyagoda';
+  const fallbackDepot = vehicles[0]?.depotId ?? depotIds[0] ?? 'depo1';
   const activeCount = FLEET_DRIVER_COUNT - FLEET_DRIVER_LEAVERS;
 
   await prisma.vehicle.updateMany({ data: { driverId: null } });
@@ -191,7 +194,6 @@ async function seedFleetDrivers() {
         role: 'driver',
         name,
         depotId,
-        phone,
         passwordHash,
         pinHash,
       },
@@ -200,7 +202,6 @@ async function seedFleetDrivers() {
         role: 'driver',
         name,
         depotId,
-        phone,
         passwordHash,
         pinHash,
       },
@@ -246,7 +247,10 @@ async function seedFleetDrivers() {
 
 /**
  * 100 loaders per depot (L001… Peliyagoda, then Kandy). Last 10 at each depot have left.
- * Login is loader id + depot; dock keypad is not checked. sampath stays as the demo login.
+ * A loader does not sign in on their own: the dock tablet signs in with the depot's dock password
+ * (seedDockPasswords), and each loader confirms with their loader id at "Start loading". Fleet
+ * loaders have no PIN, so the PIN box stays blank; a loader can set one in Account settings, which
+ * the next seed clears again. sampath stays as the demo loader with PIN 1234.
  */
 async function seedFleetLoaders() {
   const depots = await prisma.depot.findMany({ select: { id: true }, orderBy: { id: 'desc' } });
@@ -262,11 +266,10 @@ async function seedFleetLoaders() {
       const active = i <= LOADERS_PER_DEPOT - LOADER_LEAVERS_PER_DEPOT;
       const given = LOADER_NAMES[(n - 1) % LOADER_NAMES.length]!;
       const name = personName(given, n);
-      const phone = `076${String(3000000 + n).slice(-7)}`;
       const user = await prisma.user.upsert({
         where: { loginId },
-        update: { role: 'loader', name, depotId: depot.id, phone },
-        create: { loginId, role: 'loader', name, depotId: depot.id, phone },
+        update: { role: 'loader', name, depotId: depot.id, pinHash: null },
+        create: { loginId, role: 'loader', name, depotId: depot.id, pinHash: null },
       });
       const joinDate = new Date(Date.UTC(2020, 0, 1 + ((n * 7) % 1200)));
       await prisma.loader.upsert({
@@ -298,6 +301,22 @@ async function seedFleetLoaders() {
   );
 }
 
+/**
+ * The shared dock password of each depot, stored hashed on the Depot (6 digits on the dock keypad).
+ * depo1 Peliyagoda 123456, depo2 Kandy 654321; any other depot 123456. Set on every seed.
+ */
+async function seedDockPasswords() {
+  const depots = await prisma.depot.findMany({ select: { id: true } });
+  for (const depot of depots) {
+    const password = depot.id === 'depo2' ? '654321' : '123456';
+    await prisma.depot.update({
+      where: { id: depot.id },
+      data: { dockPasswordHash: await argon2.hash(password) },
+    });
+  }
+  console.log(`[seed] dock password set on ${depots.length} depots`);
+}
+
 /** One Peliyagoda truck out of service, with a reason and a return time tomorrow at 14:30 Colombo. */
 async function seedOutOfServiceDemo() {
   const colomboDate = new Intl.DateTimeFormat('en-CA', {
@@ -323,7 +342,7 @@ async function seedOutOfServiceDemo() {
       ? marked
       : await prisma.vehicle.findFirst({
           where: {
-            depotId: 'Peliyagoda',
+            depotId: 'depo1',
             id: { notIn: [...busyIds] },
             status: { not: 'on_road' },
           },
@@ -360,6 +379,13 @@ async function warnIfCsvEmpty() {
   }
 }
 
+/** Tomorrow's spine demo day, today's trips for the demo driver, and licence expiry dates. */
+async function seedDemoDay() {
+  await seedSpineDemo(prisma);
+  await linkDemoDriver(prisma);
+  await seedLicenceExpiry(prisma);
+}
+
 async function main() {
   const reset = process.env.SEED_RESET === '1';
   const dir = dataDir();
@@ -371,6 +397,9 @@ async function main() {
     await fillPlannerMinutes(prisma);
     await fillStoreLocations(prisma);
     await fillNumberPlates(prisma);
+    // The four demo logins are recreated on every seed, so a copied database always has them.
+    await seedDockPasswords();
+    await seedUsers();
     await seedOutletManagers();
     await seedFleetDrivers();
     await seedFleetLoaders();
@@ -379,12 +408,13 @@ async function main() {
     await seedOutOfServiceDemo();
     await seedDepotOrders(prisma);
     await seedDepotTrips(prisma);
+    await seedDemoDay();
     return;
   }
 
   for (const [id, name] of [
-    ['Peliyagoda', 'Peliyagoda Depot'],
-    ['Kandy', 'Kandy Depot'],
+    ['depo1', 'Peliyagoda'],
+    ['depo2', 'Kandy'],
   ]) {
     await prisma.depot.upsert({ where: { id }, update: { name }, create: { id, name } });
   }
@@ -396,6 +426,7 @@ async function main() {
   await fillNumberPlates(prisma);
   await warnIfCsvEmpty();
 
+  await seedDockPasswords();
   await seedUsers();
   await seedOutletManagers();
   await seedFleetDrivers();
@@ -406,6 +437,7 @@ async function main() {
   await seedOutOfServiceDemo();
   await seedDepotOrders(prisma);
   await seedDepotTrips(prisma);
+  await seedDemoDay();
   console.log('[seed] done');
 }
 

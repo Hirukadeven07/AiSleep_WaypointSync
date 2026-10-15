@@ -34,14 +34,14 @@ describe('plan board (e2e)', () => {
     const district = await prisma.district.create({
       data: {
         name: `PB District ${Date.now()}`,
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         depotToDistrictKm: 10,
         depotToDistrictMin: 20,
         interStopKm: 2,
         interStopMin: 6,
       },
     });
-    districtId = district.id;
+    districtId = district.name;
     for (const brand of ['Fresh', 'Style', 'Tech'] as const) {
       await prisma.serviceAllowance.upsert({
         where: { brand_dockType: { brand, dockType: 'street' } },
@@ -56,7 +56,7 @@ describe('plan board (e2e)', () => {
           displayName: `Store ${id}`,
           brand: 'Fresh',
           districtId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: 300,
           windowCloseMin: 600,
@@ -67,7 +67,7 @@ describe('plan board (e2e)', () => {
       data: [
         {
           id: 'PB-BUSY',
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           type: 'van',
           temp: 'ambient',
           weightCapKg: 1000,
@@ -78,7 +78,7 @@ describe('plan board (e2e)', () => {
         },
         {
           id: 'PB-FREE',
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           type: 'van',
           temp: 'ambient',
           weightCapKg: 1000,
@@ -116,7 +116,7 @@ describe('plan board (e2e)', () => {
     const trip = await prisma.trip.create({
       data: {
         vehicleId: 'PB-BUSY',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         brand: 'Fresh',
         districtId,
         serviceDate: date(DAY),
@@ -137,7 +137,7 @@ describe('plan board (e2e)', () => {
       await prisma.order.deleteMany({ where: { storeId: { in: STORES } } });
       await prisma.vehicle.deleteMany({ where: { id: { in: ['PB-BUSY', 'PB-FREE'] } } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
-      await prisma.district.deleteMany({ where: { id: districtId } });
+      await prisma.district.deleteMany({ where: { name: districtId } });
     }
     await app?.close();
   });
@@ -156,7 +156,7 @@ describe('plan board (e2e)', () => {
     const loader = request.agent(app.getHttpServer());
     await loader
       .post('/api/auth/login')
-      .send({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' })
+      .send({ role: 'loader', secret: '123456', depotId: 'depo1' })
       .expect(200);
     await loader.get(`/api/plan?date=${DAY}`).expect(403);
   });
@@ -176,7 +176,7 @@ describe('plan board (e2e)', () => {
     const agent = await dispatcher();
     const { body } = await agent.get(`/api/plan?date=${DAY}`).expect(200);
 
-    expect(body.depotId).toBe('Peliyagoda');
+    expect(body.depotId).toBe('depo1');
     expect(body.orders.map((o: { storeId: string }) => o.storeId)).toEqual(['PB-C']);
     expect(body.orders[0]).toMatchObject({
       movedCount: 1,

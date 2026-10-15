@@ -74,7 +74,7 @@ export function DriverBreak() {
           type="button"
           disabled={busy}
           onClick={() => void tap(b.end)}
-          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg disabled:opacity-60"
+          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-on-primary disabled:opacity-60"
         >
           End break and resume
         </button>
@@ -83,7 +83,7 @@ export function DriverBreak() {
           type="button"
           disabled={busy}
           onClick={() => void tap(b.start)}
-          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-bg disabled:opacity-60"
+          className="flex min-h-[56px] items-center justify-center rounded-pill bg-primary px-5 text-[17px] font-semibold text-on-primary disabled:opacity-60"
         >
           Start break
         </button>

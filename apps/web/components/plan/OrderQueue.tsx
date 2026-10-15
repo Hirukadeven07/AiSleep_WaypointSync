@@ -68,6 +68,17 @@ function OrderRow({ order, edit }: { order: PlanOrder; edit: PlanEdit }) {
           <p className="whitespace-nowrap text-[13px] font-semibold leading-[18px] text-ink">
             {order.storeName}
           </p>
+          {order.urgent && (
+            <span
+              title={order.urgentNote ?? undefined}
+              className="rounded-pill bg-danger-tint px-[9px] py-[3px] text-[12px] font-semibold leading-[15px] text-danger"
+            >
+              Urgent
+              {order.stockLevel
+                ? ` · ${order.stockLevel === 'out_of_stock' ? 'out of stock' : 'running low'}`
+                : ''}
+            </span>
+          )}
           {order.movedCount > 0 && (
             <span className="rounded-pill bg-surface px-[9px] py-[3px] text-[12px] font-semibold leading-[15px] text-warning">
               Moved {order.movedCount}x

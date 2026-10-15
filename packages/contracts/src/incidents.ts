@@ -1,8 +1,15 @@
 import type { Brand } from './status';
 
 export type IncidentKind =
-  'breakdown' | 'delay' | 'quiet_driver' | 'wait_timeout' | 'missing_items';
+  'breakdown' | 'delay' | 'quiet_driver' | 'wait_timeout' | 'missing_items' | 'sos';
 export type IncidentState = 'open' | 'acknowledged' | 'resolved';
+
+/** POST /incidents: an incident the dispatcher logs by hand on one of the depot's trips. */
+export interface LogIncidentRequest {
+  tripId: string;
+  type: 'breakdown' | 'delay' | 'quiet_driver' | 'wait_timeout';
+  note?: string;
+}
 
 export interface IncidentSummary {
   id: string;
@@ -10,7 +17,8 @@ export interface IncidentSummary {
   title: string;
   /** "Reported by Ruwan S. (driver) · 10:12 · 33 min ago", or the resolution for a resolved one. */
   line: string;
-  brand: Brand;
+  /** The trip's brand; null for an SOS from a driver with no trip. */
+  brand: Brand | null;
   state: IncidentState;
   /** "3 stops affected" for a trip that still has stops to deliver. */
   stopsAffected: number | null;
@@ -71,6 +79,12 @@ export interface IncidentDetail extends IncidentSummary {
   resolution: { title: string; text: string; tripId: string | null } | null;
   /** Whether a resolution can be chosen (a breakdown that is not resolved). */
   recoverable: boolean;
+  /** What "Notify store managers" sends, and to how many stores, shown before sending. */
+  notify: { message: string; stores: number } | null;
+  /** The dispatcher pressed Acknowledge (the trip carries on as it is). */
+  acknowledged: boolean;
+  /** Where an SOS was raised, when the driver's phone shared it. Null for everything else. */
+  location: { text: string; mapUrl: string } | null;
 }
 
 export interface ResolveRequest {

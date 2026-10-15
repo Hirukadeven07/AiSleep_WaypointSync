@@ -28,7 +28,7 @@ function Radio({ on }: { on: boolean }) {
 }
 
 /** Figma "Plan v2 / New trip": pick a run, a free vehicle, a brand and one or more districts. */
-export function NewTripModal({ edit }: { edit: PlanEdit }) {
+export function NewTripModal({ date, edit }: { date: string; edit: PlanEdit }) {
   const [options, setOptions] = useState<NewTripOptions | null>(null);
   const [run, setRun] = useState<1 | 2>(1);
   const [vehicleId, setVehicleId] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export function NewTripModal({ edit }: { edit: PlanEdit }) {
 
   useEffect(() => {
     let live = true;
-    api<NewTripOptions>('/plan/trips/options')
+    api<NewTripOptions>(`/plan/trips/options?date=${encodeURIComponent(date)}`)
       .then((o) => {
         if (!live) return;
         setOptions(o);
@@ -50,7 +50,7 @@ export function NewTripModal({ edit }: { edit: PlanEdit }) {
       live = false;
     };
     // The options load once, when the dialog opens.
-  }, []);
+  }, [date]);
 
   // Free vehicles first; the ones that cannot take this run follow, greyed out.
   const vehicles = [...(options?.vehicles[String(run) as '1' | '2'] ?? [])].sort(
@@ -90,7 +90,7 @@ export function NewTripModal({ edit }: { edit: PlanEdit }) {
     try {
       const trip = await api<PlanTrip>('/plan/trips', {
         method: 'POST',
-        body: { vehicleId: chosen, tripNumber: run, brand, districts },
+        body: { vehicleId: chosen, tripNumber: run, brand, districts, date },
       });
       await edit.reload();
       edit.closeModal();

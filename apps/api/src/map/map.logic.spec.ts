@@ -1,15 +1,52 @@
-import { fallbackDistricts, isOnRoad, lastVisited, locateLive, minutesLate, stopKind } from './map.logic';
+import {
+  circleRing,
+  distanceM,
+  fallbackDistricts,
+  headingBack,
+  insideDepotCircle,
+  isOnRoad,
+  lastVisited,
+  locateLive,
+  minutesLate,
+  stopKind,
+  vehiclePosition,
+} from './map.logic';
 
 const at = (iso: string) => new Date(iso);
+
+describe('depot circle', () => {
+  const depot = { lat: 6.9678, lng: 79.8832 };
+
+  it('treats a point inside 500 m as back at the depot', () => {
+    expect(insideDepotCircle({ lat: 6.97, lng: 79.884 }, depot)).toBe(true);
+    expect(distanceM(depot, { lat: 6.97, lng: 79.884 })).toBeLessThan(500);
+  });
+
+  it('keeps a point a few kilometres away outside the circle', () => {
+    expect(insideDepotCircle({ lat: 6.9271, lng: 79.8612 }, depot)).toBe(false);
+  });
+
+  it('closes the ring it draws around the yard', () => {
+    const ring = circleRing(depot.lat, depot.lng, 500);
+    expect(ring[0]).toEqual(ring[ring.length - 1]);
+    expect(ring.length).toBeGreaterThan(8);
+  });
+
+  it('calls the driver heading back only after every stop is done', () => {
+    expect(headingBack('on_road', ['delivered', 'confirmed'])).toBe(true);
+    expect(headingBack('on_road', ['delivered', 'upcoming'])).toBe(false);
+    expect(headingBack('completed', ['delivered'])).toBe(false);
+  });
+});
 
 describe('fallbackDistricts', () => {
   it('paints the west coast for Peliyagoda and the hill country for Kandy', () => {
     const rows = fallbackDistricts();
     const depot = (name: string) => rows.find((row) => row.name === name)?.depotId;
-    expect(depot('Colombo')).toBe('Peliyagoda');
-    expect(depot('Galle')).toBe('Peliyagoda');
-    expect(depot('Kandy')).toBe('Kandy');
-    expect(depot('Ratnapura')).toBe('Kandy');
+    expect(depot('Colombo')).toBe('depo1');
+    expect(depot('Galle')).toBe('depo1');
+    expect(depot('Kandy')).toBe('depo2');
+    expect(depot('Ratnapura')).toBe('depo2');
   });
 });
 
@@ -28,6 +65,20 @@ describe('lastVisited', () => {
   });
 });
 
+describe('vehiclePosition', () => {
+  it('uses the latest ping so a truck between shops is on the way', () => {
+    expect(vehiclePosition({ lat: 6.95, lng: 79.87 }, { lat: 6.93, lng: 79.84 })).toEqual({
+      lat: 6.95,
+      lng: 79.87,
+    });
+  });
+
+  it('falls back to the last confirmed stop when the phone has not pinged', () => {
+    expect(vehiclePosition(null, { lat: 6.93, lng: 79.84 })).toEqual({ lat: 6.93, lng: 79.84 });
+    expect(vehiclePosition(null, { lat: null, lng: null })).toBeNull();
+  });
+});
+
 describe('locateLive', () => {
   it('calls an on-road trip late only past the window threshold', () => {
     expect(
@@ -36,6 +87,15 @@ describe('locateLive', () => {
     expect(
       locateLive({ status: 'on_road', broke: false, allDone: false, lateMin: 5, staleMin: 2 }),
     ).toBe('late');
+  });
+
+  it('calls an on-road trip not synced after 5 quiet minutes', () => {
+    expect(
+      locateLive({ status: 'on_road', broke: false, allDone: false, lateMin: 0, staleMin: 4 }),
+    ).toBe('on_time');
+    expect(
+      locateLive({ status: 'on_road', broke: false, allDone: false, lateMin: 0, staleMin: 5 }),
+    ).toBe('not_synced');
   });
 
   it('prefers not-synced over late, and breakdown over both', () => {

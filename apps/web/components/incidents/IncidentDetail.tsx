@@ -199,6 +199,8 @@ export function IncidentDetail({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "Notify store managers" first shows what will be sent; a second tap sends it.
+  const [confirmNotify, setConfirmNotify] = useState(false);
 
   // A different incident starts from the best replacement again.
   useEffect(() => {
@@ -207,6 +209,7 @@ export function IncidentDetail({
     setDeferStopId(null);
     setReason('');
     setError(null);
+    setConfirmNotify(false);
   }, [d.id]);
   // The chosen vehicle can stop being free while the page is open.
   useEffect(() => {
@@ -259,7 +262,11 @@ export function IncidentDetail({
       <div className="flex shrink-0 items-center gap-[14px]">
         <span
           className={`flex size-[52px] shrink-0 items-center justify-center rounded-full ${tone.tint} ${
-            resolved ? 'text-success' : d.kind === 'breakdown' ? 'text-danger' : 'text-warning'
+            resolved
+              ? 'text-success'
+              : d.kind === 'breakdown' || d.kind === 'sos'
+                ? 'text-danger'
+                : 'text-warning'
           }`}
         >
           <Icon name="alert" size={22} />
@@ -280,49 +287,51 @@ export function IncidentDetail({
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row">
         <div className="flex min-w-0 flex-1 flex-col gap-[14px]">
-          <Section
-            title={stopsAllMet ? 'Affected stops · all windows still met' : 'Affected stops'}
-          >
-            <div className="flex flex-col gap-[6px]">
-              {d.stops.map((s) => {
-                const done = s.chip === 'Done';
-                return (
-                  <div
-                    key={s.id}
-                    className={`flex items-center gap-[10px] rounded-[12px] px-3 py-[10px] ${
-                      done ? 'bg-surface/60' : 'bg-surface'
-                    }`}
-                  >
-                    <p
-                      className={`min-w-px flex-1 text-[13px] leading-[18px] ${
-                        done ? 'font-medium text-muted' : 'font-semibold text-ink'
+          {d.kind !== 'sos' && (
+            <Section
+              title={stopsAllMet ? 'Affected stops · all windows still met' : 'Affected stops'}
+            >
+              <div className="flex flex-col gap-[6px]">
+                {d.stops.map((s) => {
+                  const done = s.chip === 'Done';
+                  return (
+                    <div
+                      key={s.id}
+                      className={`flex items-center gap-[10px] rounded-[12px] px-3 py-[10px] ${
+                        done ? 'bg-surface/60' : 'bg-surface'
                       }`}
                     >
-                      {s.storeName}
-                      {s.note && !done && (
-                        <span className="block text-[12px] font-normal leading-[17px] text-muted">
-                          {s.note}
-                        </span>
-                      )}
-                    </p>
-                    <p className="whitespace-nowrap text-[12px] leading-[17px] text-muted">
-                      {done && s.note ? s.note : s.windowText}
-                    </p>
-                    <span
-                      className={`flex items-center gap-[6px] whitespace-nowrap rounded-pill px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] ${
-                        s.chip.startsWith('New ETA') && s.tone === 'success'
-                          ? 'bg-info/[0.12] text-info'
-                          : CHIP[s.tone]
-                      }`}
-                    >
-                      <span aria-hidden className="size-[7px] rounded-full bg-current" />
-                      {s.chip}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </Section>
+                      <p
+                        className={`min-w-px flex-1 text-[13px] leading-[18px] ${
+                          done ? 'font-medium text-muted' : 'font-semibold text-ink'
+                        }`}
+                      >
+                        {s.storeName}
+                        {s.note && !done && (
+                          <span className="block text-[12px] font-normal leading-[17px] text-muted">
+                            {s.note}
+                          </span>
+                        )}
+                      </p>
+                      <p className="whitespace-nowrap text-[12px] leading-[17px] text-muted">
+                        {done && s.note ? s.note : s.windowText}
+                      </p>
+                      <span
+                        className={`flex items-center gap-[6px] whitespace-nowrap rounded-pill px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] ${
+                          s.chip.startsWith('New ETA') && s.tone === 'success'
+                            ? 'bg-info/[0.12] text-info'
+                            : CHIP[s.tone]
+                        }`}
+                      >
+                        <span aria-hidden className="size-[7px] rounded-full bg-current" />
+                        {s.chip}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+          )}
 
           {d.resolution && (
             <div className="flex shrink-0 flex-col gap-2">
@@ -340,7 +349,7 @@ export function IncidentDetail({
                 <div className="flex gap-2">
                   <Link
                     href="/dispatch/board"
-                    className="rounded-pill bg-primary px-4 py-2 text-[12px] font-semibold leading-4 text-bg"
+                    className="rounded-pill bg-primary px-4 py-2 text-[12px] font-semibold leading-4 text-on-primary"
                   >
                     View on dispatch board
                   </Link>
@@ -359,7 +368,62 @@ export function IncidentDetail({
             </div>
           )}
 
-          {!resolved && (
+          {d.kind === 'sos' && (
+            <Section
+              title={resolved ? 'SOS handled' : 'The driver needs help'}
+              className="bg-surface"
+            >
+              {d.location && (
+                <a
+                  href={d.location.mapUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-[10px] rounded-[14px] bg-wash p-[14px] text-[13px] font-semibold leading-[18px] text-ink"
+                >
+                  <Icon name="pin" size={16} className="shrink-0 text-slate" />
+                  <span className="min-w-px flex-1">Last shared position · {d.location.text}</span>
+                  <span className="text-slate">Open map</span>
+                </a>
+              )}
+              {!resolved && (
+                <div className="flex items-center gap-[10px] rounded-[14px] bg-wash p-[14px]">
+                  <Icon name="check" size={16} className="shrink-0 text-ink" />
+                  <div className="flex min-w-px flex-1 flex-col gap-px">
+                    <p className="text-[13px] font-semibold leading-[18px] text-ink">
+                      Call the driver, then mark it handled
+                    </p>
+                    <p className="text-[12px] leading-4 text-muted">
+                      It clears here, on Home and on the driver&apos;s phone. If the driver closes
+                      SOS first, it clears on its own.
+                    </p>
+                  </div>
+                  {d.details.driver?.phone && (
+                    <a
+                      href={`tel:${d.details.driver.phone}`}
+                      className="whitespace-nowrap rounded-pill border border-border bg-surface px-[14px] py-2 text-[12px] font-semibold leading-4 text-ink"
+                    >
+                      Call driver
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => run('close')}
+                    className="whitespace-nowrap rounded-pill bg-primary px-[14px] py-2 text-[12px] font-semibold leading-4 text-on-primary disabled:opacity-50"
+                  >
+                    Mark handled
+                  </button>
+                </div>
+              )}
+              {error && (
+                <p role="alert" className="text-[13px] font-medium text-danger">
+                  {error}
+                </p>
+              )}
+            </Section>
+          )}
+
+          {!resolved && d.kind !== 'sos' && (
             <Section
               title={d.recoverable ? 'How do you want to resolve this?' : 'What next?'}
               className="bg-surface"
@@ -439,8 +503,8 @@ export function IncidentDetail({
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
-                      disabled={busy}
-                      onClick={() => run('notify')}
+                      disabled={busy || !d.notify || d.notify.stores === 0}
+                      onClick={() => setConfirmNotify(true)}
                       className="whitespace-nowrap rounded-pill border border-border bg-surface px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-ink disabled:opacity-50"
                     >
                       Notify store managers
@@ -461,7 +525,7 @@ export function IncidentDetail({
                           onResolved,
                         )
                       }
-                      className="whitespace-nowrap rounded-pill bg-primary px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-bg disabled:opacity-50"
+                      className="whitespace-nowrap rounded-pill bg-primary px-[18px] py-[11px] text-[14px] font-semibold leading-5 text-on-primary disabled:opacity-50"
                     >
                       {confirmText}
                     </button>
@@ -488,7 +552,7 @@ export function IncidentDetail({
                     type="button"
                     disabled={busy}
                     onClick={() => run('close')}
-                    className="whitespace-nowrap rounded-pill bg-primary px-[14px] py-2 text-[12px] font-semibold leading-4 text-bg disabled:opacity-50"
+                    className="whitespace-nowrap rounded-pill bg-primary px-[14px] py-2 text-[12px] font-semibold leading-4 text-on-primary disabled:opacity-50"
                   >
                     Mark resolved
                   </button>
@@ -496,21 +560,66 @@ export function IncidentDetail({
                 {!d.recoverable && (
                   <button
                     type="button"
-                    disabled={busy}
-                    onClick={() => run('notify')}
+                    disabled={busy || !d.notify || d.notify.stores === 0}
+                    onClick={() => setConfirmNotify(true)}
                     className="whitespace-nowrap rounded-pill border border-border bg-surface px-[14px] py-2 text-[12px] font-semibold leading-4 text-ink disabled:opacity-50"
                   >
                     Notify store managers
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={onAcknowledged}
-                  className="whitespace-nowrap rounded-pill border border-border bg-surface px-[14px] py-2 text-[12px] font-semibold leading-4 text-ink"
-                >
-                  Acknowledge
-                </button>
+                {!d.acknowledged && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      run('acknowledge', { explicit: true }, (next) => {
+                        onChange(next);
+                        onAcknowledged();
+                      })
+                    }
+                    className="whitespace-nowrap rounded-pill border border-border bg-surface px-[14px] py-2 text-[12px] font-semibold leading-4 text-ink disabled:opacity-50"
+                  >
+                    Acknowledge
+                  </button>
+                )}
               </div>
+              {confirmNotify && d.notify && (
+                <div
+                  role="dialog"
+                  aria-label="Notify store managers"
+                  className="flex flex-col gap-[10px] rounded-[14px] border border-border bg-surface p-[14px]"
+                >
+                  <p className="text-[13px] font-semibold leading-[18px] text-ink">
+                    Send this to {d.notify.stores} {d.notify.stores === 1 ? 'store' : 'stores'}{' '}
+                    still waiting on the trip?
+                  </p>
+                  <p className="rounded-[10px] bg-wash p-[10px] text-[13px] leading-[19px] text-ink">
+                    {d.notify.message}
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmNotify(false)}
+                      className="rounded-pill border border-border bg-surface px-[14px] py-2 text-[12px] font-semibold leading-4 text-ink"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        run('notify', undefined, (next) => {
+                          setConfirmNotify(false);
+                          onChange(next);
+                        })
+                      }
+                      className="rounded-pill bg-primary px-[14px] py-2 text-[12px] font-semibold leading-4 text-on-primary disabled:opacity-50"
+                    >
+                      Send to {d.notify.stores} {d.notify.stores === 1 ? 'store' : 'stores'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </Section>
           )}
         </div>

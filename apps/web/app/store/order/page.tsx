@@ -7,12 +7,13 @@ import {
   type CatalogueItem,
   type ItemType,
   type PlaceOrderRequest,
+  type StockLevel,
   type StoreHome,
   type StoreOrderDetail,
   type StoreOrderView,
 } from '@waypoint/contracts';
 import { api } from '@/lib/api';
-import { messageOf, reasonOf } from '@/lib/api-error';
+import { messageOf } from '@/lib/api-error';
 import { formatMinutes } from '@/lib/clock';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -67,7 +68,7 @@ function readDraft(storeId: string, catalogue: CatalogueItem[]): Record<string, 
   }
 }
 
-/** S2: order for tomorrow from the catalogue. Refused from 16:00. */
+/** S2: place an order from the catalogue. Before 16:00 it is for today; from 16:00 it is for the next day. */
 export default function OrderPage() {
   const [home, setHome] = useState<StoreHome>();
   const [catalogue, setCatalogue] = useState<CatalogueItem[]>();
@@ -79,6 +80,10 @@ export default function OrderPage() {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [placed, setPlaced] = useState<StoreOrderView>();
+  // S3: the store can mark an order urgent, with how short it is and a note for dispatch.
+  const [urgent, setUrgent] = useState(false);
+  const [stockLevel, setStockLevel] = useState<StockLevel>();
+  const [urgentNote, setUrgentNote] = useState('');
   // The placed order whose "Cancel order" is waiting for a yes or no.
   const [confirmId, setConfirmId] = useState<string>();
   const [cancellingId, setCancellingId] = useState<string>();
@@ -117,7 +122,7 @@ export default function OrderPage() {
   if (!home || !catalogue || nowMin === undefined)
     return <p className="text-body text-muted">Loading…</p>;
 
-  const closed = nowMin >= home.cutoffMin;
+  const forToday = home.orderDate === home.today;
   const picks = catalogue.filter((c) => (qty[c.id] ?? 0) > 0);
   const units = picks.reduce((s, c) => s + qty[c.id]!, 0);
   const weight = picks.reduce((s, c) => s + c.unitWeightKg * qty[c.id]!, 0);
@@ -148,9 +153,9 @@ export default function OrderPage() {
     ...matches.filter((c) => lockedType(c.type)),
   ];
 
-  // Orders already placed for a coming day, and the latest order as the source for "order again".
+  // Orders already placed for today or later, and the latest order as the source for "order again".
   const upcoming = recent.filter(
-    (o) => o.deliveryDate > home.today && (o.status === 'waiting' || o.status === 'planned'),
+    (o) => o.deliveryDate >= home.today && (o.status === 'waiting' || o.status === 'planned'),
   );
   const last = recent[0];
   // Lines of the last order that are still in the catalogue, kept to its first line's group.
@@ -215,18 +220,20 @@ export default function OrderPage() {
     setBusy(true);
     const body: PlaceOrderRequest = {
       lines: picks.map((c) => ({ catalogueId: c.id, qty: qty[c.id]! })),
+      ...(urgent && stockLevel
+        ? { urgent: true, stockLevel, urgentNote: urgentNote.trim() || undefined }
+        : {}),
     };
     try {
       setPlaced(await api<StoreOrderView>('/store/orders', { method: 'POST', body }));
       setQty({});
+      setUrgent(false);
+      setStockLevel(undefined);
+      setUrgentNote('');
       setRecent(await api<StoreOrderDetail[]>('/store/orders/recent').catch(() => recent));
       requestStoreRefresh();
     } catch (e) {
-      setToast({
-        message: messageOf(e),
-        tone: reasonOf(e) === 'AFTER_CUTOFF' ? 'warning' : 'danger',
-      });
-      if (reasonOf(e) === 'AFTER_CUTOFF') setHome((h) => (h ? { ...h, nowMin: h.cutoffMin } : h));
+      setToast({ message: messageOf(e), tone: 'danger' });
     } finally {
       setBusy(false);
     }
@@ -234,21 +241,20 @@ export default function OrderPage() {
 
   return (
     <section className="space-y-md pb-lg">
-      <PageTitle eyebrow="Order" title="Order for tomorrow" />
+      <PageTitle eyebrow="Order" title="Place an order" />
 
-      {closed ? (
-        <div className="space-y-xs rounded-card bg-border p-lg">
-          <p className="text-title text-ink">Ordering is closed</p>
-          <p className="text-body text-muted">
-            Orders for tomorrow close at {formatMinutes(home.cutoffMin)} so the plan can be built
-            tonight. You can order again from midnight.
-          </p>
-        </div>
-      ) : (
+      {forToday ? (
         <p
           className={`text-label ${home.cutoffMin - nowMin <= 60 ? 'font-semibold text-warning' : 'text-muted'}`}
         >
-          Closes at {formatMinutes(home.cutoffMin)} · {formatDuration(home.cutoffMin - nowMin)} left
+          This order is for today. Closes at {formatMinutes(home.cutoffMin)} ·{' '}
+          {formatDuration(home.cutoffMin - nowMin)} left. After that, new orders are for the next
+          day.
+        </p>
+      ) : (
+        <p className="text-label text-ink">
+          This order is for {formatDate(home.orderDate)}. The {formatMinutes(home.cutoffMin)} cutoff
+          has passed, so ordering has moved to the next day.
         </p>
       )}
 
@@ -261,7 +267,7 @@ export default function OrderPage() {
             <div role="status" className="order-1 rounded-card bg-success-tint p-lg">
               <p className="text-title text-ink">Order placed</p>
               <p className="text-body text-muted">
-                For {formatDate(placed.deliveryDate)} · {placed.units} units · {placed.weightKg} kg
+                Ordered {formatDate(placed.deliveryDate)} · {placed.units} units · {placed.weightKg} kg
               </p>
             </div>
           )}
@@ -270,7 +276,7 @@ export default function OrderPage() {
             <div key={o.id} className="order-2 space-y-sm rounded-card bg-surface p-md">
               <details>
                 <summary className="cursor-pointer text-body font-semibold text-ink">
-                  Already ordered for {formatDate(o.deliveryDate)} · {o.units} units
+                  Ordered {formatDate(o.deliveryDate)} · {o.units} units
                 </summary>
                 <ul className="mt-sm space-y-xs">
                   {o.lines.map((l, i) => (
@@ -290,7 +296,6 @@ export default function OrderPage() {
                   <p className="text-label text-ink">
                     Cancel this order of {o.units} {o.units === 1 ? 'unit' : 'units'} for{' '}
                     {formatDate(o.deliveryDate)}?
-                    {closed ? ' Ordering is closed, so it cannot be placed again today.' : ''}
                   </p>
                   <div className="flex gap-sm">
                     <button
@@ -361,14 +366,64 @@ export default function OrderPage() {
               {units === 1 ? 'unit' : 'units'} · {Math.round(weight * 10) / 10} kg ·{' '}
               {Math.round(volume * 1000) / 1000} m³
             </p>
+            <div className="space-y-sm rounded-input bg-bg p-md">
+              <label className="flex items-center gap-sm text-body font-semibold text-ink">
+                <input
+                  type="checkbox"
+                  checked={urgent}
+                  onChange={(e) => setUrgent(e.target.checked)}
+                  className="size-5 accent-danger"
+                />
+                Mark as urgent
+              </label>
+              {urgent && (
+                <>
+                  <div className="flex gap-xs" role="radiogroup" aria-label="How short are you?">
+                    {(
+                      [
+                        ['out_of_stock', 'Out of stock'],
+                        ['running_low', 'Running low'],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={stockLevel === value}
+                        onClick={() => setStockLevel(value)}
+                        className={`flex-1 rounded-pill border px-md py-sm text-label font-semibold ${
+                          stockLevel === value
+                            ? 'border-danger bg-danger-tint text-danger'
+                            : 'border-mist bg-surface text-ink'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={urgentNote}
+                    maxLength={200}
+                    onChange={(e) => setUrgentNote(e.target.value)}
+                    placeholder="Note for dispatch (optional)"
+                    aria-label="Note for dispatch"
+                    className="w-full rounded-input border border-mist bg-surface px-md py-sm text-body text-ink"
+                  />
+                  {!stockLevel && (
+                    <p className="text-caption text-danger">Pick out of stock or running low.</p>
+                  )}
+                </>
+              )}
+            </div>
             <Button
               className="w-full"
-              disabled={closed || busy || picks.length === 0}
+              disabled={busy || picks.length === 0 || (urgent && !stockLevel)}
               onClick={place}
             >
               {busy ? 'Placing…' : upcoming.length > 0 ? 'Place another order' : 'Place order'}
             </Button>
-            {upcoming.length > 0 && picks.length > 0 && !closed && (
+            {upcoming.length > 0 && picks.length > 0 && (
               <p className="text-center text-caption text-muted">
                 This is sent as a separate order, on top of what is already placed.
               </p>
@@ -414,7 +469,7 @@ export default function OrderPage() {
                 category.
               </p>
             )}
-            {!closed && again.length > 0 && (
+            {again.length > 0 && (
               <button
                 type="button"
                 onClick={orderAgain}
@@ -447,8 +502,7 @@ export default function OrderPage() {
               ))}
 
             <ul
-              className={`space-y-sm 2xl:grid 2xl:grid-cols-2 2xl:gap-sm 2xl:space-y-0 ${closed ? 'pointer-events-none opacity-50' : ''}`}
-              aria-disabled={closed}
+              className="space-y-sm 2xl:grid 2xl:grid-cols-2 2xl:gap-sm 2xl:space-y-0"
             >
               {visible.map((c) => {
                 const starred = savedSet.has(c.id);
@@ -475,7 +529,7 @@ export default function OrderPage() {
                       name={c.name}
                       value={qty[c.id] ?? 0}
                       max={MAX_QTY}
-                      disabled={closed || locked}
+                      disabled={locked}
                       onChange={(n) => setItemQty(c.id, n)}
                     />
                   </li>

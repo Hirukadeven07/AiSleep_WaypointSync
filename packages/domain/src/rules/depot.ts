@@ -3,6 +3,7 @@
  */
 import { Reason } from '../reasons';
 import type { RuleIssue, StopView, Vehicle } from '../types';
+import { depotName, outletName, vehicleName } from '../names';
 
 export function checkHomeDepot(vehicle: Vehicle, candidate: StopView): RuleIssue[] {
   if (candidate.outlet.depot === vehicle.depot) {
@@ -13,7 +14,7 @@ export function checkHomeDepot(vehicle: Vehicle, candidate: StopView): RuleIssue
     {
       code: Reason.WRONG_DEPOT,
       severity: 'block',
-      message: `Vehicle ${vehicle.id} is based at ${vehicle.depot}; outlet ${candidate.outlet.id} belongs to ${candidate.outlet.depot}.`,
+      message: `${vehicleName(vehicle)} is based at ${depotName(vehicle.depot)}; ${outletName(candidate.outlet)} belongs to ${depotName(candidate.outlet.depot)}.`,
     },
   ];
 }

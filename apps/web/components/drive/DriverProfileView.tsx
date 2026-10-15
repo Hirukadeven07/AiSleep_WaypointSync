@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { dayText, vehicleLabel } from '@/lib/driver-format';
 import { OfflineBanner } from './OfflineBanner';
 import { useDriver } from './DriverShell';
+import { depotName } from '@/lib/depots';
 
 const CACHE = 'ws_driver_profile_v1';
 /** A licence this close to expiry is shown as a warning. */
@@ -92,7 +93,7 @@ export function DriverProfileView() {
             </h2>
             <Row label="Driver ID" value={profile.loginId} />
             {profile.phone && <Row label="Phone" value={profile.phone} />}
-            {profile.depotId && <Row label="Depot" value={profile.depotId} />}
+            {profile.depotId && <Row label="Depot" value={depotName(profile.depotId)} />}
             <Row label="Licence" value={profile.licenseNo ?? 'Not recorded'} />
             <Row
               label="Licence expires"

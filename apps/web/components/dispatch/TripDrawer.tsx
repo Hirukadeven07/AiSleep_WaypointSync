@@ -5,7 +5,9 @@ import { useEffect } from 'react';
 import type { Brand, LiveStop, LiveTrip } from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { clock } from '@/components/plan/format';
+import { buildPdf, openPdf } from '@/lib/pdf';
 import { timeOf, toneOf } from './live-format';
+import { tripReportFilename, tripReportLines, tripReportTitle } from './trip-report';
 
 const HERO: Record<Brand, string> = {
   Fresh: 'bg-fresh-tint',
@@ -43,7 +45,18 @@ function Marker({ n, tone }: { n: number; tone: string }) {
   );
 }
 
-function Stop({ stop, next, onRoad }: { stop: LiveStop; next: boolean; onRoad: boolean }) {
+function Stop({
+  stop,
+  next,
+  onRoad,
+  offline = false,
+}: {
+  stop: LiveStop;
+  next: boolean;
+  onRoad: boolean;
+  /** The phone is not syncing: ETAs are the plan, not where the truck is. */
+  offline?: boolean;
+}) {
   const finished = done(stop);
   const partial = stop.status === 'partial' || stop.issueNote !== null;
   const risk =
@@ -82,7 +95,7 @@ function Stop({ stop, next, onRoad }: { stop: LiveStop; next: boolean; onRoad: b
   } else {
     const eta =
       stop.etaMin !== null
-        ? `${next ? 'Arriving ~' : 'ETA '}${clock(stop.etaMin)} · window ${windowText(stop)}`
+        ? `${offline ? 'Planned ' : next ? 'Arriving ~' : 'ETA '}${clock(stop.etaMin)} · window ${windowText(stop)}`
         : `Window ${windowText(stop)}`;
     sub = eta;
     if (stop.missBy !== null) {
@@ -164,7 +177,13 @@ export function TripDrawer({
       : trip.live === 'breakdown'
         ? `Broke down. ${remaining} ${remaining === 1 ? 'stop' : 'stops'} still to deliver.`
         : trip.live === 'not_synced'
-          ? `Phone offline since ${timeOf(trip.lastAt)}. Deliveries recorded offline will appear here when it reconnects.`
+          ? `${
+              trip.lastSyncAt
+                ? `Phone offline since ${timeOf(trip.lastSyncAt)}.`
+                : trip.departedAt
+                  ? `No sync since it left at ${timeOf(trip.departedAt)}.`
+                  : 'The phone has not synced yet.'
+            } Times below are the plan; deliveries recorded offline appear when it reconnects.`
           : null;
 
   return (
@@ -173,7 +192,7 @@ export function TripDrawer({
         type="button"
         aria-label="Close trip details"
         onClick={onClose}
-        className="absolute inset-0 bg-ink/35"
+        className="absolute inset-0 bg-scrim/35"
       />
       <aside
         role="dialog"
@@ -256,7 +275,13 @@ export function TripDrawer({
 
         <div className="flex shrink-0 flex-col">
           {trip.stops.map((s) => (
-            <Stop key={s.id} stop={s} next={s.id === firstOpen?.id} onRoad={onRoad} />
+            <Stop
+              key={s.id}
+              stop={s}
+              next={s.id === firstOpen?.id}
+              onRoad={onRoad}
+              offline={trip.live === 'not_synced'}
+            />
           ))}
         </div>
 
@@ -293,7 +318,7 @@ export function TripDrawer({
               <button
                 type="button"
                 onClick={onNotify}
-                className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-bg"
+                className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-on-primary"
               >
                 Notify affected stores
               </button>
@@ -315,16 +340,19 @@ export function TripDrawer({
             <>
               <button
                 type="button"
-                disabled
+                onClick={() => {
+                  const title = tripReportTitle(trip);
+                  openPdf(buildPdf(tripReportLines(trip), title), tripReportFilename(trip), title);
+                }}
                 className="flex min-w-px flex-1 items-center justify-center rounded-pill border border-border bg-surface px-[18px] py-3 text-[14px] font-semibold leading-5 text-ink"
               >
-                Download trip report
+                View trip report
               </button>
               {nextTripId && trip.nextTrip && (
                 <button
                   type="button"
                   onClick={() => onOpenTrip(nextTripId)}
-                  className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-bg"
+                  className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-on-primary"
                 >
                   View Trip {trip.nextTrip.tripNumber}
                 </button>
@@ -339,7 +367,7 @@ export function TripDrawer({
               <Call phone={trip.driverPhone} />
               <Link
                 href="/dispatch/incidents"
-                className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-bg"
+                className="flex min-w-px flex-1 items-center justify-center rounded-pill bg-primary px-[18px] py-3 text-[14px] font-semibold leading-5 text-on-primary"
               >
                 {trip.live === 'breakdown' ? 'Open incident' : 'Report issue'}
               </Link>
@@ -353,7 +381,7 @@ export function TripDrawer({
 
 function Call({ phone, primary = false }: { phone: string | null; primary?: boolean }) {
   const cls = `flex min-w-px flex-1 items-center justify-center rounded-pill px-[18px] py-3 text-[14px] font-semibold leading-5 ${
-    primary ? 'bg-primary text-bg' : 'border border-border bg-surface text-ink'
+    primary ? 'bg-primary text-on-primary' : 'border border-border bg-surface text-ink'
   }`;
   return phone ? (
     <a href={`tel:${phone}`} className={cls}>

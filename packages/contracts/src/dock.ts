@@ -22,6 +22,10 @@ export interface LoadJob {
 /** One card in the loader's queue. */
 export interface LoadQueueItem {
   tripId: string;
+  /** YYYY-MM-DD. The queue holds today's trips and tomorrow's published plan. */
+  serviceDate: string;
+  /** True for a trip on a later day than today (the night shift loads tomorrow's run). */
+  later: boolean;
   vehicle: LoadVehicle;
   brand: Brand;
   district: string;
@@ -109,6 +113,16 @@ export interface FlagRequest {
   type: FlagType;
   qty?: number;
   note?: string;
+}
+
+/**
+ * POST /loads/:tripId/start. Each loader who works on a truck confirms themselves with their own
+ * loader ID and PIN; the first one starts loading, later ones are added to the trip's loader list.
+ */
+export interface StartLoadingRequest {
+  loaderId: string;
+  /** Needed only when the loader has a PIN set. */
+  pin?: string;
 }
 
 export interface TakenOffRequest {

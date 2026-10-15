@@ -4,6 +4,7 @@
  */
 import { Reason } from '../reasons';
 import type { RuleIssue, StopView } from '../types';
+import { outletName } from '../names';
 
 export function checkBrandDistrict(currentStops: StopView[], candidate: StopView): RuleIssue[] {
   const issues: RuleIssue[] = [];
@@ -16,7 +17,7 @@ export function checkBrandDistrict(currentStops: StopView[], candidate: StopView
     issues.push({
       code: Reason.BRAND_MISMATCH,
       severity: 'block',
-      message: `Trip is ${first.outlet.brand}; ${candidate.outlet.id} is ${candidate.outlet.brand}.`,
+      message: `This trip carries ${first.outlet.brand}; ${outletName(candidate.outlet)} is a ${candidate.outlet.brand} store.`,
     });
   }
 
@@ -24,7 +25,7 @@ export function checkBrandDistrict(currentStops: StopView[], candidate: StopView
     issues.push({
       code: Reason.DISTRICT_MISMATCH,
       severity: 'warn',
-      message: `Trip is ${first.outlet.district}; ${candidate.outlet.id} is ${candidate.outlet.district}.`,
+      message: `This trip serves ${first.outlet.district}; ${outletName(candidate.outlet)} is in ${candidate.outlet.district}.`,
     });
   }
 

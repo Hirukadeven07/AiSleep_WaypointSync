@@ -56,17 +56,17 @@ describe('store stops-away tracking (e2e)', () => {
     prisma = app.get(PrismaService);
 
     const district = await prisma.district.create({
-      data: { name: `E2E Progress ${Date.now()}`, depotId: 'Peliyagoda' },
+      data: { name: `E2E Progress ${Date.now()}`, depotId: 'depo1' },
     });
-    ids.district = district.id;
+    ids.district = district.name;
     for (const id of STORES) {
       await prisma.store.create({
         data: {
           id,
           displayName: id,
           brand: 'Fresh',
-          districtId: district.id,
-          depotId: 'Peliyagoda',
+          districtId: district.name,
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: 300,
           windowCloseMin: 480,
@@ -76,7 +76,7 @@ describe('store stops-away tracking (e2e)', () => {
     await prisma.vehicle.create({
       data: {
         id: 'E2E-PRG-VAN',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         type: 'van',
         temp: 'ambient',
         weightCapKg: 1000,
@@ -90,9 +90,9 @@ describe('store stops-away tracking (e2e)', () => {
     const trip = await prisma.trip.create({
       data: {
         vehicleId: 'E2E-PRG-VAN',
-        depotId: 'Peliyagoda',
+        depotId: 'depo1',
         brand: 'Fresh',
-        districtId: district.id,
+        districtId: district.name,
         serviceDate: date(DAY),
         tripNumber: 1,
         status: 'on_road',
@@ -129,7 +129,7 @@ describe('store stops-away tracking (e2e)', () => {
       await prisma.user.update({ where: { loginId: 'sunil' }, data: { storeId: sunilStoreId } });
       await prisma.vehicle.deleteMany({ where: { id: 'E2E-PRG-VAN' } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
-      await prisma.district.deleteMany({ where: { id: ids.district } });
+      await prisma.district.deleteMany({ where: { name: ids.district } });
     }
     await app?.close();
   });

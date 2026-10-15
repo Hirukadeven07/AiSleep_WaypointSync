@@ -22,6 +22,8 @@ export const REASON_CODES = [
   'REMOVED_GOODS_NOT_TAKEN_OFF',
   'ORDER_NOT_REMOVED',
   'PLAN_NOT_CHANGED',
+  'LOADER_ALREADY_ON_TRIP',
+  'LOADER_ON_ANOTHER_TRIP',
 ] as const;
 
 export type ReasonCode = (typeof REASON_CODES)[number];

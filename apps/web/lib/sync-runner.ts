@@ -12,7 +12,9 @@ let running: Promise<number> | null = null;
 /**
  * Send queued driver actions to the server, oldest first. Every action the server answered for
  * (applied, duplicate, stale or rejected) leaves the queue; a network or server error keeps them
- * all for the next try. Resolves with how many actions the server took. Never throws.
+ * all for the next try. Resolves with how many actions the server took, not counting location
+ * pings: those go every second and change nothing the driver sees, so they must not trigger a
+ * reload of the day. Never throws.
  */
 export function flushOutbox(): Promise<number> {
   running ??= push().finally(() => {
@@ -25,6 +27,7 @@ async function push(): Promise<number> {
   // Only a phone that says it is offline skips; unknown means try.
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0;
   let sent = 0;
+  let taken = 0;
   try {
     for (;;) {
       const pending = (await getPendingActions()).slice(0, BATCH);
@@ -57,11 +60,12 @@ async function push(): Promise<number> {
           })),
       );
       for (const a of done) await markActionSynced(a.clientId);
-      sent += done.length;
+      taken += done.length;
+      sent += done.filter((a) => a.type !== 'LOCATION_PING').length;
       // Nothing answered: stop rather than resend the same batch forever.
       if (done.length === 0) break;
     }
-    if (sent > 0) await purgeSynced();
+    if (taken > 0) await purgeSynced();
   } catch {
     /* offline or the server is down: the queue stays for the next try */
   }

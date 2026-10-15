@@ -42,14 +42,14 @@ describe('incidents (e2e)', () => {
       await prisma.district.create({
         data: {
           name: `IC District ${Date.now()}`,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           depotToDistrictKm: 20,
           depotToDistrictMin: 30,
           interStopKm: 3,
           interStopMin: 10,
         },
       })
-    ).id;
+    ).name;
     if (
       !(await prisma.serviceAllowance.findUnique({
         where: { brand_dockType: { brand: 'Fresh', dockType: 'street' } },
@@ -67,7 +67,7 @@ describe('incidents (e2e)', () => {
           displayName: `Store ${id}`,
           brand: 'Fresh',
           districtId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           dockType: 'street',
           windowOpenMin: 540,
           windowCloseMin: 900,
@@ -80,11 +80,14 @@ describe('incidents (e2e)', () => {
           loginId: `ic-driver-${Date.now()}`,
           role: 'driver',
           name: 'Ruwan Silva (Driver)',
-          depotId: 'Peliyagoda',
-          phone: '0771234567',
+          depotId: 'depo1',
         },
       })
     ).id;
+    const profile = await prisma.driver.create({ data: { userId: driverId } });
+    await prisma.driverPhone.create({
+      data: { driverId: profile.id, phoneNumber: '0777654321' },
+    });
     storeUserId = (
       await prisma.user.create({
         data: {
@@ -100,7 +103,7 @@ describe('incidents (e2e)', () => {
         data: {
           id,
           numberPlate: id,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           type: 'van',
           temp: 'ambient',
           weightCapKg: 1500,
@@ -130,7 +133,7 @@ describe('incidents (e2e)', () => {
       const t = await prisma.trip.create({
         data: {
           vehicleId,
-          depotId: 'Peliyagoda',
+          depotId: 'depo1',
           brand: 'Fresh',
           districtId,
           serviceDate: date(DAY),
@@ -200,13 +203,14 @@ describe('incidents (e2e)', () => {
   afterAll(async () => {
     process.env.DEMO_NOW = previousDemoNow;
     if (prisma) {
+      await prisma.driverIncident.deleteMany({ where: { driver: { userId: driverId } } });
       await prisma.incident.deleteMany({ where: { trip: { vehicleId: { in: VEHICLES } } } });
       await prisma.trip.deleteMany({ where: { vehicleId: { in: VEHICLES } } });
       await prisma.order.deleteMany({ where: { storeId: { in: STORES } } });
       await prisma.vehicle.deleteMany({ where: { id: { in: VEHICLES } } });
       await prisma.user.deleteMany({ where: { id: { in: [driverId, storeUserId] } } });
       await prisma.store.deleteMany({ where: { id: { in: STORES } } });
-      await prisma.district.deleteMany({ where: { id: districtId } });
+      await prisma.district.deleteMany({ where: { name: districtId } });
       if (createdAllowance) {
         await prisma.serviceAllowance.deleteMany({ where: { brand: 'Fresh', dockType: 'street' } });
       }
@@ -228,7 +232,7 @@ describe('incidents (e2e)', () => {
     const loader = request.agent(app.getHttpServer());
     await loader
       .post('/api/auth/login')
-      .send({ role: 'loader', loginId: 'sampath', depotId: 'Peliyagoda' })
+      .send({ role: 'loader', secret: '123456', depotId: 'depo1' })
       .expect(200);
     await loader.get('/api/incidents').expect(403);
   });
@@ -249,12 +253,86 @@ describe('incidents (e2e)', () => {
     expect(missing).toMatchObject({ kind: 'missing_items', title: '2 items short on IC-V6' });
   });
 
+  it("lists open SOS alerts with the incidents, matches Home's count, and Mark handled clears it", async () => {
+    const agent = await dispatcher();
+    const profile = await prisma.driver.findUniqueOrThrow({ where: { userId: driverId } });
+    const sos = await prisma.driverIncident.create({
+      data: {
+        driverId: profile.id,
+        tripId: ids.bd,
+        vehicleId: 'IC-V1',
+        incidentType: 'sos',
+        severity: 'high',
+        message: 'E2E flat tyre',
+        lat: 6.93,
+        lng: 79.85,
+        raisedAt: new Date(`${DAY}T09:40:00+05:30`),
+      },
+    });
+    const id = `sos:${sos.id}`;
+    const counts = async () => {
+      const list = (await agent.get('/api/incidents').expect(200)).body;
+      const home = (await agent.get('/api/dispatch/live').expect(200)).body;
+      return { list, home };
+    };
+    try {
+      const before = await counts();
+      const row = before.list.active.find((i: { id: string }) => i.id === id);
+      expect(row).toMatchObject({
+        kind: 'sos',
+        state: 'open',
+        title: 'SOS from Ruwan Silva on IC-V1',
+        brand: 'Fresh',
+      });
+      // The Incidents page and Home show the same number, SOS included.
+      expect(before.home.kpis.openIncidents).toBe(before.list.active.length);
+      expect(before.home.kpis.incidentsText).toMatch(/1 SOS/);
+
+      const detail = (await agent.get(`/api/incidents/${encodeURIComponent(id)}`).expect(200)).body;
+      expect(detail).toMatchObject({
+        kind: 'sos',
+        recoverable: false,
+        stops: [],
+        details: { driver: { name: 'Ruwan Silva', phone: '0777654321' } },
+        location: { text: '6.9300, 79.8500' },
+      });
+
+      // Opening it marks it seen; stores are never told about an SOS.
+      const seen = await agent
+        .post(`/api/incidents/${encodeURIComponent(id)}/acknowledge`)
+        .send({})
+        .expect(200);
+      expect(seen.body.state).toBe('acknowledged');
+      await agent.post(`/api/incidents/${encodeURIComponent(id)}/notify`).expect(400);
+
+      // Mark handled clears it everywhere, the same way Home's card does.
+      const handled = await agent
+        .post(`/api/incidents/${encodeURIComponent(id)}/close`)
+        .expect(200);
+      expect(handled.body).toMatchObject({ state: 'resolved' });
+      expect(
+        (await prisma.driverIncident.findUniqueOrThrow({ where: { id: sos.id } })).resolvedAt,
+      ).not.toBeNull();
+      const after = await counts();
+      expect(after.list.active.some((i: { id: string }) => i.id === id)).toBe(false);
+      expect(after.list.resolved.find((i: { id: string }) => i.id === id)).toMatchObject({
+        kind: 'sos',
+        outcome: 'Handled',
+      });
+      expect(after.list.active.length).toBe(before.list.active.length - 1);
+      expect(after.home.kpis.openIncidents).toBe(after.list.active.length);
+      await agent.post(`/api/incidents/${encodeURIComponent(id)}/reopen`).expect(400);
+    } finally {
+      await prisma.driverIncident.deleteMany({ where: { id: sos.id } });
+    }
+  });
+
   it('opens the detail with the stops and ranked replacements', async () => {
     const agent = await dispatcher();
     const { body } = await agent.get(`/api/incidents/${ids.inc}`).expect(200);
     expect(body.recoverable).toBe(true);
     expect(body.stops.map((s: { chip: string }) => s.chip)).toEqual(['At risk', 'At risk']);
-    expect(body.details.driver).toEqual({ name: 'Ruwan Silva', phone: '0771234567' });
+    expect(body.details.driver).toEqual({ name: 'Ruwan Silva', phone: '0777654321' });
 
     const byId = Object.fromEntries(
       body.replacements.map((r: { vehicleId: string }) => [r.vehicleId, r]),
@@ -382,5 +460,72 @@ describe('incidents (e2e)', () => {
       expect(o.deferReason).toBe('IC-V5 broke down');
     }
     expect(await prisma.tripStop.count({ where: { tripId: ids.bd2 } })).toBe(0);
+  });
+
+  it('logs an incident by hand, once per open kind, and only on a sent trip', async () => {
+    const agent = await dispatcher();
+    const make = (vehicleId: string, status: 'planning' | 'published' | 'on_road') =>
+      prisma.trip.create({
+        data: {
+          vehicleId,
+          depotId: 'depo1',
+          brand: 'Fresh',
+          districtId,
+          serviceDate: date(DAY),
+          tripNumber: 2,
+          status,
+        },
+      });
+    const sent = await make('IC-V5', 'published');
+    const draft = await make('IC-V4', 'planning');
+    const out = await make('IC-V6', 'on_road');
+
+    const late = await agent
+      .post('/api/incidents')
+      .send({ tripId: sent.id, type: 'delay', note: 'Stuck behind a lorry' })
+      .expect(200);
+    expect(late.body).toMatchObject({
+      kind: 'delay',
+      state: 'open',
+      title: 'IC-V5 is running late',
+    });
+    const row = await prisma.incident.findUniqueOrThrow({ where: { id: late.body.id } });
+    expect(row.timeline).toEqual([
+      expect.objectContaining({ text: 'Dispatch logged the incident: Stuck behind a lorry' }),
+    ]);
+    // Logging the same open kind again returns the one already open.
+    const again = await agent
+      .post('/api/incidents')
+      .send({ tripId: sent.id, type: 'delay' })
+      .expect(200);
+    expect(again.body.id).toBe(late.body.id);
+    // A second report with a note adds the note to the open incident.
+    const noted = await agent
+      .post('/api/incidents')
+      .send({ tripId: sent.id, type: 'delay', note: 'Road works on the bypass' })
+      .expect(200);
+    expect(noted.body.id).toBe(late.body.id);
+    expect(noted.body.timeline.map((e: { text: string }) => e.text)).toContain(
+      'Dispatch added: Road works on the bypass',
+    );
+    const list = (await agent.get('/api/incidents').expect(200)).body;
+    expect(list.active.some((i: { id: string }) => i.id === late.body.id)).toBe(true);
+
+    // A trip still being planned cannot have one, a breakdown needs the trip loading or out.
+    await agent.post('/api/incidents').send({ tripId: draft.id, type: 'quiet_driver' }).expect(400);
+    await agent.post('/api/incidents').send({ tripId: sent.id, type: 'breakdown' }).expect(400);
+    await agent.post('/api/incidents').send({ tripId: 'nope', type: 'delay' }).expect(404);
+    await agent.post('/api/incidents').send({ tripId: sent.id, type: 'aliens' }).expect(400);
+    await agent.post('/api/incidents').send({ type: 'delay' }).expect(400);
+
+    // A breakdown goes through the breakdown flow and stops the trip.
+    const broke = await agent
+      .post('/api/incidents')
+      .send({ tripId: out.id, type: 'breakdown', note: 'Clutch gone' })
+      .expect(200);
+    expect(broke.body.kind).toBe('breakdown');
+    expect((await prisma.trip.findUniqueOrThrow({ where: { id: out.id } })).status).toBe(
+      'breakdown',
+    );
   });
 });

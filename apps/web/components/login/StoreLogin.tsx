@@ -46,7 +46,7 @@ export function StoreLogin() {
         <span className="relative flex size-12 items-center justify-center">
           <img alt="" src="/landing/logo-mark.svg" className="size-[43.2px]" />
         </span>
-        <h1 className="relative text-[30px] font-semibold leading-9 text-bg lg:text-[48px] lg:leading-[56px]">
+        <h1 className="relative text-[30px] font-semibold leading-9 text-on-primary lg:text-[48px] lg:leading-[56px]">
           Sync Store
         </h1>
         <p className="relative text-[14px] leading-[19px] text-sand lg:text-[17px] lg:leading-6">

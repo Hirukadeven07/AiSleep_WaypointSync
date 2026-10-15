@@ -27,7 +27,7 @@ export function Modal({
         type="button"
         aria-label="Close"
         onClick={onClose}
-        className="fixed inset-0 bg-ink/35"
+        className="fixed inset-0 bg-scrim/35"
       />
       <div
         role="dialog"
@@ -75,7 +75,7 @@ export function SolidButton({
   children,
   onClick,
   disabled,
-  className = 'bg-primary text-bg',
+  className = 'bg-primary text-on-primary',
 }: {
   children: ReactNode;
   onClick: () => void;

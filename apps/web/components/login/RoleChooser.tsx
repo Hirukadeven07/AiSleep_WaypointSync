@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { WORKSPACES, rememberedRole } from '@/lib/roles';
 import { SkylinePhoto } from './parts';
+import { LOCAL_CHECK_URL } from '@/lib/local-check';
 
 const DEVICE_ICON: Record<string, IconName> = {
   dispatcher: 'monitor',
@@ -27,8 +28,8 @@ export function RoleChooser() {
   }, [router]);
 
   return (
-    <main className="min-h-screen bg-surface p-4 lg:flex lg:gap-4">
-      <section className="relative flex min-h-[420px] flex-col overflow-hidden rounded-hero bg-ink px-6 py-7 sm:px-10 lg:min-h-[calc(100vh-32px)] lg:w-[540px] lg:shrink-0">
+    <main className="min-h-screen bg-surface p-4 lg:flex lg:items-start lg:gap-4">
+      <section className="relative flex min-h-[420px] flex-col overflow-hidden rounded-hero bg-scrim px-6 py-7 sm:px-10 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:min-h-[560px] lg:w-[420px] lg:shrink-0 lg:pb-12 xl:w-[540px]">
         <SkylinePhoto variant="hero" />
         <nav className="relative flex h-11 items-center gap-3">
           <div className="flex items-center gap-[10px]">
@@ -48,7 +49,7 @@ export function RoleChooser() {
         <div className="relative flex flex-col gap-5 pt-16">
           <div className="flex items-center gap-2">
             <span className="size-[9px] rounded-[2px] bg-olive" />
-            <p className="text-[14px] font-medium text-white">Sign in</p>
+            <p className="text-[14px] font-medium leading-[normal] text-white">Sign in</p>
           </div>
           <h1 className="text-[44px] font-medium leading-[1.04] tracking-[-0.03em] text-white sm:text-[56px] lg:text-[64px]">
             Who&apos;s signing in?
@@ -65,13 +66,13 @@ export function RoleChooser() {
         </div>
       </section>
 
-      <section className="flex flex-1 flex-col gap-7 px-2 pb-6 pt-10 sm:px-8 lg:pt-11">
+      <section className="flex min-w-0 flex-1 flex-col gap-7 px-2 pb-6 pt-10 sm:px-8 lg:min-h-[calc(100vh-2rem)] lg:pt-11">
         <div className="flex items-center gap-2">
           <span className="size-[9px] rounded-[2px] bg-olive-ink" />
-          <p className="text-[14px] font-medium text-ink">Choose your role</p>
+          <p className="text-[14px] font-medium leading-[normal] text-ink">Choose your role</p>
         </div>
         <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
-          <h2 className="text-[34px] font-medium tracking-[-0.025em] text-ink sm:text-[44px]">
+          <h2 className="text-[34px] font-medium leading-[normal] tracking-[-0.025em] text-ink sm:text-[44px]">
             Pick your workspace
           </h2>
           <p className="w-[260px] max-w-full text-[15px] leading-[1.5] text-muted">
@@ -79,14 +80,14 @@ export function RoleChooser() {
           </p>
         </div>
 
-        <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid flex-1 auto-rows-fr grid-cols-1 gap-4 sm:grid-cols-2">
           {WORKSPACES.map((w) => (
             <Link
               key={w.slug}
               href={`/login/${w.slug}`}
-              className={`flex min-h-[260px] flex-col rounded-card p-7 ${w.tint}`}
+              className={`flex min-h-[240px] min-w-0 flex-col rounded-card p-7 ${w.tint}`}
             >
-              <div className={`flex items-center gap-3 ${w.ink}`}>
+              <div className={`flex items-center gap-3 leading-[normal] ${w.ink}`}>
                 <span className="text-[14px] font-semibold">{w.index}</span>
                 <span className="text-[12px] font-bold tracking-[0.06em]">{w.eyebrow}</span>
                 <span className="flex-1" />
@@ -96,18 +97,43 @@ export function RoleChooser() {
               </div>
               <div className="flex-1" />
               <div className="flex flex-col items-start gap-[10px]">
-                <p className="text-[34px] font-medium tracking-[-0.02em] text-ink sm:text-[40px]">{w.title}</p>
+                {/* Steps down at mid widths so long titles stay inside a half-width card; wraps between words, never inside one. */}
+                <p className="max-w-full text-[28px] font-medium leading-[normal] tracking-[-0.02em] text-ink [overflow-wrap:break-word] sm:text-[32px] lg:text-[30px] xl:text-[36px] 2xl:text-[40px]">
+                  {w.title}
+                </p>
                 <p className="text-[15px] leading-[1.5] text-slate">{w.blurb}</p>
-                <span className="flex items-center gap-[6px] rounded-pill bg-surface py-[6px] pl-[10px] pr-3 text-[13px] font-semibold text-slate">
+                <span className="flex items-center gap-[6px] rounded-pill bg-surface py-[6px] pl-[10px] pr-3 text-[13px] font-semibold leading-[normal] text-slate">
                   <Icon name={DEVICE_ICON[w.slug] ?? 'phone'} size={16} />
                   {w.device}
                 </span>
               </div>
             </Link>
           ))}
+          {LOCAL_CHECK_URL && (
+            <a
+              href={LOCAL_CHECK_URL}
+              className="flex min-h-[240px] flex-col rounded-card border border-mist bg-surface p-7"
+            >
+              <div className="flex items-center gap-3 text-olive-ink">
+                <span className="text-[14px] font-semibold">[05]</span>
+                <span className="text-[12px] font-bold tracking-[0.06em]">LOCAL CHECK</span>
+                <span className="flex-1" />
+                <span className="flex size-11 items-center justify-center rounded-full bg-olive text-ink">
+                  <Icon name="arrow-up-right" size={16} />
+                </span>
+              </div>
+              <div className="flex-1" />
+              <div className="flex flex-col items-start gap-[10px]">
+                <p className="text-[34px] font-medium tracking-[-0.02em] text-ink sm:text-[40px]">Check</p>
+                <p className="text-[15px] leading-[1.5] text-slate">
+                  Place a store order, or look up trips and logins, without signing in.
+                </p>
+              </div>
+            </a>
+          )}
         </div>
 
-        <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted">
+        <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] leading-[normal] text-muted">
           <span className="font-medium">Waypoint Sync · Waypoint Group</span>
           <span className="flex-1" />
           <span>Trouble signing in? IT support · 011 234 5678</span>

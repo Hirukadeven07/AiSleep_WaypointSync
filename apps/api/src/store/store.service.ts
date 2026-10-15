@@ -10,7 +10,9 @@ import type { Order, Prisma } from '@prisma/client';
 import {
   ORDER_CUTOFF_MIN,
   type CatalogueItem,
+  type FlagType,
   type StoreDelivery,
+  type StoreFlag,
   type StoreHome,
   type StoreNotice,
   type StopStatus,
@@ -20,7 +22,6 @@ import {
 import { DomainError } from '@waypoint/domain';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { ClockService } from '../common/clock/clock.service';
-import { nextOperatingDay } from '../common/clock/operating-day';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { NOTIFIER, type Notifier } from '../notifications/notifier.interface';
 import { anyCatalogueItem, buildOrderLines, fullCatalogue } from './catalogue';
@@ -28,6 +29,40 @@ import type { PlaceOrderDto, ReceiptDto } from './dto/store.dto';
 import { PhotosService } from '../photos/photos.service';
 
 const asDate = (iso: string) => new Date(`${iso}T00:00:00Z`);
+
+type ReceiptPick = {
+  receivedQty: number;
+  issue?: FlagType;
+  issues?: { type: FlagType; qty: number }[];
+};
+
+/**
+ * Problem counts for one line. Separate counts can share a line (1 missing and 1 damaged).
+ * A short count with no reason is missing. A flagged line with nothing short counts in full.
+ */
+function receiptIssues(
+  name: string,
+  ordered: number,
+  r?: ReceiptPick,
+): { type: FlagType; qty: number }[] {
+  if (r?.issues && r.issues.length > 0) {
+    const merged = new Map<FlagType, number>();
+    for (const i of r.issues) merged.set(i.type, (merged.get(i.type) ?? 0) + i.qty);
+    const issues = [...merged].map(([type, qty]) => ({ type, qty }));
+    const sum = issues.reduce((total, i) => total + i.qty, 0);
+    if (sum > ordered) {
+      throw new BadRequestException(
+        `${name}: missing, damaged and wrong quantity cannot add up to more than ${ordered}.`,
+      );
+    }
+    return issues;
+  }
+  const receivedQty = Math.min(Math.max(r?.receivedQty ?? ordered, 0), ordered);
+  const issue = r?.issue ?? (receivedQty < ordered ? ('missing' as const) : undefined);
+  if (!issue) return [];
+  const qty = receivedQty < ordered ? ordered - receivedQty : ordered;
+  return [{ type: issue, qty }];
+}
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
 const deliveryInclude = {
@@ -117,6 +152,7 @@ function deliveryView(s: DeliveryStop): StoreDelivery {
         qty: f.qtyFlagged,
         reason: f.reason,
         driverDecision: f.driverDecision,
+        resolveStatus: f.resolveStatus,
       })),
   };
 }
@@ -142,12 +178,12 @@ export class StoreService {
   async home(me: AuthUser): Promise<StoreHome> {
     const store = await this.store(me);
     const today = this.clock.today();
-    const [deliveries, upcoming, deferral, unreadNotices] = await Promise.all([
+    const [deliveries, upcoming, deferral, unreadNotices, openFlagCount] = await Promise.all([
       this.deliveries(me),
       this.prisma.order.findFirst({
         where: {
           storeId: store.id,
-          deliveryDate: { gt: asDate(today) },
+          deliveryDate: { gte: asDate(today) },
           status: { in: ['waiting', 'planned'] },
         },
         orderBy: { deliveryDate: 'asc' },
@@ -157,6 +193,7 @@ export class StoreService {
         orderBy: { deliveryDate: 'asc' },
       }),
       this.prisma.notification.count({ where: { userId: me.id, read: false } }),
+      this.prisma.fieldFlag.count({ where: { storeId: store.id, resolveStatus: false } }),
     ]);
     return {
       storeId: store.id,
@@ -167,11 +204,18 @@ export class StoreService {
       cutoffMin: this.orderCutoffMin(),
       nowMin: this.clock.minutesNow(),
       today,
-      // The open delivery first; otherwise the last one of the day.
-      delivery: deliveries.find((d) => !d.driverAckAt) ?? deliveries.at(-1) ?? null,
+      orderDate: this.deliveryIso(),
+      // A driver at the door first (the Receive page lists these too); then the next open
+      // delivery; otherwise the last one of the day.
+      delivery:
+        deliveries.find((d) => d.status === 'arrived' || d.status === 'waiting') ??
+        deliveries.find((d) => !d.driverAckAt) ??
+        deliveries.at(-1) ??
+        null,
       nextOrder: upcoming ? orderView(upcoming) : null,
       deferral: deferral ? orderView(deferral) : null,
       unreadNotices,
+      openFlagCount,
       phones: store.phones.map((p) => ({ label: p.label, phoneNo: p.phoneNo })),
     };
   }
@@ -192,7 +236,7 @@ export class StoreService {
   }
 
   /**
-   * The store's orders with their lines, newest first: every order still to come (what is
+   * The store's orders with their lines, newest first: every order for today or later (what is
    * already placed, and what can be cancelled) and the latest five of any day ("order again").
    */
   async recentOrders(me: AuthUser): Promise<StoreOrderDetail[]> {
@@ -208,7 +252,7 @@ export class StoreService {
       this.prisma.order.findMany({
         where: {
           storeId: store.id,
-          deliveryDate: { gt: asDate(this.clock.today()) },
+          deliveryDate: { gte: asDate(this.clock.today()) },
           status: { in: ['waiting', 'planned'] },
         },
         include,
@@ -265,24 +309,25 @@ export class StoreService {
   }
 
   /**
-   * TEMPORARY: local development keeps ordering open until 23:59 so work is not
-   * blocked after 16:00. Production and the test suite still close at ORDER_CUTOFF_MIN.
+   * 16:00 is when the order day rolls to the next day. Ordering stays open.
+   * ORDER_CUTOFF_OPEN=1 keeps the order on today until 23:59, for development only.
    */
   private orderCutoffMin(): number {
-    const env = process.env.NODE_ENV;
-    const devBypass = env !== 'production' && env !== 'test';
-    return devBypass ? 23 * 60 + 59 : ORDER_CUTOFF_MIN;
+    return process.env.ORDER_CUTOFF_OPEN === '1' ? 23 * 60 + 59 : ORDER_CUTOFF_MIN;
   }
 
-  /** Orders are for the next operating day and close at 16:00 Asia/Colombo. */
+  /** Today before the cutoff; the next calendar day from 16:00 Asia/Colombo. */
+  private deliveryIso(): string {
+    const today = this.clock.today();
+    if (this.clock.minutesNow() < this.orderCutoffMin()) return today;
+    const next = asDate(today);
+    next.setUTCDate(next.getUTCDate() + 1);
+    return isoDay(next);
+  }
+
+  /** Before 16:00 the order is for today. From 16:00 it is for the next day. */
   async placeOrder(me: AuthUser, dto: PlaceOrderDto): Promise<StoreOrderView> {
     const store = await this.store(me);
-    if (this.clock.minutesNow() >= this.orderCutoffMin()) {
-      throw new DomainError(
-        'AFTER_CUTOFF',
-        'Orders for tomorrow close at 16:00. Order again tomorrow morning.',
-      );
-    }
     let built: ReturnType<typeof buildOrderLines>;
     try {
       built = buildOrderLines(dto.lines);
@@ -291,7 +336,7 @@ export class StoreService {
     }
     // Stock level and note only mean something on an urgent order.
     const urgent = dto.urgent === true;
-    const deliveryDate = asDate(await nextOperatingDay(this.prisma, asDate(this.clock.today())));
+    const deliveryDate = asDate(this.deliveryIso());
     const order = await this.prisma.order.create({
       data: {
         storeId: store.id,
@@ -308,9 +353,10 @@ export class StoreService {
         lines: { create: built.lines },
       },
     });
+    await this.closeFlagsForSentItems(store.id, built.lines.map((l) => l.itemId));
     await this.notifyDispatchers(store.depotId, {
       title: 'New order',
-      body: `${store.displayName ?? store.id} ordered ${built.units} ${built.units === 1 ? 'item' : 'items'} (${Math.round(built.weightKg)} kg) for ${dayText(deliveryDate)}.`,
+      body: `${store.displayName ?? store.id} ordered ${built.units} ${built.units === 1 ? 'item' : 'items'} (${Math.round(built.weightKg)} kg) on ${dayText(deliveryDate)}.`,
       link: '/dispatch/plan',
     });
     return orderView(order);
@@ -360,6 +406,39 @@ export class StoreService {
     return { ok: true };
   }
 
+  /**
+   * An open FieldFlag stays resolveStatus false until this shop orders that item again,
+   * or the flag is marked solved (resolvedAt).
+   */
+  private async closeFlagsForSentItems(storeId: string, itemIds: string[]) {
+    const ids = [...new Set(itemIds.filter(Boolean))];
+    if (ids.length === 0) return;
+    const now = new Date();
+    await this.prisma.fieldFlag.updateMany({
+      where: { storeId, resolveStatus: false, itemId: { in: ids } },
+      data: { resolveStatus: true, resolvedAt: now },
+    });
+  }
+
+  /** Every item this store has flagged, newest first. */
+  async flags(me: AuthUser): Promise<StoreFlag[]> {
+    const store = await this.store(me);
+    const rows = await this.prisma.fieldFlag.findMany({
+      where: { storeId: store.id },
+      include: { item: true },
+      orderBy: { raisedAt: 'desc' },
+    });
+    return rows.map((f) => ({
+      id: f.id,
+      itemName: f.item?.itemName ?? 'Whole delivery',
+      qty: f.qtyFlagged,
+      reason: f.reason,
+      driverDecision: f.driverDecision,
+      resolveStatus: f.resolveStatus,
+      raisedAt: f.raisedAt.toISOString(),
+    }));
+  }
+
   /** Today's stops for this store, in ETA order. */
   async deliveries(me: AuthUser): Promise<StoreDelivery[]> {
     const store = await this.store(me);
@@ -406,8 +485,8 @@ export class StoreService {
     );
     const results = stop.order.lines.map((line) => {
       const r = dto.lines.find((l) => l.orderLineId === line.id);
-      const receivedQty = Math.min(r?.receivedQty ?? line.qty, line.qty);
-      const issue = r?.issue ?? (receivedQty < line.qty ? 'missing' : undefined);
+      const issues = receiptIssues(line.name, line.qty, r);
+      const receivedQty = line.qty - issues.reduce((sum, i) => sum + i.qty, 0);
       return {
         itemId: line.itemId,
         chilled: line.chilled,
@@ -415,10 +494,12 @@ export class StoreService {
         name: line.name,
         orderedQty: line.qty,
         receivedQty,
-        issue: issue ?? null,
+        // A single problem keeps the old shape. Mixed problems live on `issues`.
+        issue: issues.length === 1 ? issues[0]!.type : null,
+        issues,
       };
     });
-    const partial = results.some((r) => r.issue);
+    const partial = results.some((r) => r.issues.length > 0);
     const now = this.clock.now();
     const lineResults = results.map(({ itemId: _i, chilled: _c, ...r }) => r);
     const warm = dto.chilledWasCold === false;
@@ -443,22 +524,21 @@ export class StoreService {
         },
       });
       // Each problem line becomes a FieldFlag the driver accepts or disputes at acknowledgement.
-      await tx.fieldFlag.createMany({
-        data: results
-          .filter((r) => r.issue)
-          .map((r) => ({
-            raisedAt: now,
-            storeId: stop.order.storeId,
-            orderId: stop.orderId,
-            tripId: stop.tripId,
-            itemId: r.itemId,
-            // The short count is the problem; a damaged line with nothing short counts as all damaged.
-            qtyFlagged: r.receivedQty < r.orderedQty ? r.orderedQty - r.receivedQty : r.orderedQty,
-            reason: r.issue!,
-            reasonDetail: `${r.name}: ${r.receivedQty} of ${r.orderedQty} received`,
-            severity: r.chilled && warm ? ('high' as const) : ('medium' as const),
-          })),
-      });
+      const flags = results.flatMap((r) =>
+        r.issues.map((i) => ({
+          raisedAt: now,
+          storeId: stop.order.storeId,
+          orderId: stop.orderId,
+          tripId: stop.tripId,
+          itemId: r.itemId,
+          qtyFlagged: i.qty,
+          reason: i.type,
+          reasonDetail: `${r.name}: ${i.qty} of ${r.orderedQty} ${i.type.replace('_', ' ')}`,
+          severity: r.chilled && warm ? ('high' as const) : ('medium' as const),
+          resolveStatus: false,
+        })),
+      );
+      if (flags.length > 0) await tx.fieldFlag.createMany({ data: flags });
       await tx.order.update({
         where: { id: stop.orderId },
         data: { status: partial ? 'partial' : 'delivered' },
@@ -466,14 +546,14 @@ export class StoreService {
     });
 
     // A receipt with problems is the store's report to dispatch.
-    const problems = results.filter((r) => r.issue);
+    const problems = results.filter((r) => r.issues.length > 0);
     if (problems.length > 0) {
       const store = await this.store(me);
       await this.notifyDispatchers(store.depotId, {
         title: 'Store report',
         body: `${store.displayName ?? store.id}: ${problems.length} ${problems.length === 1 ? 'line' : 'lines'} with issues on ${stop.trip.vehicle.numberPlate ?? stop.trip.vehicleId} (${problems
           .slice(0, 2)
-          .map((r) => `${r.name} ${r.issue}`)
+          .map((r) => `${r.name} ${r.issues.map((i) => `${i.qty} ${i.type}`).join(' and ')}`)
           .join(', ')}${problems.length > 2 ? ', …' : ''}).`,
         link: '/dispatch/board',
       });
@@ -483,7 +563,7 @@ export class StoreService {
     const driverId = stop.trip.assignedDriverId ?? stop.trip.vehicle.driverId;
     if (driverId) {
       const store = await this.store(me);
-      const issues = results.filter((r) => r.issue).length;
+      const issues = results.filter((r) => r.issues.length > 0).length;
       await this.notifier.notify({
         userId: driverId,
         title: `${store.displayName ?? store.id} checked the goods`,

@@ -9,9 +9,16 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import type { DispatcherNotice, DispatcherNotices, NoticeCategory } from '@waypoint/contracts';
+import { useRouter } from 'next/navigation';
+import type {
+  DispatcherNotice,
+  DispatcherNotices,
+  LiveNotice,
+  NoticeCategory,
+} from '@waypoint/contracts';
 import { Icon } from '@/components/ui/Icon';
 import { api } from '@/lib/api';
+import { LIVE_NOTICE } from '@/lib/live-notices';
 
 type Tab = NoticeCategory | 'all';
 const TABS: { id: Tab; label: string }[] = [
@@ -25,6 +32,44 @@ const DOT: Record<NoticeCategory, string> = {
   stores: 'bg-warning',
   planning: 'bg-info',
 };
+
+function noticeCategory(link: string | null): NoticeCategory {
+  if (link?.startsWith('/dispatch/plan')) return 'planning';
+  if (link?.startsWith('/dispatch/board')) return 'stores';
+  return 'incidents';
+}
+
+function withNotice(data: DispatcherNotices | null, live: LiveNotice): DispatcherNotices {
+  const category = noticeCategory(live.link);
+  const notice: DispatcherNotice = {
+    id: live.id,
+    category,
+    title: live.title,
+    body: live.body,
+    link: live.link,
+    createdAt: live.createdAt,
+  };
+  if (!data) {
+    return {
+      notices: [notice],
+      counts: {
+        all: 1,
+        incidents: category === 'incidents' ? 1 : 0,
+        stores: category === 'stores' ? 1 : 0,
+        planning: category === 'planning' ? 1 : 0,
+      },
+    };
+  }
+  if (data.notices.some((n) => n.id === notice.id)) return data;
+  return {
+    notices: [notice, ...data.notices],
+    counts: {
+      ...data.counts,
+      all: data.counts.all + 1,
+      [category]: data.counts[category] + 1,
+    },
+  };
+}
 const SIZE = 380;
 
 function ago(iso: string, now: number) {
@@ -35,7 +80,7 @@ function ago(iso: string, now: number) {
   return h < 24 ? `${h} h ago` : `${Math.floor(h / 24)} d ago`;
 }
 
-/** Unseen notices for the dispatcher, refreshed every 15 s. */
+/** Unseen notices for the dispatcher. The live stream adds one the moment it is saved; the 15 s poll fills any gap. */
 function useNotices() {
   const [data, setData] = useState<DispatcherNotices | null>(null);
   const load = useCallback(
@@ -55,9 +100,10 @@ function useNotices() {
 
 /**
  * The bell on the live day: a square panel of unseen notices with All / Incidents / Stores /
- * Planning tabs. Clicking a notice marks it seen and it leaves the list, so only the newest unseen stay.
+ * Planning tabs. Clicking a notice marks it seen and opens what it is about (an SOS opens that incident).
  */
 export function NoticesBell() {
+  const router = useRouter();
   const { data, setData, load } = useNotices();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('all');
@@ -65,6 +111,16 @@ export function NoticesBell() {
   const bell = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const now = Date.now();
+
+  useEffect(() => {
+    const onNotice = (event: Event) => {
+      const live = (event as CustomEvent<LiveNotice>).detail;
+      if (!live?.id) return;
+      setData((current) => withNotice(current, live));
+    };
+    window.addEventListener(LIVE_NOTICE, onNotice);
+    return () => window.removeEventListener(LIVE_NOTICE, onNotice);
+  }, [setData]);
 
   // Pin the square under the bell, kept on screen.
   useLayoutEffect(() => {
@@ -122,6 +178,13 @@ export function NoticesBell() {
     void api(`/dispatch/notices/${n.id}/read`, { method: 'POST' }).catch(() => void load());
   };
 
+  const openNotice = (n: DispatcherNotice) => {
+    seen(n);
+    if (!n.link) return;
+    setOpen(false);
+    router.push(n.link);
+  };
+
   const unseen = data?.counts.all ?? 0;
   const list = (data?.notices ?? []).filter((n) => tab === 'all' || n.category === tab);
 
@@ -138,7 +201,7 @@ export function NoticesBell() {
       >
         <Icon name="bell" size={18} />
         {unseen > 0 && (
-          <span className="absolute -right-1 -top-1 flex min-w-[18px] items-center justify-center rounded-pill bg-danger px-1 text-[11px] font-semibold leading-[18px] text-bg">
+          <span className="absolute -right-1 -top-1 flex min-w-[18px] items-center justify-center rounded-pill bg-danger px-1 text-[11px] font-semibold leading-[18px] text-on-primary">
             {unseen > 99 ? '99+' : unseen}
           </span>
         )}
@@ -175,7 +238,7 @@ export function NoticesBell() {
                   aria-selected={tab === t.id}
                   onClick={() => setTab(t.id)}
                   className={`whitespace-nowrap rounded-pill px-[10px] py-[5px] text-[12px] font-semibold leading-[15px] ${
-                    tab === t.id ? 'bg-primary text-bg' : 'bg-bg text-ink'
+                    tab === t.id ? 'bg-primary text-on-primary' : 'bg-bg text-ink'
                   }`}
                 >
                   {t.label} · {data?.counts[t.id] ?? 0}
@@ -192,8 +255,8 @@ export function NoticesBell() {
                 <li key={n.id}>
                   <button
                     type="button"
-                    onClick={() => seen(n)}
-                    title="Mark as seen"
+                    onClick={() => openNotice(n)}
+                    title={n.link ? 'Open' : 'Mark as seen'}
                     className="flex w-full items-start gap-[10px] rounded-input bg-bg p-3 text-left hover:bg-wash"
                   >
                     <span
@@ -217,7 +280,7 @@ export function NoticesBell() {
             </ul>
             {list.length > 0 && (
               <p className="text-center text-[11px] leading-[14px] text-muted">
-                Click a notification to mark it as seen.
+                Click a notification to open it and mark it as seen.
               </p>
             )}
           </div>,

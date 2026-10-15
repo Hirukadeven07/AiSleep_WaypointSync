@@ -8,6 +8,12 @@ export const DRIVER_EVENT_TYPES = [
   'BREAK_START',
   'BREAK_END',
   'LOCATION_PING',
+  /** The driver closed the SOS screen ("I'm safe"): their open SOS is resolved. */
+  'SOS_CLEARED',
+  /** The driver leaves the depot. The trip becomes on_road and the start time is this moment. */
+  'START_TRIP',
+  /** The driver is back at the depot. The trip is completed and the end time is this moment. */
+  'END_TRIP',
 ] as const;
 
 export type DriverEventType = (typeof DRIVER_EVENT_TYPES)[number];
@@ -19,7 +25,7 @@ export const WAIT_ALERT_MIN = 10;
 export const BREAK_ALLOWANCE_MIN = 45;
 
 /**
- * LOCATION_PING payload. Sent every few minutes while the trip is on the road, and every 30 s while
+ * LOCATION_PING payload. Sent every second while the trip is on the road, and every 30 s while
  * the SOS screen is open (`sos: true`, which also moves the open SOS alert's position). Closing
  * SOS stops the SOS pings.
  */
@@ -73,7 +79,9 @@ export type SyncRejectReason =
   | 'ACK_PENDING'
   | 'NO_ACTIVE_TRIP'
   | 'NO_VEHICLE'
-  | 'INVALID_PAYLOAD';
+  | 'INVALID_PAYLOAD'
+  /** Start trip is only for a truck the loader has finished. */
+  | 'TRIP_NOT_READY';
 
 export interface DriverEventInput {
   clientId: string;
